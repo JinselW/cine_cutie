@@ -1,0 +1,55 @@
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0b0b1a;--bg2:#13132d;--bg3:#1c1c3d;
+  --gold:#f0c040;--gold-dim:#c49a2a;--rose:#ff6b8a;--rose-dim:#d44a6a;
+  --cream:#f5f0e8;--cream2:#d4cfc7;--cream3:#9e9a93;
+  --glass:rgba(255,255,255,0.05);--glass2:rgba(255,255,255,0.08);
+  --glass-border:rgba(255,255,255,0.08);
+  --radius:16px;--radius-sm:10px;--radius-xs:6px;
+  --shadow:0 8px 32px rgba(0,0,0,0.4);
+  --font:'Segoe UI',system-ui,-apple-system,sans-serif;
+  --transition:0.3s cubic-bezier(0.4,0,0.2,1);
+}
+[data-theme="light"]{
+  --bg:#f5f3ef;--bg2:#ebe8e2;--bg3:#e0ddd6;
+  --gold:#c8950c;--gold-dim:#a67a08;--rose:#d44060;--rose-dim:#b83050;
+  --cream:#1a1a2e;--cream2:#3a3a4e;--cream3:#6e6e82;
+  --glass:rgba(0,0,0,0.03);--glass2:rgba(0,0,0,0.05);
+  --glass-border:rgba(0,0,0,0.08);
+  --shadow:0 8px 32px rgba(0,0,0,0.08);
+}
+html{font-size:16px;scroll-behavior:smooth}
+body{
+  font-family:var(--font);background:var(--bg);color:var(--cream);
+  min-height:100vh;overflow-x:hidden;line-height:1.6;
+  transition:background var(--transition),color var(--transition);
+}
+body::before{
+  content:'';position:fixed;inset:0;z-index:0;pointer-events:none;
+  background:radial-gradient(ellipse at 20% 0%,rgba(240,192,64,0.06) 0%,transparent 60%),
+             radial-gradient(ellipse at 80% 100%,rgba(255,107,138,0.05) 0%,transparent 60%);
+}
+[data-theme="light"] body::before{
+  background:radial-gradient(ellipse at 20% 0%,rgba(200,149,12,0.04) 0%,transparent 60%),
+             radial-gradient(ellipse at 80% 100%,rgba(212,64,96,0.03) 0%,transparent 60%);
+}
+
+::-webkit-scrollbar{width:6px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--cream3);border-radius:3px}
+
+#app{position:relative;z-index:1;max-width:960px;margin:0 auto;padding:24px 20px 60px}
+
+.section{
+  background:var(--glass);border:1px solid var(--glass-border);
+  border-radius:var(--radius);padding:28px;margin-top:24px;
+  backdrop-filter:blur(10px);
+  animation:fadeUp 0.5s ease both;
+}
+.section.hidden{display:none}
+
+.section-title{
+  font-size:1.1rem;font-weight:700;margin-bottom:16px;
+  display:flex;align-items:center;gap:8px;
+}
+.section-title .icon{font-size:1.2rem}

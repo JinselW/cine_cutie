@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cine-Cutie | AI Movie Agent</title>
+  <link rel="stylesheet" href="/src/css/base.css">
+  <link rel="stylesheet" href="/src/css/animations.css">
+  <link rel="stylesheet" href="/src/css/components.css">
+  <link rel="stylesheet" href="/src/css/pipeline.css">
+  <link rel="stylesheet" href="/src/css/responsive.css">
+</head>
+<body>
+<div id="app">
+  <!-- Header -->
+  <header class="header">
+    <div class="header-controls">
+      <button id="settingsBtn" class="icon-btn" title="AI Settings">⚙️<span class="llm-dot" id="llmDot"></span></button>
+      <button id="themeToggle" class="icon-btn" title="Toggle theme">🌙</button>
+      <button id="langToggle" class="icon-btn" title="Switch language">中</button>
+    </div>
+    <div class="mascot-wrap">
+      <div class="mascot" id="mascot">
+        <div class="mascot-body">
+          <div class="mascot-lens"></div>
+          <div class="mascot-eye left"></div>
+          <div class="mascot-eye right"></div>
+          <div class="mascot-cheek left"></div>
+          <div class="mascot-cheek right"></div>
+          <div class="mascot-mouth"></div>
+        </div>
+        <div class="mascot-reel left"></div>
+        <div class="mascot-reel right"></div>
+        <div class="mascot-leg left"></div>
+        <div class="mascot-leg right"></div>
+      </div>
+    </div>
+    <h1 class="title">Cine-Cutie</h1>
+    <p class="subtitle">Your AI Movie Creation Agent</p>
+  </header>
+
+  <!-- Input Section -->
+  <div class="section" id="inputSection">
+    <div class="section-title"><span class="icon">🎬</span> Tell me your story idea</div>
+    <div class="input-area">
+      <textarea id="userInput" placeholder="One sentence, a paragraph, or a wild idea — anything that sparks your imagination...&#10;&#10;e.g. &quot;A shy librarian discovers she can enter books and meet their characters&quot;"></textarea>
+      <div class="file-upload" id="fileUpload">
+        <span>📎 Drop files here or click to upload (images, audio, video, text)</span>
+        <input type="file" id="fileInput" multiple accept="image/*,audio/*,video/*,.txt,.pdf,.docx,.md">
+        <div class="file-list" id="fileList"></div>
+      </div>
+    </div>
+    <div class="mode-toggle">
+      <button class="mode-btn active" data-mode="auto" id="modeAuto">
+        <div class="mode-label">🚀 Auto Pilot</div>
+        <div class="mode-desc">Sit back and watch the magic unfold</div>
+      </button>
+      <button class="mode-btn" data-mode="interactive" id="modeInteractive">
+        <div class="mode-label">🤝 Co-Create</div>
+        <div class="mode-desc">Collaborate step by step, your vision matters</div>
+      </button>
+    </div>
+    <button class="start-btn" id="startBtn">
+      <span class="shimmer"></span>
+      ✨ Lights, Camera, Action!
+    </button>
+  </div>
+
+  <!-- Pipeline Section -->
+  <div class="section hidden" id="pipelineSection">
+    <div class="pipeline" id="pipeline"></div>
+    <div id="stepContent"></div>
+  </div>
+
+  <!-- Settings Modal -->
+  <div id="settingsModal" class="modal-overlay hidden">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h2 id="settingsTitle">AI Model Settings</h2>
+        <button id="settingsClose" class="modal-close">&times;</button>
+      </div>
+      <div class="modal-field">
+        <label for="cfgEndpoint" id="lblEndpoint">API Endpoint</label>
+        <input type="text" id="cfgEndpoint" placeholder="https://api.openai.com/v1">
+      </div>
+      <div class="modal-field">
+        <label for="cfgApiKey" id="lblApiKey">API Key</label>
+        <div class="input-with-toggle">
+          <input type="password" id="cfgApiKey" placeholder="sk-...">
+          <button id="toggleKeyVis" class="toggle-vis-btn" type="button">👁</button>
+        </div>
+      </div>
+      <div class="modal-field">
+        <label for="cfgModel" id="lblModel">Model</label>
+        <input type="text" id="cfgModel" placeholder="gpt-4o-mini">
+      </div>
+      <div class="modal-field modal-field-row">
+        <label id="lblJsonMode">JSON Mode</label>
+        <label class="toggle-switch">
+          <input type="checkbox" id="cfgJsonMode" checked>
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <div class="modal-field modal-field-row">
+        <label id="lblProxy">Use Proxy Server</label>
+        <label class="toggle-switch">
+          <input type="checkbox" id="cfgProxy">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <div class="modal-actions">
+        <button id="testConnBtn" class="action-btn" type="button">
+          <span id="testConnText">Test Connection</span>
+        </button>
+        <button id="saveSettingsBtn" class="action-btn primary" type="button">
+          <span id="saveSettingsText">Save</span>
+        </button>
+      </div>
+      <div id="settingsStatus" class="settings-status"></div>
+    </div>
+  </div>
+</div>
+
+<script type="module" src="/src/js/main.js"></script>
+</body>
+</html>

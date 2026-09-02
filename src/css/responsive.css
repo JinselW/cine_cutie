@@ -1,0 +1,16 @@
+@media(max-width:600px){
+  .title{font-size:1.8rem}
+  .section{padding:20px 16px}
+  .pipe-line,.pipe-line-sm{width:16px}
+  .pipe-node{width:36px;height:36px;font-size:0.9rem}
+  .pipe-node-sm{width:40px;height:40px;font-size:1rem}
+  .pipe-label{font-size:0.62rem;top:44px}
+  .pipeline-row{gap:4px}
+  .pipeline-connector{padding:22px 0 14px}
+  .connector-line{height:18px}
+  .char-grid{grid-template-columns:1fr}
+  .storyboard-grid{grid-template-columns:repeat(2,1fr)}
+  .take-grid{grid-template-columns:1fr}
+  .mode-toggle{flex-direction:column}
+  .timeline-bar{flex-wrap:wrap}
+}
