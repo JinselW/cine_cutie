@@ -1,4 +1,4 @@
-# Cine-Cutie6666
+# Cine-Cutie
 
 AI Movie Creation Agent -- 一句话灵感，完整短片制作。
 
