@@ -1,7 +1,4 @@
 import { registerProvider } from './registry.js';
-import { addAgentMessage } from '../ui/render.js';
-import { t } from '../i18n.js';
-import { state } from '../state.js';
 
 const CFG_KEY = 'cine-cutie-dashscope';
 
@@ -31,164 +28,100 @@ function getConfig() {
 
 loadConfig();
 
-function buildCharacterPrompt(character, script) {
-  const style = script?.genre || 'cinematic';
-  return `Character portrait of ${character.name}, ${character.appearance || character.desc || ''}, ${style} style, detailed face and costume, studio lighting, high quality, 4k`;
-}
-
-function buildSettingPrompt(setting, script) {
-  const style = script?.genre || 'cinematic';
-  return `Scene environment of ${setting.name}, ${setting.desc || ''}, ${style} style, wide angle establishing shot, atmospheric lighting, cinematic composition, high quality, 4k`;
-}
-
-function buildShotPrompt(shot, characters, genre) {
-  const style = genre || 'cinematic';
-  let base = shot.prompt || `${shot.description}, ${shot.type} shot`;
-
-  if (characters?.length) {
-    const shotText = base.toLowerCase();
-    for (const c of characters) {
-      const names = [c.name, c.enName].filter(Boolean).map(n => n.toLowerCase());
-      if (names.some(n => n && shotText.includes(n)) && c.appearance) {
-        base += `, ${c.appearance}`;
-        break;
-      }
-    }
-  }
-
-  return `${style} style, ${base}, high quality, 4k`;
-}
-
 const imageProvider = {
   id: 'image',
   name: 'DashScope Image Generation',
   capabilities: ['image'],
 
-  async generate({ step, genre, context }) {
-    if (!isConfigured()) {
-      return buildPlaceholder(step, context);
+  async generate({ items, overrides = {}, signal } = {}) {
+    if (!isConfigured() || !items?.length) {
+      return items.map(item => ({
+        id: item.id,
+        path: '',
+        imageUrl: '',
+        status: 'failed',
+        error: !isConfigured() ? 'Not configured' : 'No items',
+      }));
     }
 
-    let prompts = [];
-    let ids = [];
+    const prompts = items.map(item => {
+      const overridePrompt = overrides.promptOverrides && overrides.promptOverrides[item.id];
+      return overridePrompt || item.prompt;
+    });
 
-    if (step === 'characterDesign') {
-      const script = context.script;
-      if (!script) return buildPlaceholder(step, context);
+    const seeds = items.map(item => {
+      const overrideSeed = overrides.seed?.[item.id];
+      return overrideSeed ?? item.seed ?? 42;
+    });
 
-      for (const char of (script.characters || [])) {
-        ids.push(char.id);
-        prompts.push(buildCharacterPrompt(char, script));
-      }
-      for (const setting of (script.settings || [])) {
-        ids.push(setting.id);
-        prompts.push(buildSettingPrompt(setting, script));
-      }
+    const ids = items.map(item => item.id);
 
-      addAgentMessage('🎨', t('ui.charDesignGenerating', { total: prompts.length }));
-
-      const results = await generateImages(prompts, ids, true);
-
-      const characters = (script.characters || []).map((char, i) => ({
-        id: char.id,
-        name: char.name,
-        enName: char.enName || '',
-        desc: char.desc,
-        appearance: char.appearance || '',
-        imagePath: results[i]?.path || '',
-        imageUrl: results[i]?.imageUrl || ''
-      }));
-      const settings = (script.settings || []).map((setting, i) => ({
-        id: setting.id,
-        name: setting.name,
-        desc: setting.desc,
-        imagePath: results[script.characters.length + i]?.path || '',
-        imageUrl: results[script.characters.length + i]?.imageUrl || ''
-      }));
-
-      return { characters, settings };
-    }
-
-    if (step === 'referenceImages') {
-      const storyboard = context.storyboard;
-      if (!storyboard) return buildPlaceholder(step, context);
-
-      const shots = [];
-      for (const ep of (storyboard.episodes || [])) {
-        for (const seg of (ep.segments || [])) {
-          for (const shot of (seg.shots || [])) {
-            shots.push(shot);
-          }
-        }
-      }
-
-      const maxClips = Math.ceil((context.totalDuration || 30) / 5);
-      if (shots.length > maxClips) {
-        shots.length = maxClips;
-      }
-
-      const characters = context.characterDesign?.characters || [];
-      prompts = shots.map(sh => buildShotPrompt(sh, characters, genre));
-      ids = shots.map(sh => sh.shot_id);
-
-      const results = await generateImages(prompts, ids);
-
-      const shotResults = shots.map((sh, i) => ({
-        shot_id: sh.shot_id,
-        imagePath: results[i]?.path || '',
-        imageUrl: results[i]?.imageUrl || '',
-        prompt: prompts[i],
-        status: results[i]?.path ? 'complete' : 'failed'
-      }));
-
-      return { shots: shotResults };
-    }
-
-    return buildPlaceholder(step, context);
-  }
+    return await generateImages(prompts, ids, seeds, signal);
+  },
 };
 
-async function generateImages(prompts, ids, skipFirstMessage = false) {
+async function generateImages(prompts, ids, seeds, externalSignal) {
   try {
-    if (!skipFirstMessage) {
-      addAgentMessage('🖼️', t('ui.refImagesGenerating', { current: 1, total: prompts.length }));
+    if (externalSignal?.aborted) {
+      return prompts.map((_, i) => ({
+        id: ids[i], path: '', imageUrl: '', status: 'failed', error: 'Cancelled',
+      }));
     }
 
     const res = await fetch('/api/generate/image', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-Api-Key': config.apiKey
+        'X-Api-Key': config.apiKey,
       },
+      signal: externalSignal,
       body: JSON.stringify({
         prompts,
         model: config.imageModel,
-        size: state.imageSize,
-        seed: 42
-      })
+        size: '1024*1024',
+        seed: seeds[0] || 42,
+      }),
     });
 
     if (!res.ok) {
       const errText = await res.text().catch(() => '');
-      addAgentMessage('⚠️', `Image batch failed: ${errText.substring(0, 100)}`);
-      return prompts.map((_, i) => ({ path: '', imageUrl: '', id: ids[i] }));
+      return prompts.map((_, i) => ({
+        id: ids[i],
+        path: '',
+        imageUrl: '',
+        status: 'failed',
+        error: `HTTP ${res.status}: ${errText.substring(0, 100)}`,
+      }));
     }
 
     const { taskId } = await res.json();
     const results = [];
     const startTime = Date.now();
     const MAX_WAIT = 10 * 60 * 1000;
-    let lastProgress = skipFirstMessage ? 0 : 1;
 
     for (let attempt = 0; attempt < 200; attempt++) {
+      if (externalSignal?.aborted) {
+        return prompts.map((_, i) => ({
+          id: ids[i], path: '', imageUrl: '', status: 'failed', error: 'Cancelled',
+        }));
+      }
       if (Date.now() - startTime > MAX_WAIT) {
-        addAgentMessage('⚠️', 'Image generation timed out');
-        break;
+        return prompts.map((_, i) => ({
+          id: ids[i],
+          path: '',
+          imageUrl: '',
+          status: 'failed',
+          error: 'Timeout',
+        }));
       }
       await new Promise(r => setTimeout(r, 3000));
 
       const ctrl = new AbortController();
       const tid = setTimeout(() => ctrl.abort(), 30000);
+      if (externalSignal) {
+        if (externalSignal.aborted) { ctrl.abort(); clearTimeout(tid); break; }
+        externalSignal.addEventListener('abort', () => ctrl.abort(), { once: true });
+      }
       let taskData;
       try {
         const taskRes = await fetch(`/api/task/${taskId}`, { signal: ctrl.signal });
@@ -196,12 +129,8 @@ async function generateImages(prompts, ids, skipFirstMessage = false) {
         taskData = await taskRes.json();
       } catch {
         clearTimeout(tid);
+        if (externalSignal?.aborted) break;
         continue;
-      }
-
-      if (taskData.current && taskData.current !== lastProgress) {
-        lastProgress = taskData.current;
-        addAgentMessage('️', t('ui.refImagesGenerating', { current: taskData.current, total: taskData.total || prompts.length }));
       }
 
       if (taskData.status === 'completed') {
@@ -209,57 +138,45 @@ async function generateImages(prompts, ids, skipFirstMessage = false) {
         for (let i = 0; i < prompts.length; i++) {
           const img = images.find(e => e.index === i);
           results.push({
+            id: ids[i],
             path: img?.path || '',
             imageUrl: img?.imageUrl || '',
-            id: ids[i]
+            status: img?.path ? 'complete' : 'failed',
+            error: img?.path ? null : 'No image returned',
           });
         }
         break;
       }
       if (taskData.status === 'failed') {
-        addAgentMessage('⚠️', `Image batch failed: ${taskData.error || 'Unknown'}`);
-        break;
+        return prompts.map((_, i) => ({
+          id: ids[i],
+          path: '',
+          imageUrl: '',
+          status: 'failed',
+          error: taskData.error || 'Generation failed',
+        }));
       }
     }
 
     while (results.length < prompts.length) {
-      results.push({ path: '', imageUrl: '', id: ids[results.length] });
+      results.push({
+        id: ids[results.length],
+        path: '',
+        imageUrl: '',
+        status: 'failed',
+        error: 'Incomplete results',
+      });
     }
     return results;
   } catch (err) {
-    addAgentMessage('⚠️', `Image batch error: ${err.message}`);
-    return prompts.map((_, i) => ({ path: '', imageUrl: '', id: ids[i] }));
-  }
-}
-
-function buildPlaceholder(step, context) {
-  if (step === 'characterDesign') {
-    const script = context.script;
-    const characters = (script?.characters || []).map(c => ({
-      id: c.id, name: c.name, enName: c.enName || '', desc: c.desc, appearance: c.appearance || '',
-      imagePath: '', imageUrl: ''
+    return prompts.map((_, i) => ({
+      id: ids[i],
+      path: '',
+      imageUrl: '',
+      status: 'failed',
+      error: err.message,
     }));
-    const settings = (script?.settings || []).map(s => ({
-      id: s.id, name: s.name, desc: s.desc,
-      imagePath: '', imageUrl: ''
-    }));
-    return { characters, settings };
   }
-
-  if (step === 'referenceImages') {
-    const storyboard = context.storyboard;
-    const shots = [];
-    for (const ep of (storyboard?.episodes || [])) {
-      for (const seg of (ep.segments || [])) {
-        for (const shot of (seg.shots || [])) {
-          shots.push({ shot_id: shot.shot_id, imagePath: '', prompt: shot.prompt || '', status: 'pending' });
-        }
-      }
-    }
-    return { shots };
-  }
-
-  return null;
 }
 
 registerProvider(imageProvider);

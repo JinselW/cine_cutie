@@ -135,9 +135,12 @@ cine-cutie/
 │       ├── config.js             # 6 步 Pipeline 配置（STEPS, contextKeys）
 │       ├── state.js              # 全局状态
 │       ├── engine.js             # Pipeline 引擎（推进、渲染调度）
-│       ├── agents.js             # Agent 运行器（上下文构建、实体提取）
+│       ├── orchestrator.js       # 编排器（Agent 调度、恢复、回滚）
 │       ├── i18n.js               # 国际化（中/英）
-│       ├── observability.js      # 执行日志
+│       ├── observability.js      # 执行日志（从 Artifact 派生）
+│       ├── agents/               # 6 个 Agent（Script/Storyboard/Character/Reference/Video/Editor）
+│       ├── artifacts/            # ArtifactStore + 版本化 + 状态追踪
+│       ├── orchestrator/         # ExecutionCheckpoint / RunState / CancellationToken
 │       ├── providers/
 │       │   ├── registry.js       # Provider 注册与调度
 │       │   ├── llm.js            # LLM Provider（OpenAI 兼容 API）

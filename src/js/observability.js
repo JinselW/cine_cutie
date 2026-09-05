@@ -1,26 +1,22 @@
-import { STEPS } from './config.js';
+import { ArtifactStatus } from './artifacts/artifactTypes.js';
 
-const executionLog = [];
+let _store = null;
 let currentEntry = null;
+
+export function initObservability(store) {
+  _store = store;
+}
 
 export function logStepStart(stepId, agentName) {
   currentEntry = {
     stepId,
     agentName,
     startTime: Date.now(),
-    duration: 0,
     tokens: { prompt: 0, completion: 0 },
     qualityScore: null,
     retryCount: 0,
-    fallbackUsed: false
+    fallbackUsed: false,
   };
-}
-
-export function logStepComplete() {
-  if (!currentEntry) return;
-  currentEntry.duration = Math.round((Date.now() - currentEntry.startTime) / 100) / 10;
-  executionLog.push({ ...currentEntry });
-  currentEntry = null;
 }
 
 export function updateStepMetrics(metrics) {
@@ -34,24 +30,42 @@ export function updateStepMetrics(metrics) {
   if (metrics.fallbackUsed) currentEntry.fallbackUsed = true;
 }
 
+export function logStepComplete() {
+  currentEntry = null;
+}
+
 export function getExecutionLog() {
-  return executionLog;
+  if (!_store) return [];
+  return _store.listAll()
+    .filter(a => a.status !== ArtifactStatus.STALE && a.status !== ArtifactStatus.SUPERSEDED)
+    .sort((a, b) => a.createdAt - b.createdAt)
+    .map(a => ({
+      stepId: a.stepId,
+      agentName: a.provenance?.agent || 'Agent',
+      startTime: a.createdAt,
+      duration: Math.round((a.updatedAt - a.createdAt) / 100) / 10,
+      tokens: a.metrics?.tokens || { prompt: 0, completion: 0 },
+      qualityScore: a.metrics?.qualityScore ?? null,
+      retryCount: a.metrics?.retries ?? 0,
+      fallbackUsed: a.metrics?.fallbackUsed ?? false,
+    }));
 }
 
 export function resetLog() {
-  executionLog.length = 0;
   currentEntry = null;
 }
 
 export function getTotalTokens() {
-  return executionLog.reduce(
-    (acc, e) => ({ prompt: acc.prompt + e.tokens.prompt, completion: acc.completion + e.tokens.completion }),
-    { prompt: 0, completion: 0 }
+  const log = getExecutionLog();
+  return log.reduce(
+    (acc, e) => ({ prompt: acc.prompt + (e.tokens.prompt || 0), completion: acc.completion + (e.tokens.completion || 0) }),
+    { prompt: 0, completion: 0 },
   );
 }
 
 export function getAverageQuality() {
-  const scored = executionLog.filter(e => e.qualityScore != null);
+  const log = getExecutionLog();
+  const scored = log.filter(e => e.qualityScore != null);
   if (scored.length === 0) return null;
   return Math.round(scored.reduce((s, e) => s + e.qualityScore, 0) / scored.length * 10) / 10;
 }

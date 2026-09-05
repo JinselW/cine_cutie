@@ -1,6 +1,5 @@
 import { registerProvider, getActiveProvider, setActiveProvider, listAllProviders } from './registry.js';
 import { buildMessages } from './prompts.js';
-import { critiqueOutput, shouldRetry, buildRetryFeedback, reportScore, reportRetry, MAX_RETRIES } from './critic.js';
 import { t } from '../i18n.js';
 import { addAgentMessage } from '../ui/render.js';
 
@@ -38,17 +37,15 @@ function getConfig() {
 loadConfig();
 
 let stepUsage = { prompt: 0, completion: 0 };
-let stepRetries = 0;
 let stepFallback = false;
 
 function resetStepMetrics() {
   stepUsage = { prompt: 0, completion: 0 };
-  stepRetries = 0;
   stepFallback = false;
 }
 
 function consumeStepMetrics() {
-  const m = { tokens: { ...stepUsage }, retries: stepRetries, fallbackUsed: stepFallback };
+  const m = { tokens: { ...stepUsage }, retries: 0, fallbackUsed: stepFallback };
   resetStepMetrics();
   return m;
 }
@@ -61,9 +58,20 @@ class LLMError extends Error {
   }
 }
 
-async function callChat(messages, { retryWithoutJsonFormat = false } = {}) {
+async function callChat(messages, { retryWithoutJsonFormat = false, signal: externalSignal } = {}) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 90000);
+
+  let onExternalAbort;
+  if (externalSignal) {
+    if (externalSignal.aborted) {
+      clearTimeout(timeout);
+      controller.abort();
+    } else {
+      onExternalAbort = () => controller.abort();
+      externalSignal.addEventListener('abort', onExternalAbort, { once: true });
+    }
+  }
 
   const body = {
     model: config.model,
@@ -112,7 +120,7 @@ async function callChat(messages, { retryWithoutJsonFormat = false } = {}) {
       }
       if (res.status === 400 && text.includes('response_format')) {
         if (!retryWithoutJsonFormat) {
-          return callChat(messages, { retryWithoutJsonFormat: true });
+          return callChat(messages, { retryWithoutJsonFormat: true, signal: externalSignal });
         }
       }
       throw new LLMError('llm.errHttp', `${res.status}: ${text.substring(0, 200)}`);
@@ -127,9 +135,15 @@ async function callChat(messages, { retryWithoutJsonFormat = false } = {}) {
     if (!content) {
       throw new LLMError('llm.errParse', 'Empty response from model');
     }
+    if (onExternalAbort && externalSignal) {
+      externalSignal.removeEventListener('abort', onExternalAbort);
+    }
     return content;
   } catch (err) {
     clearTimeout(timeout);
+    if (onExternalAbort && externalSignal) {
+      externalSignal.removeEventListener('abort', onExternalAbort);
+    }
     if (err instanceof LLMError) throw err;
     if (err.name === 'AbortError') {
       throw new LLMError('llm.errTimeout', '90s');
@@ -249,76 +263,7 @@ const llmProvider = {
       return fallbackToTemplate(step, genre, context, new LLMError('llm.errSchema', `Validation failed for step ${step}`));
     }
 
-    if (step === 'storyboard' && context.totalDuration) {
-      const maxClips = Math.ceil(context.totalDuration / 5);
-      let totalShots = 0;
-      for (const ep of (parsed.episodes || [])) {
-        for (const seg of (ep.segments || [])) {
-          totalShots += (seg.shots || []).length;
-        }
-      }
-      if (totalShots > maxClips) {
-        let remaining = maxClips;
-        outer: for (const ep of (parsed.episodes || [])) {
-          for (const seg of (ep.segments || [])) {
-            if (seg.shots && seg.shots.length > remaining) {
-              seg.shots = seg.shots.slice(0, remaining);
-            }
-            remaining -= (seg.shots || []).length;
-            if (remaining <= 0) {
-              seg.shots = seg.shots || [];
-              break outer;
-            }
-          }
-        }
-        for (const ep of (parsed.episodes || [])) {
-          ep.segments = (ep.segments || []).filter(seg => (seg.shots || []).length > 0);
-        }
-        parsed.episodes = (parsed.episodes || []).filter(ep => (ep.segments || []).length > 0);
-      }
-    }
-
-    let currentResult = parsed;
-    let bestResult = parsed;
-    let bestScore = -1;
-
-    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-      const critique = await critiqueOutput(step, currentResult, context, callChat);
-
-      if (!critique) break;
-
-      reportScore(step, critique.score, '⭐');
-
-      if (critique.score > bestScore) {
-        bestScore = critique.score;
-        bestResult = currentResult;
-      }
-
-      if (!shouldRetry(critique) || attempt === MAX_RETRIES) break;
-
-      reportRetry(step, critique.score, attempt + 1, '⭐');
-      stepRetries++;
-
-      const feedbackMessages = [
-        ...messages,
-        { role: 'assistant', content: JSON.stringify(currentResult) },
-        { role: 'user', content: buildRetryFeedback(critique) }
-      ];
-
-      try {
-        const retryRaw = await callChat(feedbackMessages);
-        const retryParsed = parseJson(retryRaw);
-        if (validate(step, retryParsed)) {
-          currentResult = retryParsed;
-        } else {
-          break;
-        }
-      } catch {
-        break;
-      }
-    }
-
-    return bestResult;
+    return parsed;
   }
 };
 
@@ -375,4 +320,8 @@ if (isConfigured()) {
   setActiveProvider('text', 'llm');
 }
 
-export { saveConfig, getConfig, isConfigured, testConnection, loadConfig, consumeStepMetrics };
+async function chat(messages, { signal, retryWithoutJsonFormat } = {}) {
+  return callChat(messages, { signal, retryWithoutJsonFormat });
+}
+
+export { saveConfig, getConfig, isConfigured, testConnection, loadConfig, consumeStepMetrics, chat };

@@ -13,7 +13,8 @@ Cine-Cutie 采用分层架构，核心关注点分离为：Pipeline 编排、Age
 ┌──────────────────────────────┴──────────────────────────────────┐
 │                      Orchestration Layer                         │
 │  engine.js (Pipeline 推进/修改/渲染调度)                          │
-│  agents.js (Agent 运行/上下文构建/实体提取)                       │
+│  orchestrator.js (Agent 调度/恢复/回滚)                          │
+│  agents/ (6 个 Agent 实现)                                       │
 └──────────────────────────────┬──────────────────────────────────┘
                                │
 ┌──────────────────────────────┴──────────────────────────────────┐
@@ -55,39 +56,33 @@ function renderStep(stepId, result, onAdvance) {
 
 `advanceStep` 和 `reviseStep` 共用同一个 `renderStep()`，避免了 switch 块重复。
 
-### 2. Agent 运行器 (`agents.js`)
+### 2. 编排器与 Agent (`orchestrator.js` + `agents/`)
 
-每个步骤的执行通过 `runAgent(stepId, feedback)` 完成：
+编排器负责 Pipeline 生命周期，每个步骤由专属 Agent 类执行：
 
-1. **查找 Provider**: 根据步骤的 `capability` 从 Registry 获取活跃 Provider
-2. **构建上下文**: `buildContext(stepId)` 根据 `contextKeys` 裁剪所需数据
-3. **注入一致性约束**: `buildConsistencyConstraints()` 生成实体约束文本
-4. **调用生成**: `provider.generate({ step, genre, context })`
-5. **收集指标**: `consumeStepMetrics()` 获取 token 使用量等数据
-6. **记录日志**: `logStepStart` / `logStepComplete` 记录到执行日志
-7. **提取实体**: `extractEntities(stepId, result)` 更新一致性追踪器
+1. **上下文构建**: `#buildContext(step)` 根据 `contextKeys` 裁剪数据 + 注入一致性约束
+2. **Agent 执行**: `agent.process(ctx, token)` — 每个 Agent 拥有自己的 prompt 构建和重试逻辑
+3. **产物提交**: `ArtifactStore.commit(artifact)` — 版本化存储，自动标记下游 stale
+4. **质量门禁**: `#postGate()` — 结构验证 + 一致性检查
+5. **实体追踪**: `extractEntities()` + `mergeEntities()` 更新一致性状态
+6. **可观测性**: 指标附着在 Artifact 上，`observability.js` 从 ArtifactStore 派生执行日志
 
-#### 上下文裁剪 (Context Pruning)
+#### Agent 类
 
-每个步骤在 `config.js` 中声明 `contextKeys`，`buildContext` 只注入所需数据：
+| Agent | 步骤 | 职责 |
+|-------|------|------|
+| `ScriptAgent` | script | 剧本生成 + 结构验证 |
+| `CharacterAgent` | characterDesign | 角色设计 + per-item 重试 |
+| `StoryboardAgent` | storyboard | 分镜生成 + 结构验证 |
+| `ReferenceAgent` | referenceImages | 参考图生成 + per-item 重试 |
+| `VideoAgent` | videoGeneration | 视频片段 + per-item 重试 + SWAP_REFERENCE |
+| `EditorAgent` | postProduction | 后期剪辑组装 |
 
-```js
-// config.js
-{ id: 'characters', contextKeys: ['planning', 'screenplay'], ... }
+#### 恢复与回滚
 
-// agents.js
-function buildContext(stepId) {
-  const step = STEPS.find(s => s.id === stepId);
-  const keys = step?.contextKeys || [];
-  const ctx = { userInput, genre, media, constraints };
-  for (const key of keys) {
-    if (d[key] != null) ctx[key] = d[key];
-  }
-  return ctx;
-}
-```
-
-这确保每个步骤只接收相关上下文，减少 token 消耗 30-50%。
+- **ExecutionCheckpoint**: 持久化每个步骤的结果，支持断点恢复
+- **RunState**: 跟踪 Pipeline 生命周期（IDLE → RUNNING → INTERRUPTED/COMPLETED）
+- **CancellationToken**: 3 态控制（RUNNING/PAUSED/CANCELLED）+ AbortSignal 传播到 Provider
 
 ### 3. Provider 系统
 

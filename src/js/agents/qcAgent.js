@@ -1,28 +1,29 @@
-import { t } from '../i18n.js';
+import { getActiveProvider } from '../providers/registry.js';
+import { chat } from '../providers/llm.js';
 import { addAgentMessage } from '../ui/render.js';
 import { updateStepMetrics } from '../observability.js';
+import { t } from '../i18n.js';
 
-const CRITIQUE_SYSTEM = `You are a film production quality reviewer. You evaluate the output of AI film agents for quality, coherence, and creativity. Reply ONLY with valid JSON. No markdown, no commentary, no code fences.`;
+const CRITIQUE_SYSTEM = 'You are a film production quality reviewer. You evaluate the output of AI film agents for quality, coherence, and creativity. Reply ONLY with valid JSON. No markdown, no commentary, no code fences.';
 
 const CRITERIA = {
   script: [
     'Story has a clear structure with episodes and segments',
     'Characters are visually distinctive with detailed appearance descriptions',
     'Settings are vivid and specific enough for image generation',
-    'Story aligns with the user\'s input and genre'
+    'Story aligns with the user\'s input and genre',
   ],
   storyboard: [
     'Shots cover all segments from the script',
     'Shot prompts are detailed enough for image generation',
     'Camera angles and movements are varied and cinematic',
-    'Shot durations create good pacing'
-  ]
+    'Shot durations create good pacing',
+  ],
 };
 
-const SCORE_THRESHOLD = 7;
-const MAX_RETRIES = 2;
+export const SCORE_THRESHOLD = 7;
 
-function buildCritiquePrompt(stepId, data, context) {
+function buildCritiqueMessages(stepId, data, context) {
   const criteria = CRITERIA[stepId] || CRITERIA.script;
   const dataStr = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
 
@@ -32,7 +33,7 @@ function buildCritiquePrompt(stepId, data, context) {
   }
   if (context.storyboard?.episodes) {
     const shotCount = context.storyboard.episodes.reduce((n, ep) =>
-      n + ep.segments.reduce((m, seg) => m + (seg.shots?.length || 0), 0), 0);
+      n + (ep.segments || []).reduce((m, seg) => m + (seg.shots?.length || 0), 0), 0);
     contextStr += `\nSTORYBOARD: ${context.storyboard.episodes.length} episodes, ${shotCount} shots`;
   }
 
@@ -61,7 +62,7 @@ Requirements:
 - Each criterion score: 1-10
 - overallScore: average of all criterion scores, rounded to 1 decimal
 - issues: 1-3 specific problems (only if score < 8)
-- suggestions: 1-3 actionable improvements (only if score < 8)` }
+- suggestions: 1-3 actionable improvements (only if score < 8)` },
   ];
 }
 
@@ -79,31 +80,45 @@ function parseCritiqueResponse(raw) {
   }
 }
 
-export async function critiqueOutput(stepId, data, context, callChatFn) {
-  if (stepId !== 'script' && stepId !== 'storyboard') return null;
-
-  const messages = buildCritiquePrompt(stepId, data, context);
-
-  let raw;
-  try {
-    raw = await callChatFn(messages);
-  } catch {
-    return null;
+export class QCAgent {
+  constructor({ stepId }) {
+    this.name = 'QCAgent';
+    this.stepId = stepId;
   }
 
-  const parsed = parseCritiqueResponse(raw);
-  if (!parsed || typeof parsed.overallScore !== 'number') return null;
+  async process(ctx) {
+    const provider = getActiveProvider('text');
+    if (!provider) return null;
 
-  return {
-    score: Math.round(parsed.overallScore * 10) / 10,
-    issues: Array.isArray(parsed.issues) ? parsed.issues : [],
-    suggestions: Array.isArray(parsed.suggestions) ? parsed.suggestions : []
-  };
+    const messages = buildCritiqueMessages(this.stepId, ctx.data, ctx);
+
+    let raw;
+    try {
+      raw = await chat(messages);
+    } catch {
+      return null;
+    }
+
+    const parsed = parseCritiqueResponse(raw);
+    if (!parsed || typeof parsed.overallScore !== 'number') return null;
+
+    return {
+      score: Math.round(parsed.overallScore * 10) / 10,
+      issues: Array.isArray(parsed.issues) ? parsed.issues : [],
+      suggestions: Array.isArray(parsed.suggestions) ? parsed.suggestions : [],
+    };
+  }
 }
 
-export function shouldRetry(critiqueResult) {
-  if (!critiqueResult) return false;
-  return critiqueResult.score < SCORE_THRESHOLD;
+export function reportScore(score, agentIcon) {
+  const scoreColor = score >= 8 ? '#00e5a0' : score >= 7 ? 'var(--gold)' : 'var(--rose)';
+  const scoreText = t('critique.scoreDisplay', { score: score.toFixed(1) });
+  addAgentMessage(agentIcon, `<span style="color:${scoreColor}">${scoreText}</span>`);
+  updateStepMetrics({ qualityScore: score });
+}
+
+export function reportRetry(score, retryNum, maxRetries, agentIcon) {
+  addAgentMessage(agentIcon, t('critique.retrying', { score: score.toFixed(1), retry: retryNum, max: maxRetries }));
 }
 
 export function buildRetryFeedback(critiqueResult) {
@@ -120,16 +135,3 @@ export function buildRetryFeedback(critiqueResult) {
   parts.push('Please regenerate the output addressing all issues.');
   return parts.join('\n');
 }
-
-export function reportScore(stepId, score, agentIcon) {
-  const scoreColor = score >= 8 ? '#00e5a0' : score >= 7 ? 'var(--gold)' : 'var(--rose)';
-  const scoreText = t('critique.scoreDisplay', { score: score.toFixed(1) });
-  addAgentMessage(agentIcon, `<span style="color:${scoreColor}">${scoreText}</span>`);
-  updateStepMetrics({ qualityScore: score });
-}
-
-export function reportRetry(stepId, score, retryNum, agentIcon) {
-  addAgentMessage(agentIcon, t('critique.retrying', { score: score.toFixed(1), retry: retryNum, max: MAX_RETRIES }));
-}
-
-export { SCORE_THRESHOLD, MAX_RETRIES };
