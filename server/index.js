@@ -173,7 +173,7 @@ app.post('/api/generate/image', async (req, res) => {
 });
 
 app.post('/api/generate/video', async (req, res) => {
-  const { clips, model, duration, resolution, seed } = req.body;
+  const { clips, model, duration, resolution, seed, aspectRatio } = req.body;
   const apiKey = req.headers['x-api-key'];
 
   if (!apiKey) {
@@ -212,7 +212,7 @@ app.post('/api/generate/video', async (req, res) => {
             : `${req.protocol}://${req.get('host')}${clip.imageUrl}`;
           console.log(`[VideoBatch] task=${task.id} clip ${i + 1} imageUrl=${imageUrl}`);
 
-          const taskId = await submitVideoTask(clip.prompt, imageUrl, { model, duration, resolution, apiKey, seed });
+          const taskId = await submitVideoTask(clip.prompt, imageUrl, { model, duration, resolution, apiKey, seed, aspectRatio });
 
           let pollResult;
           for (let attempt = 0; attempt < 240; attempt++) {

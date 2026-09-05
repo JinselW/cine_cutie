@@ -23,6 +23,8 @@ function feedbackPanel(stepId, approveKey = 'ui.approve') {
   `;
 }
 
+let _autoAdvanceTimer = null;
+
 function autoAdvance(delay, callback) {
   const actions = $('#actionRow');
   if (actions) {
@@ -30,7 +32,14 @@ function autoAdvance(delay, callback) {
     const btn = $('#autoNextBtn');
     if (btn) btn.style.display = 'none';
   }
-  setTimeout(callback, delay);
+  _autoAdvanceTimer = setTimeout(callback, delay);
+}
+
+export function cancelAutoAdvance() {
+  if (_autoAdvanceTimer != null) {
+    clearTimeout(_autoAdvanceTimer);
+    _autoAdvanceTimer = null;
+  }
 }
 
 function bindFeedback(stepId, approveCallback) {
@@ -44,7 +53,7 @@ function bindFeedback(stepId, approveCallback) {
   });
 }
 
-export function renderScript(data, onAdvance) {
+export function renderScript(data, onAdvance, readOnly = false) {
   const el = $('#stepContent');
   const chars = (data.characters || []).map(c => `
     <div class="char-card">
@@ -94,19 +103,21 @@ export function renderScript(data, onAdvance) {
         ${episodes}
       </div>
     </div>
-    <div class="action-row" id="actionRow"></div>
+    ${readOnly ? '' : '<div class="action-row" id="actionRow"></div>'}
   `;
 
-  if (state.mode === 'interactive') {
-    $('#actionRow').innerHTML = feedbackPanel('script', 'ui.approveScript');
-    bindFeedback('script', onAdvance);
-  } else {
-    autoAdvance(2000, onAdvance);
+  if (!readOnly) {
+    if (state.mode === 'interactive') {
+      $('#actionRow').innerHTML = feedbackPanel('script', 'ui.approveScript');
+      bindFeedback('script', onAdvance);
+    } else {
+      autoAdvance(2000, onAdvance);
+    }
   }
   setMascot('happy');
 }
 
-export function renderCharacterDesign(data, onAdvance) {
+export function renderCharacterDesign(data, onAdvance, readOnly = false) {
   const el = $('#stepContent');
   const { isConfigured: dsConfigured } = getDashScopeStatus();
 
@@ -141,19 +152,21 @@ export function renderCharacterDesign(data, onAdvance) {
       <h3>${t('ui.charDesignSettings')}</h3>
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px">${settingCards}</div>
     </div>
-    <div class="action-row" id="actionRow"></div>
+    ${readOnly ? '' : '<div class="action-row" id="actionRow"></div>'}
   `;
 
-  if (state.mode === 'interactive') {
-    $('#actionRow').innerHTML = feedbackPanel('characterDesign', 'ui.approveCharacterDesign');
-    bindFeedback('characterDesign', onAdvance);
-  } else {
-    autoAdvance(2000, onAdvance);
+  if (!readOnly) {
+    if (state.mode === 'interactive') {
+      $('#actionRow').innerHTML = feedbackPanel('characterDesign', 'ui.approveCharacterDesign');
+      bindFeedback('characterDesign', onAdvance);
+    } else {
+      autoAdvance(2000, onAdvance);
+    }
   }
   setMascot('happy');
 }
 
-export function renderStoryboard(data, onAdvance) {
+export function renderStoryboard(data, onAdvance, readOnly = false) {
   const el = $('#stepContent');
 
   const episodes = (data.episodes || []).map(ep => {
@@ -178,19 +191,21 @@ export function renderStoryboard(data, onAdvance) {
   el.innerHTML = `
     <div style="margin-bottom:8px;font-size:0.85rem;color:var(--cream2)">${t('ui.storyboardTitle')}</div>
     ${episodes}
-    <div class="action-row" id="actionRow"></div>
+    ${readOnly ? '' : '<div class="action-row" id="actionRow"></div>'}
   `;
 
-  if (state.mode === 'interactive') {
-    $('#actionRow').innerHTML = feedbackPanel('storyboard', 'ui.approveStoryboard');
-    bindFeedback('storyboard', onAdvance);
-  } else {
-    autoAdvance(2000, onAdvance);
+  if (!readOnly) {
+    if (state.mode === 'interactive') {
+      $('#actionRow').innerHTML = feedbackPanel('storyboard', 'ui.approveStoryboard');
+      bindFeedback('storyboard', onAdvance);
+    } else {
+      autoAdvance(2000, onAdvance);
+    }
   }
   setMascot('happy');
 }
 
-export function renderReferenceImages(data, onAdvance) {
+export function renderReferenceImages(data, onAdvance, readOnly = false) {
   const el = $('#stepContent');
   const { isConfigured: dsConfigured } = getDashScopeStatus();
 
@@ -209,19 +224,21 @@ export function renderReferenceImages(data, onAdvance) {
       ${!dsConfigured ? `<div style="background:var(--bg3);border-radius:var(--radius-xs);padding:12px;margin-bottom:16px;color:var(--gold);font-size:0.85rem">${t('ui.refImagesConfigNeeded')}</div>` : ''}
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px">${shots}</div>
     </div>
-    <div class="action-row" id="actionRow"></div>
+    ${readOnly ? '' : '<div class="action-row" id="actionRow"></div>'}
   `;
 
-  if (state.mode === 'interactive') {
-    $('#actionRow').innerHTML = feedbackPanel('referenceImages', 'ui.approveReferenceImages');
-    bindFeedback('referenceImages', onAdvance);
-  } else {
-    autoAdvance(2000, onAdvance);
+  if (!readOnly) {
+    if (state.mode === 'interactive') {
+      $('#actionRow').innerHTML = feedbackPanel('referenceImages', 'ui.approveReferenceImages');
+      bindFeedback('referenceImages', onAdvance);
+    } else {
+      autoAdvance(2000, onAdvance);
+    }
   }
   setMascot('happy');
 }
 
-export function renderVideoGeneration(data, onAdvance) {
+export function renderVideoGeneration(data, onAdvance, readOnly = false) {
   const el = $('#stepContent');
   const { isConfigured: dsConfigured } = getDashScopeStatus();
 
@@ -240,19 +257,21 @@ export function renderVideoGeneration(data, onAdvance) {
       ${!dsConfigured ? `<div style="background:var(--bg3);border-radius:var(--radius-xs);padding:12px;margin-bottom:16px;color:var(--gold);font-size:0.85rem">${t('ui.videoGenConfigNeeded')}</div>` : ''}
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px">${clips}</div>
     </div>
-    <div class="action-row" id="actionRow"></div>
+    ${readOnly ? '' : '<div class="action-row" id="actionRow"></div>'}
   `;
 
-  if (state.mode === 'interactive') {
-    $('#actionRow').innerHTML = feedbackPanel('videoGeneration', 'ui.approveVideoGeneration');
-    bindFeedback('videoGeneration', onAdvance);
-  } else {
-    autoAdvance(2000, onAdvance);
+  if (!readOnly) {
+    if (state.mode === 'interactive') {
+      $('#actionRow').innerHTML = feedbackPanel('videoGeneration', 'ui.approveVideoGeneration');
+      bindFeedback('videoGeneration', onAdvance);
+    } else {
+      autoAdvance(2000, onAdvance);
+    }
   }
   setMascot('happy');
 }
 
-export function renderPostProduction(data, onAdvance) {
+export function renderPostProduction(data, onAdvance, readOnly = false) {
   const el = $('#stepContent');
   const { isConfigured: dsConfigured } = getDashScopeStatus();
 
@@ -271,14 +290,16 @@ export function renderPostProduction(data, onAdvance) {
           </div>`
         : `<div style="color:var(--cream3);font-size:0.85rem;text-align:center;padding:40px 0">${data.status === 'no-clips' ? 'No video clips available' : data.status === 'failed' ? 'Render failed' : '—'}</div>`}
     </div>
-    <div class="action-row" id="actionRow"></div>
+    ${readOnly ? '' : '<div class="action-row" id="actionRow"></div>'}
   `;
 
-  if (state.mode === 'interactive') {
-    $('#actionRow').innerHTML = feedbackPanel('postProduction', 'ui.approvePostProduction');
-    bindFeedback('postProduction', onAdvance);
-  } else {
-    autoAdvance(2000, onAdvance);
+  if (!readOnly) {
+    if (state.mode === 'interactive') {
+      $('#actionRow').innerHTML = feedbackPanel('postProduction', 'ui.approvePostProduction');
+      bindFeedback('postProduction', onAdvance);
+    } else {
+      autoAdvance(2000, onAdvance);
+    }
   }
   setMascot('happy');
 }
@@ -370,7 +391,11 @@ export function renderExecutionLog() {
   `;
 
   $('#backBtn').addEventListener('click', () => {
-    renderPostProduction(state.data.finalVideo || {}, () => {});
+    if (state.currentStep >= STEPS.length) {
+      showCompletion();
+    } else {
+      renderPostProduction(state.data.finalVideo || {}, () => {});
+    }
   });
 }
 

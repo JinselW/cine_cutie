@@ -51,6 +51,35 @@
           <span class="duration-hint" id="durationHint">每个片段约 5 秒，将生成 6 个镜头</span>
         </div>
       </div>
+      <div class="aspect-row">
+        <label id="lblAspectRatio">画面比例</label>
+        <div class="aspect-options">
+          <button class="aspect-btn active" data-ratio="16:9" data-size="1280*720" title="16:9">
+            <span class="ratio-shape" style="width:28px;height:16px"></span>
+            <span class="ratio-label">16:9</span>
+          </button>
+          <button class="aspect-btn" data-ratio="9:16" data-size="720*1280" title="9:16">
+            <span class="ratio-shape" style="width:14px;height:25px"></span>
+            <span class="ratio-label">9:16</span>
+          </button>
+          <button class="aspect-btn" data-ratio="1:1" data-size="1024*1024" title="1:1">
+            <span class="ratio-shape" style="width:20px;height:20px"></span>
+            <span class="ratio-label">1:1</span>
+          </button>
+          <button class="aspect-btn" data-ratio="4:3" data-size="1024*768" title="4:3">
+            <span class="ratio-shape" style="width:24px;height:18px"></span>
+            <span class="ratio-label">4:3</span>
+          </button>
+          <button class="aspect-btn" data-ratio="3:4" data-size="768*1024" title="3:4">
+            <span class="ratio-shape" style="width:18px;height:24px"></span>
+            <span class="ratio-label">3:4</span>
+          </button>
+          <button class="aspect-btn" data-ratio="21:9" data-size="1344*576" title="21:9">
+            <span class="ratio-shape" style="width:32px;height:12px"></span>
+            <span class="ratio-label">21:9</span>
+          </button>
+        </div>
+      </div>
       <div class="file-upload" id="fileUpload">
         <span>📎 Drop files here or click to upload (images, audio, video, text)</span>
         <input type="file" id="fileInput" multiple accept="image/*,audio/*,video/*,.txt,.pdf,.docx,.md">
@@ -128,7 +157,7 @@
       </div>
       <div class="modal-field">
         <label for="cfgVideoModel" id="lblVideoModel">Video Model</label>
-        <input type="text" id="cfgVideoModel" placeholder="wanx2.1-i2v-turbo">
+        <input type="text" id="cfgVideoModel" placeholder="wanx2.1-i2v-plus">
       </div>
       <div class="modal-actions">
         <button id="testConnBtn" class="action-btn" type="button">

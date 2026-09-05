@@ -47,7 +47,7 @@ export async function submitImageTask(prompt, { model = 'wanx2.1-t2i-turbo', siz
   }
 }
 
-export async function submitVideoTask(prompt, imageUrl, { model = 'wanx2.1-i2v-turbo', duration = 5, resolution = '720P', apiKey, seed } = {}) {
+export async function submitVideoTask(prompt, imageUrl, { model = 'wanx2.1-i2v-plus', duration = 5, resolution = '720P', apiKey, seed, aspectRatio } = {}) {
   const url = `${DASHSCOPE_BASE}/services/aigc/video-generation/video-synthesis`;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 30000);
@@ -70,7 +70,7 @@ export async function submitVideoTask(prompt, imageUrl, { model = 'wanx2.1-i2v-t
           prompt,
           img_url: imageUrl
         },
-        parameters: { duration, resolution, ...(seed != null && { seed }) }
+        parameters: { duration, resolution, ...(seed != null && { seed }), ...(aspectRatio && { aspect_ratio: aspectRatio }) }
       }),
       signal: controller.signal
     });
