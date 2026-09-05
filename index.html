@@ -80,11 +80,47 @@
           </button>
         </div>
       </div>
-      <div class="file-upload" id="fileUpload">
-        <span>📎 Drop files here or click to upload (images, audio, video, text)</span>
-        <input type="file" id="fileInput" multiple accept="image/*,audio/*,video/*,.txt,.pdf,.docx,.md">
-        <div class="file-list" id="fileList"></div>
+      <div class="style-row">
+        <label id="lblVisualStyle">视觉风格</label>
+        <div class="style-options" id="styleOptions">
+          <button class="style-btn active" data-style="cinematic">🎬 <span>电影感</span></button>
+          <button class="style-btn" data-style="fantasy">🧙 <span>奇幻</span></button>
+          <button class="style-btn" data-style="scifi">🚀 <span>科幻</span></button>
+          <button class="style-btn" data-style="anime">⛩️ <span>动漫</span></button>
+          <button class="style-btn" data-style="noir">🕵️ <span>黑色电影</span></button>
+          <button class="style-btn" data-style="horror">👻 <span>恐怖</span></button>
+          <button class="style-btn" data-style="romance">💕 <span>浪漫</span></button>
+          <button class="style-btn" data-style="comedy">😂 <span>喜剧</span></button>
+          <button class="style-btn" data-style="adventure">🗺️ <span>冒险</span></button>
+          <button class="style-btn" data-style="documentary">📹 <span>纪录片</span></button>
+          <button class="style-btn" data-style="custom">✏️ <span>自定义</span></button>
+        </div>
+        <input type="text" id="customStyleInput" class="custom-style-input hidden" placeholder="描述你想要的风格...">
       </div>
+      <div class="upload-slots" id="uploadSlots">
+        <div class="upload-slot" id="slotFirstFrame" data-slot="firstFrame">
+          <div class="slot-icon">🖼️</div>
+          <div class="slot-label" data-i18n="ui.slotFirstFrame">首帧图片</div>
+          <div class="slot-hint" data-i18n="ui.slotDropHint">拖拽或点击上传</div>
+          <input type="file" class="slot-file-input" id="inputFirstFrame" accept="image/*">
+          <div class="slot-preview hidden" id="previewFirstFrame"></div>
+        </div>
+        <div class="upload-slot" id="slotLastFrame" data-slot="lastFrame">
+          <div class="slot-icon">🖼️</div>
+          <div class="slot-label" data-i18n="ui.slotLastFrame">尾帧图片</div>
+          <div class="slot-hint" data-i18n="ui.slotDropHint">拖拽或点击上传</div>
+          <input type="file" class="slot-file-input" id="inputLastFrame" accept="image/*">
+          <div class="slot-preview hidden" id="previewLastFrame"></div>
+        </div>
+        <div class="upload-slot" id="slotReferenceImages" data-slot="referenceImages">
+          <div class="slot-icon">🎞️</div>
+          <div class="slot-label" data-i18n="ui.slotRefImages">参考图</div>
+          <div class="slot-hint" data-i18n="ui.slotDropHint">拖拽或点击上传</div>
+          <input type="file" class="slot-file-input" id="inputReferenceImages" accept="image/*" multiple>
+          <div class="slot-preview hidden" id="previewReferenceImages"></div>
+        </div>
+      </div>
+      <div class="upload-mode-hint hidden" id="uploadModeHint"></div>
     </div>
     <div class="mode-toggle">
       <button class="mode-btn active" data-mode="auto" id="modeAuto">
@@ -110,27 +146,108 @@
 
   <!-- Settings Modal -->
   <div id="settingsModal" class="modal-overlay hidden">
-    <div class="modal-card">
+    <div class="modal-card modal-card-wide">
       <div class="modal-header">
         <h2 id="settingsTitle">AI Model Settings</h2>
         <button id="settingsClose" class="modal-close">&times;</button>
       </div>
-      <div class="modal-field">
-        <label for="cfgEndpoint" id="lblEndpoint">API Endpoint</label>
-        <input type="text" id="cfgEndpoint" placeholder="https://api.openai.com/v1">
-      </div>
-      <div class="modal-field">
-        <label for="cfgApiKey" id="lblApiKey">API Key</label>
+
+      <!-- Module 1: API Settings -->
+      <div class="modal-section-title" id="apiSettingsTitle">API Settings</div>
+
+      <div class="api-provider-row" data-provider="openai">
+        <span class="api-provider-name">OpenAI</span>
+        <input type="text" class="api-endpoint" data-p="openai" placeholder="https://api.openai.com/v1">
         <div class="input-with-toggle">
-          <input type="password" id="cfgApiKey" placeholder="sk-...">
-          <button id="toggleKeyVis" class="toggle-vis-btn" type="button">👁</button>
+          <input type="password" class="api-key" data-p="openai" placeholder="API Key">
+          <button class="toggle-vis-btn" type="button" data-target="openai">👁</button>
         </div>
       </div>
-      <div class="modal-field">
-        <label for="cfgModel" id="lblModel">Model <span style="font-size:0.75rem;color:var(--cream3);font-weight:400" id="modelHint">(Text model only)</span></label>
-        <input type="text" id="cfgModel" placeholder="qwen-plus, qwen-turbo, gpt-4o-mini...">
-        <div class="field-hint" id="modelHintText" style="font-size:0.72rem;color:var(--cream3);margin-top:4px">用于剧本和分镜生成。不要填视频模型（如 wan2.x-t2v-xxx）</div>
+
+      <div class="api-provider-row" data-provider="deepseek">
+        <span class="api-provider-name">DeepSeek</span>
+        <input type="text" class="api-endpoint" data-p="deepseek" placeholder="https://api.deepseek.com/v1">
+        <div class="input-with-toggle">
+          <input type="password" class="api-key" data-p="deepseek" placeholder="API Key">
+          <button class="toggle-vis-btn" type="button" data-target="deepseek">👁</button>
+        </div>
       </div>
+
+      <div class="api-provider-row" data-provider="dashscope">
+        <span class="api-provider-name">DashScope</span>
+        <input type="text" class="api-endpoint" data-p="dashscope" placeholder="https://dashscope.aliyuncs.com/compatible-mode/v1">
+        <div class="input-with-toggle">
+          <input type="password" class="api-key" data-p="dashscope" placeholder="API Key">
+          <button class="toggle-vis-btn" type="button" data-target="dashscope">👁</button>
+        </div>
+      </div>
+
+      <div class="api-provider-row" data-provider="ark">
+        <span class="api-provider-name">ARK</span>
+        <input type="text" class="api-endpoint" data-p="ark" placeholder="https://ark.cn-beijing.volces.com/api/v3">
+        <div class="input-with-toggle">
+          <input type="password" class="api-key" data-p="ark" placeholder="API Key">
+          <button class="toggle-vis-btn" type="button" data-target="ark">👁</button>
+        </div>
+      </div>
+
+      <div class="api-provider-row" data-provider="kling">
+        <span class="api-provider-name">Kling</span>
+        <input type="text" class="api-endpoint" data-p="kling" placeholder="https://api.klingai.com">
+        <div class="input-with-toggle">
+          <input type="password" class="api-key" data-p="kling" placeholder="API Key">
+          <button class="toggle-vis-btn" type="button" data-target="kling">👁</button>
+        </div>
+      </div>
+
+      <div class="api-provider-row" data-provider="gemini">
+        <span class="api-provider-name">Gemini</span>
+        <input type="text" class="api-endpoint" data-p="gemini" placeholder="https://generativelanguage.googleapis.com/v1beta/openai">
+        <div class="input-with-toggle">
+          <input type="password" class="api-key" data-p="gemini" placeholder="API Key">
+          <button class="toggle-vis-btn" type="button" data-target="gemini">👁</button>
+        </div>
+      </div>
+
+      <div class="modal-divider"></div>
+
+      <!-- Module 2: Model Selection -->
+      <div class="modal-section-title" id="modelSelectionTitle">Model Selection</div>
+
+      <div class="model-select-group">
+        <label id="lblTextModel">Text Model <span class="model-hint" id="textModelHint">(for script & storyboard)</span></label>
+        <select id="cfgTextModel" class="model-select"></select>
+        <div class="model-custom-wrap hidden" id="textModelCustomWrap">
+          <input type="text" id="cfgTextModelCustom" class="model-custom-input" placeholder="Model name...">
+        </div>
+      </div>
+
+      <div class="model-select-group">
+        <label id="lblImageModel">Text-to-Image Model</label>
+        <select id="cfgImageModel" class="model-select"></select>
+        <div class="model-custom-wrap hidden" id="imageModelCustomWrap">
+          <input type="text" id="cfgImageModelCustom" class="model-custom-input" placeholder="Model name...">
+        </div>
+      </div>
+
+      <div class="model-select-group">
+        <label id="lblVideoModel">Image-to-Video Model</label>
+        <select id="cfgVideoModel" class="model-select"></select>
+        <div class="model-custom-wrap hidden" id="videoModelCustomWrap">
+          <input type="text" id="cfgVideoModelCustom" class="model-custom-input" placeholder="Model name...">
+        </div>
+      </div>
+
+      <div class="model-select-group">
+        <label id="lblRefVideoModel">Reference-to-Video Model</label>
+        <select id="cfgRefVideoModel" class="model-select"></select>
+        <div class="model-custom-wrap hidden" id="refVideoModelCustomWrap">
+          <input type="text" id="cfgRefVideoModelCustom" class="model-custom-input" placeholder="Model name...">
+        </div>
+      </div>
+
+      <div class="modal-divider"></div>
+
       <div class="modal-field modal-field-row">
         <label id="lblJsonMode">JSON Mode</label>
         <label class="toggle-switch">
@@ -145,20 +262,7 @@
           <span class="toggle-slider"></span>
         </label>
       </div>
-      <div class="modal-divider"></div>
-      <div class="modal-section-title" id="dashscopeTitle">DashScope Settings</div>
-      <div class="modal-field">
-        <label for="cfgDashScopeKey" id="lblDashScopeKey">DashScope API Key</label>
-        <input type="password" id="cfgDashScopeKey" placeholder="sk-...">
-      </div>
-      <div class="modal-field">
-        <label for="cfgImageModel" id="lblImageModel">Image Model</label>
-        <input type="text" id="cfgImageModel" placeholder="wanx2.1-t2i-turbo">
-      </div>
-      <div class="modal-field">
-        <label for="cfgVideoModel" id="lblVideoModel">Video Model</label>
-        <input type="text" id="cfgVideoModel" placeholder="wanx2.1-i2v-plus">
-      </div>
+
       <div class="modal-actions">
         <button id="testConnBtn" class="action-btn" type="button">
           <span id="testConnText">Test Connection</span>

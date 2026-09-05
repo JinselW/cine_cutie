@@ -151,6 +151,16 @@ const en = {
   'settings.dashscopeOn': 'DashScope configured',
   'settings.dashscopeOff': 'DashScope not configured',
 
+  'settings.apiSettings': 'API Settings',
+  'settings.modelSelection': 'Model Selection',
+  'settings.textModel': 'Text Model',
+  'settings.textModelHint': '(for script & storyboard)',
+  'settings.imageModelLabel': 'Text-to-Image Model',
+  'settings.videoModelLabel': 'Image-to-Video Model',
+  'settings.refVideoModelLabel': 'Reference-to-Video Model',
+  'settings.customModel': 'Custom...',
+  'settings.customModelPlaceholder': 'Model name...',
+
   'ui.approveScript': 'Approve Script',
   'ui.approveCharacterDesign': 'Approve Design',
   'ui.approveStoryboard': 'Approve Storyboard',
@@ -221,7 +231,31 @@ const en = {
   'log.quality': 'Quality',
   'log.retries': 'Retries',
   'log.fallback': 'Fallback',
-  'log.back': '← Back'
+  'log.back': '← Back',
+
+  'style.cinematic': 'Cinematic',
+  'style.fantasy': 'Fantasy',
+  'style.scifi': 'Sci-Fi',
+  'style.anime': 'Anime',
+  'style.noir': 'Noir',
+  'style.horror': 'Horror',
+  'style.romance': 'Romance',
+  'style.comedy': 'Comedy',
+  'style.adventure': 'Adventure',
+  'style.documentary': 'Documentary',
+  'style.custom': 'Custom',
+  'ui.lblVisualStyle': 'Visual Style',
+  'ui.customStylePlaceholder': 'Describe your style...',
+  'ui.slotFirstFrame': 'First Frame',
+  'ui.slotLastFrame': 'Last Frame',
+  'ui.slotRefImages': 'Reference Images',
+  'ui.slotDropHint': 'Drop or click to upload',
+  'ui.slotNeedFirstForLast': 'Please set first frame before setting last frame',
+  'ui.uploadModeI2v': 'Image-to-Video mode (wan2.7-i2v)',
+  'ui.uploadModeR2v': 'Reference-to-Video mode (wan2.7-r2v)',
+  'ui.uploading': 'Uploading files...',
+  'ui.uploadErrorSize': 'File too large (max 10MB)',
+  'ui.uploadErrorMaxRef': 'Maximum 5 reference images'
 };
 
 const zh = {
@@ -374,6 +408,16 @@ const zh = {
   'settings.dashscopeOn': 'DashScope 已配置',
   'settings.dashscopeOff': 'DashScope 未配置',
 
+  'settings.apiSettings': 'API 设置',
+  'settings.modelSelection': '模型选择',
+  'settings.textModel': '文本模型',
+  'settings.textModelHint': '（用于剧本与分镜）',
+  'settings.imageModelLabel': '文生图模型',
+  'settings.videoModelLabel': '图生视频模型',
+  'settings.refVideoModelLabel': '参考生视频模型',
+  'settings.customModel': '自定义…',
+  'settings.customModelPlaceholder': '输入模型名…',
+
   'ui.approveScript': '确认剧本',
   'ui.approveCharacterDesign': '确认设计',
   'ui.approveStoryboard': '确认分镜',
@@ -444,7 +488,31 @@ const zh = {
   'log.quality': '质量',
   'log.retries': '重试',
   'log.fallback': '回退',
-  'log.back': '← 返回'
+  'log.back': '← 返回',
+
+  'style.cinematic': '电影感',
+  'style.fantasy': '奇幻',
+  'style.scifi': '科幻',
+  'style.anime': '动漫',
+  'style.noir': '黑色电影',
+  'style.horror': '恐怖',
+  'style.romance': '浪漫',
+  'style.comedy': '喜剧',
+  'style.adventure': '冒险',
+  'style.documentary': '纪录片',
+  'style.custom': '自定义',
+  'ui.lblVisualStyle': '视觉风格',
+  'ui.customStylePlaceholder': '描述你想要的风格...',
+  'ui.slotFirstFrame': '首帧图片',
+  'ui.slotLastFrame': '尾帧图片',
+  'ui.slotRefImages': '参考图',
+  'ui.slotDropHint': '拖拽或点击上传',
+  'ui.slotNeedFirstForLast': '请先设置首帧图片，再设置尾帧',
+  'ui.uploadModeI2v': '图生视频模式 (wan2.7-i2v)',
+  'ui.uploadModeR2v': '参考图生视频模式 (wan2.7-r2v)',
+  'ui.uploading': '正在上传文件...',
+  'ui.uploadErrorSize': '文件太大（最大 10MB）',
+  'ui.uploadErrorMaxRef': '最多 5 张参考图'
 };
 
 const dicts = { en, zh };
@@ -477,8 +545,11 @@ export function applyLang() {
   const textarea = $('#userInput');
   if (textarea) textarea.placeholder = t('ui.placeholder');
 
-  const fileUploadSpan = document.querySelector('.file-upload > span');
-  if (fileUploadSpan) fileUploadSpan.textContent = t('ui.fileUpload');
+  document.querySelectorAll('[data-i18n]').forEach(el => {
+    const key = el.getAttribute('data-i18n');
+    const val = t(key);
+    if (val) el.textContent = val;
+  });
 
   const modeAuto = $('#modeAuto');
   if (modeAuto) {
@@ -506,14 +577,42 @@ export function applyLang() {
   const lblAspectRatio = $('#lblAspectRatio');
   if (lblAspectRatio) lblAspectRatio.textContent = t('ui.aspectRatio');
 
+  const lblVisualStyle = $('#lblVisualStyle');
+  if (lblVisualStyle) lblVisualStyle.textContent = t('ui.lblVisualStyle');
+  document.querySelectorAll('#styleOptions .style-btn').forEach(btn => {
+    const span = btn.querySelector('span');
+    const key = 'style.' + btn.dataset.style;
+    if (span && span.textContent) span.textContent = t(key);
+  });
+  const customStyleInput = $('#customStyleInput');
+  if (customStyleInput) customStyleInput.placeholder = t('ui.customStylePlaceholder');
+
   const settingsTitle = $('#settingsTitle');
   if (settingsTitle) settingsTitle.textContent = t('settings.title');
-  const lblEndpoint = $('#lblEndpoint');
-  if (lblEndpoint) lblEndpoint.textContent = t('settings.endpoint');
-  const lblApiKey = $('#lblApiKey');
-  if (lblApiKey) lblApiKey.textContent = t('settings.apiKey');
-  const lblModel = $('#lblModel');
-  if (lblModel) lblModel.textContent = t('settings.model');
+  const apiSettingsTitle = $('#apiSettingsTitle');
+  if (apiSettingsTitle) apiSettingsTitle.textContent = t('settings.apiSettings');
+  const modelSelectionTitle = $('#modelSelectionTitle');
+  if (modelSelectionTitle) modelSelectionTitle.textContent = t('settings.modelSelection');
+
+  const lblTextModel = $('#lblTextModel');
+  if (lblTextModel && lblTextModel.firstChild) {
+    lblTextModel.firstChild.nodeValue = `${t('settings.textModel')} `;
+  }
+  const textModelHint = $('#textModelHint');
+  if (textModelHint) textModelHint.textContent = t('settings.textModelHint');
+  const lblImageModelNew = $('#lblImageModel');
+  if (lblImageModelNew) lblImageModelNew.textContent = t('settings.imageModelLabel');
+  const lblVideoModelNew = $('#lblVideoModel');
+  if (lblVideoModelNew) lblVideoModelNew.textContent = t('settings.videoModelLabel');
+  const lblRefVideoModel = $('#lblRefVideoModel');
+  if (lblRefVideoModel) lblRefVideoModel.textContent = t('settings.refVideoModelLabel');
+
+  const customPlaceholder = t('settings.customModelPlaceholder');
+  ['#cfgTextModelCustom', '#cfgImageModelCustom', '#cfgVideoModelCustom', '#cfgRefVideoModelCustom'].forEach(sel => {
+    const el = $(sel);
+    if (el) el.placeholder = customPlaceholder;
+  });
+
   const lblJsonMode = $('#lblJsonMode');
   if (lblJsonMode) lblJsonMode.textContent = t('settings.jsonMode');
   const lblProxy = $('#lblProxy');

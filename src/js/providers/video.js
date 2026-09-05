@@ -6,7 +6,7 @@ const videoProvider = {
   name: 'DashScope Video Generation',
   capabilities: ['video'],
 
-  async generate({ items, overrides = {}, signal } = {}) {
+  async generate({ items, uploads, overrides = {}, signal } = {}) {
     const dsConfig = getImageConfig();
     if (!dsConfig.apiKey || !items?.length) {
       return items.map(item => ({
@@ -23,6 +23,8 @@ const videoProvider = {
       }));
     }
 
+    const hasUploads = uploads && (uploads.firstFrame || uploads.lastFrame || uploads.referenceImages?.length > 0);
+
     const clips = items.map(item => {
       const overridePrompt = overrides.promptOverrides?.[item.id];
       const overrideRef = overrides.referenceOverrides?.[item.id];
@@ -34,16 +36,47 @@ const videoProvider = {
         imageUrl: overrideRef || item.imageUrl,
         seed: overrideSeed ?? item.seed ?? 42,
       };
-    }).filter(c => c.imageUrl);
+    });
 
-    if (!clips.length) {
-      return items.map(item => ({
-        id: item.id,
-        videoPath: '',
-        status: 'skipped',
-        error: 'No reference image URL',
-      }));
+    if (!hasUploads) {
+      const filtered = clips.filter(c => c.imageUrl);
+      if (!filtered.length) {
+        return items.map(item => ({
+          id: item.id,
+          videoPath: '',
+          status: 'skipped',
+          error: 'No reference image URL',
+        }));
+      }
     }
+
+    const hasRefImages = uploads?.referenceImages?.length > 0;
+    const chosenModel = hasRefImages ? dsConfig.refVideoModel : dsConfig.videoModel;
+
+    const bodyPayload = hasUploads
+      ? {
+          clips: clips.map(c => ({ prompt: c.prompt })),
+          uploads: {
+            firstFrame: uploads.firstFrame ? { localPath: uploads.firstFrame.localPath, name: uploads.firstFrame.name } : null,
+            lastFrame: uploads.lastFrame ? { localPath: uploads.lastFrame.localPath, name: uploads.lastFrame.name } : null,
+            referenceImages: (uploads.referenceImages || []).map(r => ({ localPath: r.localPath, name: r.name })),
+          },
+          model: chosenModel,
+          duration: 5,
+          resolution: '720P',
+          seed: clips[0].seed,
+          aspectRatio: '16:9',
+        }
+      : {
+          clips: clips.filter(c => c.imageUrl).map(c => ({ prompt: c.prompt, imageUrl: c.imageUrl })),
+          model: chosenModel,
+          duration: 5,
+          resolution: '720P',
+          seed: clips[0].seed,
+          aspectRatio: '16:9',
+        };
+
+    const sentClips = hasUploads ? clips : clips.filter(c => c.imageUrl);
 
     try {
       const res = await fetch('/api/generate/video', {
@@ -53,14 +86,7 @@ const videoProvider = {
           'X-Api-Key': dsConfig.apiKey,
         },
         signal,
-        body: JSON.stringify({
-          clips: clips.map(c => ({ prompt: c.prompt, imageUrl: c.imageUrl })),
-          model: dsConfig.videoModel,
-          duration: 5,
-          resolution: '720P',
-          seed: clips[0].seed,
-          aspectRatio: '16:9',
-        }),
+        body: JSON.stringify(bodyPayload),
       });
 
       if (!res.ok) {
@@ -114,7 +140,7 @@ const videoProvider = {
           const results = taskData.result?.clips || [];
           const resultMap = new Map();
           for (const r of results) {
-            const clipId = clips[r.index]?.id;
+            const clipId = sentClips[r.index]?.id;
             if (clipId) {
               resultMap.set(clipId, {
                 videoPath: r.path || '',
@@ -127,7 +153,7 @@ const videoProvider = {
           return items.map(item => {
             const result = resultMap.get(item.id);
             if (result) return { id: item.id, ...result };
-            const clip = clips.find(c => c.id === item.id);
+            const clip = sentClips.find(c => c.id === item.id);
             if (!clip) {
               return { id: item.id, videoPath: '', status: 'skipped', error: 'No reference image URL' };
             }

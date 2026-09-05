@@ -3,10 +3,10 @@ import './providers/llm.js';
 import './providers/image.js';
 import './providers/video.js';
 import './providers/render.js';
-import { $, $$, detectGenre } from './utils.js';
+import { $, $$ } from './utils.js';
 import { state } from './state.js';
 import { STEPS } from './config.js';
-import { addFiles, removeMedia, listMedia } from './media.js';
+import { setFirstFrame, setLastFrame, addReferenceImages, removeReferenceImage, clearSlot, clearAllUploads, getUploads, hasUploads, uploadToServer } from './media.js';
 import { buildPipelineBar, showSection, setMascot, addAgentMessage } from './ui/render.js';
 import { startPipeline } from './engine.js';
 import { t, applyLang } from './i18n.js';
@@ -40,23 +40,128 @@ $('#langToggle').addEventListener('click', () => {
 
 buildPipelineBar();
 
-const fileUpload = $('#fileUpload');
-const fileInput = $('#fileInput');
+const slotConfig = {
+  firstFrame: { slotEl: '#slotFirstFrame', inputEl: '#inputFirstFrame', previewEl: '#previewFirstFrame' },
+  lastFrame: { slotEl: '#slotLastFrame', inputEl: '#inputLastFrame', previewEl: '#previewLastFrame' },
+  referenceImages: { slotEl: '#slotReferenceImages', inputEl: '#inputReferenceImages', previewEl: '#previewReferenceImages' },
+};
 
-fileUpload.addEventListener('click', () => fileInput.click());
-fileUpload.addEventListener('dragover', e => { e.preventDefault(); fileUpload.classList.add('dragover'); });
-fileUpload.addEventListener('dragleave', () => fileUpload.classList.remove('dragover'));
-fileUpload.addEventListener('drop', e => {
-  e.preventDefault();
-  fileUpload.classList.remove('dragover');
-  addFiles(e.dataTransfer.files);
-  renderMediaList();
-});
-fileInput.addEventListener('change', () => {
-  addFiles(fileInput.files);
-  renderMediaList();
-  fileInput.value = '';
-});
+function initSlotHandlers(slotName) {
+  const cfg = slotConfig[slotName];
+  const slotEl = $(cfg.slotEl);
+  const inputEl = $(cfg.inputEl);
+  if (!slotEl || !inputEl) return;
+
+  slotEl.addEventListener('click', () => inputEl.click());
+  slotEl.addEventListener('dragover', e => { e.preventDefault(); slotEl.classList.add('dragover'); });
+  slotEl.addEventListener('dragleave', () => slotEl.classList.remove('dragover'));
+  slotEl.addEventListener('drop', e => {
+    e.preventDefault();
+    slotEl.classList.remove('dragover');
+    handleSlotFiles(slotName, e.dataTransfer.files);
+  });
+  inputEl.addEventListener('change', () => {
+    handleSlotFiles(slotName, inputEl.files);
+    inputEl.value = '';
+  });
+}
+
+function handleSlotFiles(slotName, fileList) {
+  let err;
+  if (slotName === 'firstFrame') {
+    err = setFirstFrame(fileList[0]);
+  } else if (slotName === 'lastFrame') {
+    err = setLastFrame(fileList[0]);
+  } else if (slotName === 'referenceImages') {
+    err = addReferenceImages(fileList);
+  }
+  if (err) {
+    alert(err);
+    return;
+  }
+  renderUploadSlots();
+}
+
+function renderUploadSlots() {
+  const uploads = getUploads();
+
+  renderSingleSlot('firstFrame', uploads.firstFrame);
+  renderSingleSlot('lastFrame', uploads.lastFrame);
+  renderRefSlot(uploads.referenceImages);
+  updateModeHint();
+}
+
+function renderSingleSlot(slotName, entry) {
+  const cfg = slotConfig[slotName];
+  const slotEl = $(cfg.slotEl);
+  const previewEl = $(cfg.previewEl);
+  if (!slotEl || !previewEl) return;
+
+  if (entry) {
+    slotEl.classList.add('has-file');
+    previewEl.classList.remove('hidden');
+    previewEl.innerHTML = `
+      <div style="position:relative;display:inline-block">
+        <img src="${entry.previewUrl}" alt="${entry.name}">
+        <button class="slot-remove" data-slot="${slotName}" data-index="-1">&times;</button>
+      </div>`;
+    previewEl.querySelector('.slot-remove').addEventListener('click', e => {
+      e.stopPropagation();
+      clearSlot(slotName);
+      renderUploadSlots();
+    });
+  } else {
+    slotEl.classList.remove('has-file');
+    previewEl.classList.add('hidden');
+    previewEl.innerHTML = '';
+  }
+}
+
+function renderRefSlot(refImages) {
+  const cfg = slotConfig.referenceImages;
+  const slotEl = $(cfg.slotEl);
+  const previewEl = $(cfg.previewEl);
+  if (!slotEl || !previewEl) return;
+
+  if (refImages.length > 0) {
+    slotEl.classList.add('has-file');
+    previewEl.classList.remove('hidden');
+    previewEl.innerHTML = refImages.map((entry, i) => `
+      <div style="position:relative;display:inline-block">
+        <img src="${entry.previewUrl}" alt="${entry.name}">
+        <button class="slot-remove" data-index="${i}">&times;</button>
+      </div>`).join('');
+    previewEl.querySelectorAll('.slot-remove').forEach(btn => {
+      btn.addEventListener('click', e => {
+        e.stopPropagation();
+        removeReferenceImage(+btn.dataset.index);
+        renderUploadSlots();
+      });
+    });
+  } else {
+    slotEl.classList.remove('has-file');
+    previewEl.classList.add('hidden');
+    previewEl.innerHTML = '';
+  }
+}
+
+function updateModeHint() {
+  const hint = $('#uploadModeHint');
+  if (!hint) return;
+  const uploads = getUploads();
+  if (uploads.referenceImages.length > 0) {
+    hint.textContent = t('ui.uploadModeR2v');
+    hint.classList.remove('hidden');
+  } else if (uploads.firstFrame || uploads.lastFrame) {
+    hint.textContent = t('ui.uploadModeI2v');
+    hint.classList.remove('hidden');
+  } else {
+    hint.classList.add('hidden');
+  }
+}
+
+for (const name of Object.keys(slotConfig)) initSlotHandlers(name);
+renderUploadSlots();
 
 function updateDurationHint() {
   const val = Math.max(5, parseInt($('#totalDuration').value) || 30);
@@ -75,21 +180,6 @@ $$('.aspect-btn').forEach(btn => {
   });
 });
 
-function renderMediaList() {
-  const fl = $('#fileList');
-  const media = listMedia();
-  fl.innerHTML = media.map(m =>
-    `<span class="file-tag">${m.name}<span class="remove" data-id="${m.id}">×</span></span>`
-  ).join('');
-  fl.querySelectorAll('.remove').forEach(el => {
-    el.addEventListener('click', e => {
-      e.stopPropagation();
-      removeMedia(+el.dataset.id);
-      renderMediaList();
-    });
-  });
-}
-
 $$('.mode-btn').forEach(btn => {
   btn.addEventListener('click', () => {
     $$('.mode-btn').forEach(b => b.classList.remove('active'));
@@ -98,24 +188,68 @@ $$('.mode-btn').forEach(btn => {
   });
 });
 
-$('#startBtn').addEventListener('click', () => {
+$$('#styleOptions .style-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    $$('#styleOptions .style-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    state.visualStyle = btn.dataset.style;
+    const customInput = $('#customStyleInput');
+    if (btn.dataset.style === 'custom') {
+      customInput.classList.remove('hidden');
+      customInput.focus();
+    } else {
+      customInput.classList.add('hidden');
+    }
+  });
+});
+
+$('#customStyleInput').addEventListener('input', e => {
+  state.customStyle = e.target.value.trim();
+});
+
+$('#startBtn').addEventListener('click', async () => {
   const input = $('#userInput').value.trim();
-  if (!input && listMedia().length === 0) {
+  if (!input && !hasUploads()) {
     $('#userInput').focus();
     $('#userInput').style.borderColor = 'var(--rose)';
     setTimeout(() => $('#userInput').style.borderColor = '', 2000);
     return;
   }
 
+  if (hasUploads()) {
+    const uploads = getUploads();
+    if (uploads.lastFrame && !uploads.firstFrame) {
+      alert(t('ui.slotNeedFirstForLast'));
+      return;
+    }
+  }
+
   state.userInput = input;
-  state.genre = detectGenre(input);
+  state.genre = state.visualStyle === 'custom'
+    ? (state.customStyle || 'cinematic')
+    : state.visualStyle;
   state.totalDuration = Math.max(5, Math.min(120, parseInt($('#totalDuration').value) || 30));
 
   const btn = $('#startBtn');
   btn.disabled = true;
   btn.textContent = t('ui.starting');
 
-  const genreHint = state.genre !== 'fantasy' ? t('ui.genreHint', { genre: state.genre }) : '!';
+  try {
+    if (hasUploads()) {
+      btn.textContent = t('ui.uploading') || 'Uploading...';
+      await uploadToServer();
+    }
+  } catch (err) {
+    alert('Upload failed: ' + err.message);
+    btn.disabled = false;
+    btn.textContent = t('ui.startBtn') || '✨ Lights, Camera, Action!';
+    return;
+  }
+
+  const genreLabel = state.visualStyle === 'custom'
+    ? (state.customStyle || 'cinematic')
+    : t('style.' + state.visualStyle);
+  const genreHint = t('ui.genreHint', { genre: genreLabel });
   const modeHint = state.mode === 'auto'
     ? t('ui.modeAutoHint')
     : t('ui.modeCoHint');
