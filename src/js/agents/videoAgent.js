@@ -112,11 +112,15 @@ export class VideoAgent extends BaseAgent {
     });
 
     const results = await this.#generateItemsWithUploads(items, artifact, ctx, _token);
-    const data = { clips: results.map((r, i) => ({
-      shot_id: r.id,
-      videoPath: r.videoPath || '',
-      status: r.status === 'complete' ? 'complete' : 'failed',
-    })) };
+    const resultById = new Map(results.map(r => [r.id, r]));
+    const data = { clips: items.map(item => {
+      const r = resultById.get(item.id);
+      return {
+        shot_id: item.id,
+        videoPath: r?.videoPath || '',
+        status: r?.status === 'complete' ? 'complete' : 'failed',
+      };
+    }) };
 
     const complete = data.clips.filter(c => c.status === 'complete').length;
     artifact.data = data;
@@ -288,37 +292,45 @@ export class VideoAgent extends BaseAgent {
 
     addAgentMessage('🎥', t('ui.videoGenGenerating', { current: 1, total: items.length }));
 
-    const batch = pending.map(item => ({
-      id: item.id,
-      prompt: item.prompt,
-      imageUrl: item.imageUrl,
-      seed: item.seed,
-    }));
+    for (let attempt = 0; attempt < MAX_ITEM_ATTEMPTS && pending.length > 0; attempt++) {
+      const batch = pending.map(item => ({
+        id: item.id,
+        prompt: item.prompt,
+        imageUrl: item.imageUrl,
+        seed: item.seed,
+      }));
 
-    const providerResults = await provider.generate({
-      items: batch,
-      uploads: ctx.uploads,
-      overrides: {},
-      signal: token?.signal,
-    });
-
-    for (const result of providerResults) {
-      recordItemAttempt(artifact, result.id, {
-        seed: batch.find(b => b.id === result.id)?.seed,
-        prompt: batch.find(b => b.id === result.id)?.prompt,
-        referenceId: batch.find(b => b.id === result.id)?.imageUrl,
-        status: result.status,
-        error: result.error,
+      const providerResults = await provider.generate({
+        items: batch,
+        uploads: ctx.uploads,
+        overrides: {},
+        signal: token?.signal,
       });
 
-      if (result.status === 'complete') {
-        results.set(result.id, result);
+      for (const result of providerResults) {
+        const src = batch.find(b => b.id === result.id);
+        recordItemAttempt(artifact, result.id, {
+          seed: src?.seed,
+          prompt: src?.prompt,
+          referenceId: src?.imageUrl,
+          status: result.status,
+          error: result.error,
+        });
+
+        if (result.status === 'complete') {
+          results.set(result.id, result);
+          const idx = pending.findIndex(p => p.id === result.id);
+          if (idx >= 0) pending.splice(idx, 1);
+        } else if (result.status !== 'skipped' && attempt < MAX_ITEM_ATTEMPTS - 1) {
+          const item = pending.find(p => p.id === result.id);
+          if (item) item.seed = (item.seed ?? 42) + 13 * (attempt + 1) + 1;
+        }
       }
     }
 
     for (const item of pending) {
       if (!results.has(item.id)) {
-        results.set(item.id, { id: item.id, videoPath: '', status: 'failed', error: 'Generation failed' });
+        results.set(item.id, { id: item.id, videoPath: '', status: 'failed', error: 'Max retries exceeded' });
       }
     }
 
