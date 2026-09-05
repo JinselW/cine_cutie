@@ -1,6 +1,7 @@
 const DASHSCOPE_BASE = 'https://dashscope.aliyuncs.com/api/v1';
 
-export async function submitImageTask(prompt, { model = 'wanx2.1-t2i-turbo', size = '1024*1024', apiKey, seed } = {}) {
+export async function submitImageTask(prompt, { model, size = '1024*1024', apiKey, seed } = {}) {
+  if (!model) throw new Error('submitImageTask: model is required');
   const url = `${DASHSCOPE_BASE}/services/aigc/text2image/image-synthesis`;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 30000);
@@ -47,7 +48,8 @@ export async function submitImageTask(prompt, { model = 'wanx2.1-t2i-turbo', siz
   }
 }
 
-export async function submitVideoTask(prompt, imageUrl, { model = 'wanx2.1-i2v-plus', duration = 5, resolution = '720P', apiKey, seed, aspectRatio } = {}) {
+export async function submitVideoTask(prompt, imageUrl, { model, duration = 5, resolution = '720P', apiKey, seed, aspectRatio } = {}) {
+  if (!model) throw new Error('submitVideoTask: model is required');
   const url = `${DASHSCOPE_BASE}/services/aigc/video-generation/video-synthesis`;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 30000);
@@ -128,6 +130,78 @@ export async function pollTask(taskId, apiKey) {
       throw new Error('DashScope poll timed out (15s)');
     }
     console.error(`[DashScope] Poll ERROR for ${taskId}: ${err.message}`);
+    throw err;
+  }
+}
+
+export function detectVideoMode(uploads) {
+  if (uploads?.referenceImages?.length > 0) return 'r2v';
+  if (uploads?.firstFrame || uploads?.lastFrame) return 'i2v';
+  return 'legacy';
+}
+
+export async function fileToDataUri(filePath) {
+  const { readFile } = await import('fs/promises');
+  const { extname } = await import('path');
+  const buf = await readFile(filePath);
+  const ext = extname(filePath).toLowerCase();
+  const mimeMap = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp' };
+  const mime = mimeMap[ext] || 'image/png';
+  return `data:${mime};base64,${buf.toString('base64')}`;
+}
+
+export async function submitVideoTaskV2(prompt, mediaArray, { model, duration = 5, resolution = '720P', apiKey, seed, aspectRatio } = {}) {
+  if (!model) throw new Error('submitVideoTaskV2: model is required');
+  const url = `${DASHSCOPE_BASE}/services/aigc/video-generation/video-synthesis`;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 30000);
+
+  console.log(`[DashScope V2] Submitting video task: model=${model}, media=${mediaArray.length} items, duration=${duration}, resolution=${resolution}`);
+  console.log(`[DashScope V2]   prompt: ${prompt.substring(0, 80)}...`);
+
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+        'X-DashScope-Async': 'enable'
+      },
+      body: JSON.stringify({
+        model,
+        input: {
+          prompt,
+          media: mediaArray
+        },
+        parameters: {
+          duration,
+          resolution,
+          ...(seed != null && { seed }),
+          ...(aspectRatio && { aspect_ratio: aspectRatio })
+        }
+      }),
+      signal: controller.signal
+    });
+
+    clearTimeout(timeout);
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      console.error(`[DashScope V2] Video submit FAILED (${res.status}): ${text.substring(0, 300)}`);
+      throw new Error(`DashScope V2 video submit failed (${res.status}): ${text.substring(0, 300)}`);
+    }
+
+    const data = await res.json();
+    const taskId = data.output?.task_id;
+    console.log(`[DashScope V2] Video task submitted: task_id=${taskId}`);
+    return taskId;
+  } catch (err) {
+    clearTimeout(timeout);
+    if (err.name === 'AbortError') {
+      console.error(`[DashScope V2] Video submit TIMEOUT (30s)`);
+      throw new Error('DashScope V2 video submit timed out (30s)');
+    }
+    console.error(`[DashScope V2] Video submit ERROR: ${err.message}`);
     throw err;
   }
 }

@@ -1,6 +1,7 @@
 import express from 'express';
+import multer from 'multer';
 import { LRUCache } from './cache.js';
-import { submitImageTask, submitVideoTask, pollTask, downloadFile } from './dashscope.js';
+import { submitImageTask, submitVideoTask, submitVideoTaskV2, pollTask, downloadFile, detectVideoMode, fileToDataUri } from './dashscope.js';
 import { createTask, getTask, updateTask } from './tasks.js';
 import { concatVideos, checkFfmpeg } from './render.js';
 import path from 'path';
@@ -14,6 +15,28 @@ const PORT = process.env.PORT || 3006;
 
 const MEDIA_DIR = path.join(__dirname, '..', 'media');
 fs.mkdirSync(MEDIA_DIR, { recursive: true });
+
+const UPLOADS_DIR = path.join(MEDIA_DIR, 'uploads');
+fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+
+const upload = multer({
+  storage: multer.diskStorage({
+    destination: UPLOADS_DIR,
+    filename: (_req, file, cb) => {
+      const ext = path.extname(file.originalname);
+      cb(null, `${Date.now()}_${Math.random().toString(36).slice(2, 8)}${ext}`);
+    }
+  }),
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    if (/^image\//.test(file.mimetype)) cb(null, true);
+    else cb(new Error('Only image files are allowed'));
+  }
+});
+
+function isV2Model(name) {
+  return typeof name === 'string' && name.startsWith('wan2.7');
+}
 
 app.use(express.json({ limit: '10mb' }));
 
@@ -172,8 +195,21 @@ app.post('/api/generate/image', async (req, res) => {
   res.json({ taskId: task.id });
 });
 
+app.post('/api/upload', upload.array('files', 10), (req, res) => {
+  if (!req.files || req.files.length === 0) {
+    return res.status(400).json({ error: 'No files uploaded' });
+  }
+  const files = req.files.map(f => ({
+    name: f.filename,
+    path: `/api/media/uploads/${f.filename}`,
+    localPath: f.path,
+  }));
+  console.log(`[Upload] ${files.length} file(s) uploaded`);
+  res.json({ files });
+});
+
 app.post('/api/generate/video', async (req, res) => {
-  const { clips, model, duration, resolution, seed, aspectRatio } = req.body;
+  const { clips, model, duration, resolution, seed, aspectRatio, uploads } = req.body;
   const apiKey = req.headers['x-api-key'];
 
   if (!apiKey) {
@@ -184,18 +220,21 @@ app.post('/api/generate/video', async (req, res) => {
     return res.status(400).json({ error: 'Missing clips array' });
   }
 
+  const hasUploads = uploads && (uploads.firstFrame?.localPath || uploads.referenceImages?.length > 0);
+  const mode = hasUploads ? detectVideoMode(uploads) : 'legacy';
+  const effectiveModel = model;
+
+  if (!effectiveModel) {
+    return res.status(400).json({ error: 'Missing model — pick one in Settings' });
+  }
+
   const task = createTask('video', { total: clips.length });
 
   (async () => {
     const results = [];
-    console.log(`[VideoBatch] task=${task.id} starting ${clips.length} clips`);
+    console.log(`[VideoBatch] task=${task.id} starting ${clips.length} clips, mode=${mode}, model=${effectiveModel}`);
     for (let i = 0; i < clips.length; i++) {
       const clip = clips[i];
-      if (!clip.imageUrl) {
-        results.push({ index: i, status: 'error', error: 'No imageUrl provided' });
-        console.log(`[VideoBatch] task=${task.id} clip ${i + 1} SKIPPED: no imageUrl`);
-        continue;
-      }
 
       let lastError = null;
       for (let retry = 0; retry <= 2; retry++) {
@@ -207,12 +246,48 @@ app.post('/api/generate/video', async (req, res) => {
           console.log(`[VideoBatch] task=${task.id} clip ${i + 1}/${clips.length}`);
           updateTask(task.id, { status: 'running', current: i + 1, progress: Math.round((i / clips.length) * 100) });
 
-          const imageUrl = clip.imageUrl.startsWith('http')
-            ? clip.imageUrl
-            : `${req.protocol}://${req.get('host')}${clip.imageUrl}`;
-          console.log(`[VideoBatch] task=${task.id} clip ${i + 1} imageUrl=${imageUrl}`);
+          let taskId;
 
-          const taskId = await submitVideoTask(clip.prompt, imageUrl, { model, duration, resolution, apiKey, seed, aspectRatio });
+          if (hasUploads && isV2Model(effectiveModel)) {
+            const mediaArray = [];
+            if (uploads.firstFrame?.localPath) {
+              const dataUri = await fileToDataUri(uploads.firstFrame.localPath);
+              mediaArray.push({ type: 'first_frame', url: dataUri });
+            }
+            if (uploads.lastFrame?.localPath) {
+              const dataUri = await fileToDataUri(uploads.lastFrame.localPath);
+              mediaArray.push({ type: 'last_frame', url: dataUri });
+            }
+            if (uploads.referenceImages?.length > 0) {
+              for (const ref of uploads.referenceImages) {
+                if (ref.localPath) {
+                  const dataUri = await fileToDataUri(ref.localPath);
+                  mediaArray.push({ type: 'reference_image', url: dataUri });
+                }
+              }
+            }
+
+            if (mediaArray.length === 0) {
+              results.push({ index: i, status: 'error', error: 'No valid upload media' });
+              break;
+            }
+
+            console.log(`[VideoBatch V2] task=${task.id} clip ${i + 1} media=${mediaArray.length} items`);
+            taskId = await submitVideoTaskV2(clip.prompt || 'Scene animation', mediaArray, {
+              model: effectiveModel, duration, resolution, apiKey, seed, aspectRatio
+            });
+          } else {
+            if (!clip.imageUrl) {
+              results.push({ index: i, status: 'error', error: 'No imageUrl provided' });
+              console.log(`[VideoBatch] task=${task.id} clip ${i + 1} SKIPPED: no imageUrl`);
+              break;
+            }
+            const imageUrl = clip.imageUrl.startsWith('http')
+              ? clip.imageUrl
+              : `${req.protocol}://${req.get('host')}${clip.imageUrl}`;
+            console.log(`[VideoBatch] task=${task.id} clip ${i + 1} imageUrl=${imageUrl}`);
+            taskId = await submitVideoTask(clip.prompt, imageUrl, { model: effectiveModel, duration, resolution, apiKey, seed, aspectRatio });
+          }
 
           let pollResult;
           for (let attempt = 0; attempt < 240; attempt++) {
@@ -320,6 +395,14 @@ app.get('/api/task/:id', (req, res) => {
   const task = getTask(req.params.id);
   if (!task) return res.status(404).json({ error: 'Task not found' });
   res.json(task);
+});
+
+app.get('/api/media/uploads/:filename', (req, res) => {
+  const filePath = path.join(UPLOADS_DIR, path.basename(req.params.filename));
+  if (!fs.existsSync(filePath)) {
+    return res.status(404).json({ error: 'File not found' });
+  }
+  res.sendFile(filePath);
 });
 
 app.get('/api/media/:filename', (req, res) => {
