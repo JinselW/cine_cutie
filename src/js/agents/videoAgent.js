@@ -31,6 +31,12 @@ export class VideoAgent extends BaseAgent {
   }
 
   async run(ctx, _token) {
+    const hasUploads = ctx.uploads && (ctx.uploads.firstFrame || ctx.uploads.lastFrame || ctx.uploads.referenceImages?.length > 0);
+
+    if (hasUploads) {
+      return this.#runWithUploads(ctx, _token);
+    }
+
     const refImages = ctx.referenceImages;
     if (!refImages?.shots?.length) return this.#emptyResult(ctx);
 
@@ -61,6 +67,69 @@ export class VideoAgent extends BaseAgent {
         failedClips: data.clips.filter(c => c.status === 'failed').length,
         qualityScore: l2Check.verdict === QCVerdict.PASS ? 10 : l2Check.verdict === QCVerdict.CONDITIONAL_PASS ? 7 : 5,
         consistencyIssues: l2Check.issues || [],
+      },
+    };
+  }
+
+  async #runWithUploads(ctx, _token) {
+    const uploads = ctx.uploads;
+    const storyboard = ctx.storyboard;
+    const script = ctx.script;
+
+    const allStoryboardShots = [];
+    if (storyboard?.episodes) {
+      for (const ep of storyboard.episodes) {
+        for (const seg of (ep.segments || [])) {
+          for (const shot of (seg.shots || [])) allStoryboardShots.push(shot);
+        }
+      }
+    }
+
+    const shotCount = Math.max(1, allStoryboardShots.length || Math.ceil((ctx.totalDuration || 30) / 5));
+    const items = [];
+
+    for (let i = 0; i < shotCount; i++) {
+      const sbShot = allStoryboardShots[i];
+      const prompt = sbShot?.description || sbShot?.prompt || `Scene ${i + 1}`;
+      const camera = sbShot?.camera || '';
+      const motion = CAMERA_MOTION_MAP[camera] || 'subtle natural motion';
+      const videoPrompt = `${prompt}, ${motion}`;
+
+      items.push({
+        id: `upload_clip_${i}`,
+        prompt: videoPrompt,
+        imageUrl: uploads.firstFrame?.serverPath || uploads.referenceImages?.[0]?.serverPath || '',
+        seed: 42,
+        referenceId: 'uploads',
+      });
+    }
+
+    const artifact = createArtifact({
+      kind: ArtifactKind.VIDEO_CLIP,
+      stepId: 'videoGeneration',
+      data: { clips: [] },
+      status: ArtifactStatus.GENERATING,
+    });
+
+    const results = await this.#generateItemsWithUploads(items, artifact, ctx, _token);
+    const data = { clips: results.map((r, i) => ({
+      shot_id: r.id,
+      videoPath: r.videoPath || '',
+      status: r.status === 'complete' ? 'complete' : 'failed',
+    })) };
+
+    const complete = data.clips.filter(c => c.status === 'complete').length;
+    artifact.data = data;
+    artifact.status = complete > 0 ? ArtifactStatus.COMPLETE : ArtifactStatus.FAILED;
+
+    return {
+      artifacts: [artifact],
+      metadata: {
+        totalClips: data.clips.length,
+        completeClips: complete,
+        failedClips: data.clips.filter(c => c.status === 'failed').length,
+        qualityScore: complete > 0 ? 8 : 5,
+        consistencyIssues: [],
       },
     };
   }
@@ -193,6 +262,63 @@ export class VideoAgent extends BaseAgent {
     for (const item of pending) {
       if (!results.has(item.id)) {
         results.set(item.id, { id: item.id, videoPath: '', status: 'failed', error: 'Max retries exceeded' });
+      }
+    }
+
+    return [...results.values()];
+  }
+
+  async #generateItemsWithUploads(items, artifact, ctx, token) {
+    const provider = getActiveProvider('video');
+    if (!provider) {
+      return items.map(item => ({ id: item.id, status: 'failed', error: 'No provider' }));
+    }
+
+    const results = new Map();
+    const pending = [...items];
+
+    for (const item of items) {
+      recordItemAttempt(artifact, item.id, {
+        seed: item.seed,
+        prompt: item.prompt,
+        referenceId: item.referenceId,
+        status: 'pending',
+      });
+    }
+
+    addAgentMessage('🎥', t('ui.videoGenGenerating', { current: 1, total: items.length }));
+
+    const batch = pending.map(item => ({
+      id: item.id,
+      prompt: item.prompt,
+      imageUrl: item.imageUrl,
+      seed: item.seed,
+    }));
+
+    const providerResults = await provider.generate({
+      items: batch,
+      uploads: ctx.uploads,
+      overrides: {},
+      signal: token?.signal,
+    });
+
+    for (const result of providerResults) {
+      recordItemAttempt(artifact, result.id, {
+        seed: batch.find(b => b.id === result.id)?.seed,
+        prompt: batch.find(b => b.id === result.id)?.prompt,
+        referenceId: batch.find(b => b.id === result.id)?.imageUrl,
+        status: result.status,
+        error: result.error,
+      });
+
+      if (result.status === 'complete') {
+        results.set(result.id, result);
+      }
+    }
+
+    for (const item of pending) {
+      if (!results.has(item.id)) {
+        results.set(item.id, { id: item.id, videoPath: '', status: 'failed', error: 'Generation failed' });
       }
     }
 

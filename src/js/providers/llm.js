@@ -3,23 +3,149 @@ import { buildMessages } from './prompts.js';
 import { t } from '../i18n.js';
 import { addAgentMessage } from '../ui/render.js';
 
-const CFG_KEY = 'cine-cutie-llm';
+const SETTINGS_KEY = 'cine-cutie-settings';
+const OLD_LLM_KEY = 'cine-cutie-llm';
+const OLD_DS_KEY = 'cine-cutie-dashscope';
 
-let config = { endpoint: '', apiKey: '', model: '', jsonMode: true, useProxy: false };
+const PROVIDER_DEFAULTS = {
+  openai:    { endpoint: 'https://api.openai.com/v1', apiKey: '' },
+  deepseek:  { endpoint: 'https://api.deepseek.com/v1', apiKey: '' },
+  dashscope: { endpoint: 'https://dashscope.aliyuncs.com/compatible-mode/v1', apiKey: '' },
+  ark:       { endpoint: 'https://ark.cn-beijing.volces.com/api/v3', apiKey: '' },
+  kling:     { endpoint: 'https://api.klingai.com', apiKey: '' },
+  gemini:    { endpoint: 'https://generativelanguage.googleapis.com/v1beta/openai', apiKey: '' },
+};
+
+const MODEL_PRESETS = {
+  openai:    ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo'],
+  deepseek:  ['deepseek-chat', 'deepseek-reasoner'],
+  dashscope: ['qwen-plus', 'qwen-turbo', 'qwen-max'],
+  ark:       ['doubao-pro-32k', 'doubao-lite-32k'],
+  gemini:    ['gemini-2.0-flash', 'gemini-1.5-pro'],
+};
+
+const IMAGE_PRESETS = ['wanx2.1-t2i-turbo', 'wanx2.1-t2i-plus'];
+const VIDEO_PRESETS = ['wanx2.1-i2v-plus', 'wan2.7-i2v'];
+const REF_VIDEO_PRESETS = ['wan2.7-r2v'];
+
+let config = {
+  apiProviders: structuredClone(PROVIDER_DEFAULTS),
+  models: {
+    text: { provider: 'dashscope', name: 'qwen-plus' },
+    image: { name: 'wanx2.1-t2i-turbo' },
+    video: { name: 'wanx2.1-i2v-plus' },
+    refVideo: { name: 'wan2.7-r2v' },
+  },
+  jsonMode: true,
+  useProxy: false,
+};
+
+function inferProvider(modelName) {
+  if (!modelName) return null;
+  if (/gpt|o1|o3/i.test(modelName)) return 'openai';
+  if (/deepseek/i.test(modelName)) return 'deepseek';
+  if (/qwen/i.test(modelName)) return 'dashscope';
+  if (/doubao/i.test(modelName)) return 'ark';
+  if (/gemini/i.test(modelName)) return 'gemini';
+  return null;
+}
+
+function migrateOldConfig() {
+  const oldLlm = localStorage.getItem(OLD_LLM_KEY);
+  const oldDs = localStorage.getItem(OLD_DS_KEY);
+  if (!oldLlm && !oldDs) return null;
+
+  const newCfg = {
+    apiProviders: structuredClone(PROVIDER_DEFAULTS),
+    models: {
+      text: { provider: 'dashscope', name: '' },
+      image: { name: 'wanx2.1-t2i-turbo' },
+      video: { name: 'wanx2.1-i2v-plus' },
+      refVideo: { name: 'wan2.7-r2v' },
+    },
+    jsonMode: true,
+    useProxy: false,
+  };
+
+  if (oldLlm) {
+    try {
+      const old = JSON.parse(oldLlm);
+      const provider = inferProvider(old.model) || 'dashscope';
+      if (old.endpoint) newCfg.apiProviders[provider].endpoint = old.endpoint;
+      if (old.apiKey) newCfg.apiProviders[provider].apiKey = old.apiKey;
+      if (old.model) newCfg.models.text = { provider, name: old.model };
+      newCfg.jsonMode = old.jsonMode ?? true;
+      newCfg.useProxy = old.useProxy ?? false;
+    } catch {}
+  }
+
+  if (oldDs) {
+    try {
+      const old = JSON.parse(oldDs);
+      if (old.apiKey) newCfg.apiProviders.dashscope.apiKey = old.apiKey;
+      if (old.imageModel) newCfg.models.image = { name: old.imageModel };
+      if (old.videoModel) newCfg.models.video = { name: old.videoModel };
+    } catch {}
+  }
+
+  return newCfg;
+}
 
 function loadConfig() {
   try {
-    const saved = localStorage.getItem(CFG_KEY);
-    if (saved) config = { ...config, ...JSON.parse(saved) };
+    const saved = localStorage.getItem(SETTINGS_KEY);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      config = {
+        apiProviders: { ...structuredClone(PROVIDER_DEFAULTS), ...parsed.apiProviders },
+        models: {
+          text: parsed.models?.text || { provider: 'dashscope', name: '' },
+          image: parsed.models?.image || { name: 'wanx2.1-t2i-turbo' },
+          video: parsed.models?.video || { name: 'wanx2.1-i2v-plus' },
+          refVideo: parsed.models?.refVideo || { name: 'wan2.7-r2v' },
+        },
+        jsonMode: parsed.jsonMode ?? true,
+        useProxy: parsed.useProxy ?? false,
+      };
+      for (const key of Object.keys(PROVIDER_DEFAULTS)) {
+        config.apiProviders[key] = { ...PROVIDER_DEFAULTS[key], ...(parsed.apiProviders?.[key] || {}) };
+      }
+    } else {
+      const migrated = migrateOldConfig();
+      if (migrated) {
+        config = migrated;
+        saveConfig(config);
+      }
+    }
   } catch {}
 }
 
 function saveConfig(cfg) {
-  config = { ...config, ...cfg };
+  if (cfg.apiProviders) {
+    for (const key of Object.keys(PROVIDER_DEFAULTS)) {
+      if (cfg.apiProviders[key]) {
+        config.apiProviders[key] = { ...config.apiProviders[key], ...cfg.apiProviders[key] };
+      }
+    }
+  }
+  if (cfg.models) {
+    for (const k of Object.keys(cfg.models)) {
+      config.models[k] = { ...config.models[k], ...cfg.models[k] };
+    }
+  }
+  if (cfg.jsonMode !== undefined) config.jsonMode = cfg.jsonMode;
+  if (cfg.useProxy !== undefined) config.useProxy = cfg.useProxy;
+
   try {
-    localStorage.setItem(CFG_KEY, JSON.stringify(config));
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({
+      apiProviders: config.apiProviders,
+      models: config.models,
+      jsonMode: config.jsonMode,
+      useProxy: config.useProxy,
+    }));
   } catch {}
-  if (config.apiKey) {
+
+  if (isConfigured()) {
     setActiveProvider('text', 'llm');
   } else {
     setActiveProvider('text', 'template');
@@ -27,11 +153,27 @@ function saveConfig(cfg) {
 }
 
 function isConfigured() {
-  return !!(config.apiKey && config.model);
+  const { provider, name } = config.models.text;
+  return !!(name && config.apiProviders[provider]?.apiKey);
 }
 
 function getConfig() {
-  return { ...config };
+  return {
+    apiProviders: structuredClone(config.apiProviders),
+    models: structuredClone(config.models),
+    jsonMode: config.jsonMode,
+    useProxy: config.useProxy,
+  };
+}
+
+function getTextProviderEndpoint() {
+  const provider = config.models.text.provider;
+  return (config.apiProviders[provider]?.endpoint || PROVIDER_DEFAULTS[provider]?.endpoint || '').replace(/\/+$/, '');
+}
+
+function getTextProviderApiKey() {
+  const provider = config.models.text.provider;
+  return config.apiProviders[provider]?.apiKey || '';
 }
 
 loadConfig();
@@ -74,13 +216,16 @@ async function callChat(messages, { retryWithoutJsonFormat = false, signal: exte
   }
 
   const body = {
-    model: config.model,
+    model: config.models.text.name,
     messages,
     temperature: 0.8
   };
   if (config.jsonMode && !retryWithoutJsonFormat) {
     body.response_format = { type: 'json_object' };
   }
+
+  const endpoint = getTextProviderEndpoint();
+  const apiKey = getTextProviderApiKey();
 
   try {
     let url, headers;
@@ -89,15 +234,14 @@ async function callChat(messages, { retryWithoutJsonFormat = false, signal: exte
       url = '/api/chat/completions';
       headers = {
         'Content-Type': 'application/json',
-        'X-Target-Endpoint': config.endpoint || 'https://api.openai.com/v1',
-        'X-Api-Key': config.apiKey
+        'X-Target-Endpoint': endpoint || 'https://api.openai.com/v1',
+        'X-Api-Key': apiKey
       };
     } else {
-      const endpoint = (config.endpoint || 'https://api.openai.com/v1').replace(/\/+$/, '');
       url = `${endpoint}/chat/completions`;
       headers = {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${config.apiKey}`
+        'Authorization': `Bearer ${apiKey}`
       };
     }
 
@@ -270,11 +414,13 @@ const llmProvider = {
 registerProvider(llmProvider);
 
 async function testConnection() {
-  if (!config.apiKey) return { ok: false, error: 'No API key configured' };
-  if (!config.model) return { ok: false, error: 'No model specified' };
+  const apiKey = getTextProviderApiKey();
+  const model = config.models.text.name;
+  if (!apiKey) return { ok: false, error: 'No API key configured' };
+  if (!model) return { ok: false, error: 'No model specified' };
 
   try {
-    const endpoint = (config.endpoint || 'https://api.openai.com/v1').replace(/\/+$/, '');
+    const endpoint = getTextProviderEndpoint();
     const url = `${endpoint}/chat/completions`;
 
     const controller = new AbortController();
@@ -284,10 +430,10 @@ async function testConnection() {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${config.apiKey}`
+        'Authorization': `Bearer ${apiKey}`
       },
       body: JSON.stringify({
-        model: config.model,
+        model,
         messages: [{ role: 'user', content: 'Reply with the word OK' }],
         max_tokens: 5
       }),
@@ -302,7 +448,7 @@ async function testConnection() {
         return { ok: false, error: `Authentication failed (${res.status})` };
       }
       if (res.status === 404) {
-        return { ok: false, error: `Model not found: ${config.model}` };
+        return { ok: false, error: `Model not found: ${model}` };
       }
       return { ok: false, error: `HTTP ${res.status}: ${text.substring(0, 200)}` };
     }
@@ -324,4 +470,9 @@ async function chat(messages, { signal, retryWithoutJsonFormat } = {}) {
   return callChat(messages, { signal, retryWithoutJsonFormat });
 }
 
-export { saveConfig, getConfig, isConfigured, testConnection, loadConfig, consumeStepMetrics, chat };
+export {
+  saveConfig, getConfig, isConfigured, testConnection, loadConfig,
+  consumeStepMetrics, chat,
+  MODEL_PRESETS, IMAGE_PRESETS, VIDEO_PRESETS, REF_VIDEO_PRESETS,
+  PROVIDER_DEFAULTS, inferProvider,
+};

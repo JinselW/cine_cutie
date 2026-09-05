@@ -1,12 +1,14 @@
 export const state = {
   mode: 'auto',
   currentStep: -1,
-  genre: 'fantasy',
+  genre: 'cinematic',
+  visualStyle: 'cinematic',
+  customStyle: '',
   userInput: '',
   totalDuration: 30,
   aspectRatio: '16:9',
   imageSize: '1280*720',
-  media: [],
+  uploads: { firstFrame: null, lastFrame: null, referenceImages: [] },
   theme: 'dark',
   lang: 'zh',
   entities: {},
@@ -33,12 +35,14 @@ export function resetState() {
   state.paused = false;
   state.stopped = false;
   state.stepRunning = false;
-  state.genre = 'fantasy';
+  state.genre = 'cinematic';
+  state.visualStyle = 'cinematic';
+  state.customStyle = '';
   state.userInput = '';
   state.totalDuration = 30;
   state.aspectRatio = '16:9';
   state.imageSize = '1280*720';
-  state.media = [];
+  state.uploads = { firstFrame: null, lastFrame: null, referenceImages: [] };
   state.entities = {};
   for (const k of Object.keys(state.data)) state.data[k] = null;
 }
