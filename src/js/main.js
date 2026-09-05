@@ -11,6 +11,7 @@ import { buildPipelineBar, showSection, setMascot, addAgentMessage } from './ui/
 import { startPipeline } from './engine.js';
 import { t, applyLang } from './i18n.js';
 import { initSettings } from './ui/settings.js';
+import { initMascotInteraction } from './mascot-interact.js';
 
 const savedTheme = localStorage.getItem('cine-cutie-theme');
 if (savedTheme) {
@@ -39,6 +40,7 @@ $('#langToggle').addEventListener('click', () => {
 });
 
 buildPipelineBar();
+initMascotInteraction();
 
 const fileUpload = $('#fileUpload');
 const fileInput = $('#fileInput');
