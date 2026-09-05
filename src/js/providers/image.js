@@ -40,8 +40,22 @@ function buildSettingPrompt(setting, script) {
   return `Scene environment of ${setting.name}, ${setting.desc || ''}, ${style} style, wide angle establishing shot, atmospheric lighting, cinematic composition, high quality, 4k`;
 }
 
-function buildShotPrompt(shot) {
-  return shot.prompt || `${shot.description}, ${shot.type} shot, ${shot.camera} camera, cinematic, high quality`;
+function buildShotPrompt(shot, characters, genre) {
+  const style = genre || 'cinematic';
+  let base = shot.prompt || `${shot.description}, ${shot.type} shot`;
+
+  if (characters?.length) {
+    const shotText = base.toLowerCase();
+    for (const c of characters) {
+      const names = [c.name, c.enName].filter(Boolean).map(n => n.toLowerCase());
+      if (names.some(n => n && shotText.includes(n)) && c.appearance) {
+        base += `, ${c.appearance}`;
+        break;
+      }
+    }
+  }
+
+  return `${style} style, ${base}, high quality, 4k`;
 }
 
 const imageProvider = {
@@ -77,14 +91,18 @@ const imageProvider = {
       const characters = (script.characters || []).map((char, i) => ({
         id: char.id,
         name: char.name,
+        enName: char.enName || '',
         desc: char.desc,
-        imagePath: results[i]?.path || ''
+        appearance: char.appearance || '',
+        imagePath: results[i]?.path || '',
+        imageUrl: results[i]?.imageUrl || ''
       }));
       const settings = (script.settings || []).map((setting, i) => ({
         id: setting.id,
         name: setting.name,
         desc: setting.desc,
-        imagePath: results[script.characters.length + i]?.path || ''
+        imagePath: results[script.characters.length + i]?.path || '',
+        imageUrl: results[script.characters.length + i]?.imageUrl || ''
       }));
 
       return { characters, settings };
@@ -108,7 +126,8 @@ const imageProvider = {
         shots.length = maxClips;
       }
 
-      prompts = shots.map(sh => buildShotPrompt(sh));
+      const characters = context.characterDesign?.characters || [];
+      prompts = shots.map(sh => buildShotPrompt(sh, characters, genre));
       ids = shots.map(sh => sh.shot_id);
 
       const results = await generateImages(prompts, ids);
@@ -143,7 +162,8 @@ async function generateImages(prompts, ids, skipFirstMessage = false) {
       body: JSON.stringify({
         prompts,
         model: config.imageModel,
-        size: '1024*1024'
+        size: '1024*1024',
+        seed: 42
       })
     });
 
@@ -215,10 +235,12 @@ function buildPlaceholder(step, context) {
   if (step === 'characterDesign') {
     const script = context.script;
     const characters = (script?.characters || []).map(c => ({
-      id: c.id, name: c.name, desc: c.desc, imagePath: ''
+      id: c.id, name: c.name, enName: c.enName || '', desc: c.desc, appearance: c.appearance || '',
+      imagePath: '', imageUrl: ''
     }));
     const settings = (script?.settings || []).map(s => ({
-      id: s.id, name: s.name, desc: s.desc, imagePath: ''
+      id: s.id, name: s.name, desc: s.desc,
+      imagePath: '', imageUrl: ''
     }));
     return { characters, settings };
   }

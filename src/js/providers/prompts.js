@@ -26,7 +26,8 @@ OUTPUT JSON SCHEMA:
   "characters": [
     {
       "id": "string — unique id like 'char_1'",
-      "name": "string — character name",
+      "name": "string — character name in the story's language",
+      "enName": "string — English transliteration or English name for the character",
       "desc": "string — brief personality and role description",
       "appearance": "string — detailed visual appearance for image generation (clothing, hair, features, etc.)"
     }
@@ -58,7 +59,15 @@ Requirements:
 - 2-4 settings, each with vivid visual descriptions
 - 1-${maxEpisodes} episodes (limited by ${totalDuration}s total duration), each with 2-4 segments
 - Make characters visually distinctive for image generation
-- Make settings detailed enough to generate reference images`;
+- Make settings detailed enough to generate reference images
+
+STORY COHERENCE — CRITICAL:
+- The story MUST have a clear narrative arc: setup → development → climax → resolution
+- Each segment MUST logically follow from the previous one with cause-and-effect relationships
+- Characters' actions and emotions should evolve naturally across segments, not jump randomly
+- The ending should resolve the central conflict or question introduced at the beginning
+- Avoid disconnected vignettes — every segment must advance the plot or develop a character
+- Keep the story focused: ONE main conflict, resolved within the ${totalDuration}s duration`;
     }
   },
 
@@ -72,7 +81,7 @@ Requirements:
       const maxShotsPerSeg = maxClips <= 2 ? 2 : maxClips <= 6 ? 2 : 4;
 
       const scriptSummary = script
-        ? `Title: ${script.title}\nCharacters: ${(script.characters || []).map(c => `${c.name} — ${c.appearance}`).join('; ')}\nSettings: ${(script.settings || []).map(s => `${s.name} — ${s.desc}`).join('; ')}\nEpisodes: ${(script.episodes || []).map(ep => `Ep${ep.episode}: ${ep.title} — ${ep.summary}`).join('\n')}`
+        ? `Title: ${script.title}\nCharacters: ${(script.characters || []).map(c => `${c.name} (${c.enName || c.name}) — ${c.appearance}`).join('; ')}\nSettings: ${(script.settings || []).map(s => `${s.name} — ${s.desc}`).join('; ')}\nEpisodes: ${(script.episodes || []).map(ep => `Ep${ep.episode}: ${ep.title} — ${ep.summary}`).join('\n')}`
         : 'No script available';
 
       return `Create a shot-by-shot storyboard from this script.
@@ -110,10 +119,20 @@ Requirements:
 - Each episode should have 1-${maxSegmentsPerEp} segments
 - Each segment should have 1-${maxShotsPerSeg} shots
 - Shot prompts must be in English, detailed enough for image generation
+- When a character appears in a shot, use their English name (enName) in the prompt, e.g. "Mibao the cat..."
 - Include character appearance details in prompts when characters are present
 - Include setting details in prompts
 - Specify lighting and mood in each prompt
-- Duration should be 3-10 seconds per shot`;
+- Duration should be 3-10 seconds per shot
+
+SHOT-TO-SHOT CONTINUITY — CRITICAL:
+- Shots MUST form a coherent visual narrative — each shot should feel like the NEXT MOMENT after the previous one
+- Maintain consistent character positions, poses, and actions across consecutive shots within a segment
+- Use varied shot types (wide → medium → close-up) to create visual rhythm, NOT to jump to unrelated moments
+- The "description" field should describe a CONTINUOUS action that flows from the previous shot, not a disconnected scene
+- Think like a film director: each shot is a camera angle on an ONGOING action, not a separate illustration
+- If a character is sitting in shot 1, they should still be sitting (or in the process of standing up) in shot 2 — not suddenly in a different location
+- End each segment on a visual that naturally leads into the next segment`;
     }
   }
 };

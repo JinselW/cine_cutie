@@ -42,7 +42,7 @@ export const STEPS = [
     capability: 'video', accepts: [],
     agent: 'Video Director',
     dataKey: 'videoClips',
-    contextKeys: ['script', 'storyboard', 'referenceImages'],
+    contextKeys: ['script', 'storyboard', 'referenceImages', 'characterDesign'],
     genMessages: ['Setting up shots...', 'Generating video clips...', 'Reviewing motion quality...', 'Finalizing clips...']
   },
   {

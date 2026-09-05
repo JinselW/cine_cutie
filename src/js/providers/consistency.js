@@ -10,7 +10,7 @@ export function extractEntities(stepId, data) {
       entities.characterDetails = (data.characters || []).map(c => ({
         name: c.name,
         desc: c.desc?.substring(0, 80),
-        appearance: c.appearance?.substring(0, 120)
+        appearance: c.appearance?.substring(0, 200)
       }));
       entities.settingNames = (data.settings || []).map(s => s.name);
       break;
@@ -20,6 +20,8 @@ export function extractEntities(stepId, data) {
       if (!data) break;
       entities.characterImages = (data.characters || []).map(c => ({
         name: c.name,
+        appearance: c.appearance?.substring(0, 200),
+        desc: c.desc?.substring(0, 80),
         hasImage: !!c.imagePath
       }));
       break;
@@ -65,6 +67,16 @@ export function buildConsistencyConstraints(entities) {
       .map(c => `${c.name}: ${c.desc}`)
       .join('; ');
     parts.push(`Character details: ${details}`);
+  }
+
+  if (entities.characterImages) {
+    const visuals = entities.characterImages
+      .filter(c => c.appearance)
+      .map(c => `${c.name}: ${c.appearance}`)
+      .join('; ');
+    if (visuals) {
+      parts.push(`Character visual appearance (MUST match): ${visuals}`);
+    }
   }
 
   if (entities.settingNames && entities.settingNames.length > 0) {

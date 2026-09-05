@@ -1,11 +1,11 @@
 const DASHSCOPE_BASE = 'https://dashscope.aliyuncs.com/api/v1';
 
-export async function submitImageTask(prompt, { model = 'wanx2.1-t2i-turbo', size = '1024*1024', apiKey } = {}) {
+export async function submitImageTask(prompt, { model = 'wanx2.1-t2i-turbo', size = '1024*1024', apiKey, seed } = {}) {
   const url = `${DASHSCOPE_BASE}/services/aigc/text2image/image-synthesis`;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 30000);
 
-  console.log(`[DashScope] Submitting image task: model=${model}, size=${size}`);
+  console.log(`[DashScope] Submitting image task: model=${model}, size=${size}${seed != null ? `, seed=${seed}` : ''}`);
   console.log(`[DashScope]   prompt: ${prompt.substring(0, 80)}...`);
 
   try {
@@ -19,7 +19,7 @@ export async function submitImageTask(prompt, { model = 'wanx2.1-t2i-turbo', siz
       body: JSON.stringify({
         model,
         input: { prompt },
-        parameters: { size, n: 1 }
+        parameters: { size, n: 1, ...(seed != null && { seed }) }
       }),
       signal: controller.signal
     });
@@ -47,12 +47,12 @@ export async function submitImageTask(prompt, { model = 'wanx2.1-t2i-turbo', siz
   }
 }
 
-export async function submitVideoTask(prompt, imageUrl, { model = 'wanx2.1-i2v-turbo', duration = 5, resolution = '720P', apiKey } = {}) {
+export async function submitVideoTask(prompt, imageUrl, { model = 'wanx2.1-i2v-turbo', duration = 5, resolution = '720P', apiKey, seed } = {}) {
   const url = `${DASHSCOPE_BASE}/services/aigc/video-generation/video-synthesis`;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 30000);
 
-  console.log(`[DashScope] Submitting video task: model=${model}, duration=${duration}, resolution=${resolution}`);
+  console.log(`[DashScope] Submitting video task: model=${model}, duration=${duration}, resolution=${resolution}${seed != null ? `, seed=${seed}` : ''}`);
   console.log(`[DashScope]   img_url: ${imageUrl}`);
   console.log(`[DashScope]   prompt: ${prompt.substring(0, 80)}...`);
 
@@ -70,7 +70,7 @@ export async function submitVideoTask(prompt, imageUrl, { model = 'wanx2.1-i2v-t
           prompt,
           img_url: imageUrl
         },
-        parameters: { duration, resolution }
+        parameters: { duration, resolution, ...(seed != null && { seed }) }
       }),
       signal: controller.signal
     });
