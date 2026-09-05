@@ -117,6 +117,26 @@
 .duration-input-wrap input:focus{border-color:var(--gold)}
 .duration-hint{font-size:0.78rem;color:var(--cream3)}
 
+.aspect-row{
+  margin-top:14px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;
+}
+.aspect-row label{
+  font-size:0.85rem;font-weight:600;color:var(--cream2);white-space:nowrap;
+}
+.aspect-options{display:flex;gap:8px;flex-wrap:wrap}
+.aspect-btn{
+  display:flex;flex-direction:column;align-items:center;gap:4px;
+  padding:8px 10px;border-radius:var(--radius-xs);border:1px solid var(--glass-border);
+  background:var(--glass);color:var(--cream2);cursor:pointer;
+  transition:all var(--transition);font-family:var(--font);
+}
+.aspect-btn:hover{background:var(--glass2);border-color:var(--cream3)}
+.aspect-btn.active{border-color:var(--gold);background:rgba(240,192,64,0.08);color:var(--cream)}
+.ratio-shape{
+  display:block;border:1.5px solid currentColor;border-radius:2px;
+}
+.ratio-label{font-size:0.72rem;font-weight:600}
+
 .mode-toggle{display:flex;gap:10px;margin-top:20px}
 .mode-btn{
   flex:1;padding:14px 16px;border-radius:var(--radius-sm);border:1px solid var(--glass-border);

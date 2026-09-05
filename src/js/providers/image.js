@@ -1,10 +1,11 @@
 import { registerProvider } from './registry.js';
 import { addAgentMessage } from '../ui/render.js';
 import { t } from '../i18n.js';
+import { state } from '../state.js';
 
 const CFG_KEY = 'cine-cutie-dashscope';
 
-let config = { apiKey: '', imageModel: 'wanx2.1-t2i-turbo', videoModel: 'wanx2.1-i2v-turbo' };
+let config = { apiKey: '', imageModel: 'wanx2.1-t2i-turbo', videoModel: 'wanx2.1-i2v-plus' };
 
 function loadConfig() {
   try {
@@ -162,7 +163,7 @@ async function generateImages(prompts, ids, skipFirstMessage = false) {
       body: JSON.stringify({
         prompts,
         model: config.imageModel,
-        size: '1024*1024',
+        size: state.imageSize,
         seed: 42
       })
     });
@@ -177,7 +178,7 @@ async function generateImages(prompts, ids, skipFirstMessage = false) {
     const results = [];
     const startTime = Date.now();
     const MAX_WAIT = 10 * 60 * 1000;
-    let lastProgress = 0;
+    let lastProgress = skipFirstMessage ? 0 : 1;
 
     for (let attempt = 0; attempt < 200; attempt++) {
       if (Date.now() - startTime > MAX_WAIT) {

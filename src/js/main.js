@@ -66,6 +66,15 @@ function updateDurationHint() {
 $('#totalDuration').addEventListener('input', updateDurationHint);
 updateDurationHint();
 
+$$('.aspect-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    $$('.aspect-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    state.aspectRatio = btn.dataset.ratio;
+    state.imageSize = btn.dataset.size;
+  });
+});
+
 function renderMediaList() {
   const fl = $('#fileList');
   const media = listMedia();

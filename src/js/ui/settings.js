@@ -38,7 +38,7 @@ function openModal() {
   const dsImgInput = $('#cfgImageModel');
   if (dsImgInput) dsImgInput.value = dsCfg.imageModel || 'wanx2.1-t2i-turbo';
   const dsVidInput = $('#cfgVideoModel');
-  if (dsVidInput) dsVidInput.value = dsCfg.videoModel || 'wanx2.1-i2v-turbo';
+  if (dsVidInput) dsVidInput.value = dsCfg.videoModel || 'wanx2.1-i2v-plus';
 
   clearStatus();
   modal.classList.remove('hidden');
@@ -63,7 +63,7 @@ function handleSave() {
       saveDashScopeConfig({
         apiKey: dsKeyEl.value.trim(),
         imageModel: ($('#cfgImageModel')?.value.trim() || 'wanx2.1-t2i-turbo'),
-        videoModel: ($('#cfgVideoModel')?.value.trim() || 'wanx2.1-i2v-turbo')
+        videoModel: ($('#cfgVideoModel')?.value.trim() || 'wanx2.1-i2v-plus')
       });
     }
     closeModal();
@@ -88,7 +88,7 @@ function handleSave() {
     saveDashScopeConfig({
       apiKey: dsKeyEl.value.trim(),
       imageModel: ($('#cfgImageModel')?.value.trim() || 'wanx2.1-t2i-turbo'),
-      videoModel: ($('#cfgVideoModel')?.value.trim() || 'wanx2.1-i2v-turbo')
+      videoModel: ($('#cfgVideoModel')?.value.trim() || 'wanx2.1-i2v-plus')
     });
   }
 

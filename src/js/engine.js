@@ -2,12 +2,12 @@ import { STEPS, dataKeyOf } from './config.js';
 import { state } from './state.js';
 import { runAgent } from './agents.js';
 import { t } from './i18n.js';
-import { updatePipeline, showGenerating, setMascot, addAgentMessage } from './ui/render.js';
+import { updatePipeline, showGenerating, addAgentMessage, setGenAnim, clearCurrentMessages, waitForResume, getGenAnim } from './ui/render.js';
 import {
   renderScript, renderCharacterDesign, renderStoryboard,
   renderReferenceImages, renderVideoGeneration, renderPostProduction,
-  showCompletion
 } from './ui/views.js';
+import { showCompletion } from './navigation.js';
 import { sleep } from './utils.js';
 import { isConfigured } from './providers/llm.js';
 import { resetLog } from './observability.js';
@@ -26,10 +26,11 @@ function renderStep(stepId, result, onAdvance) {
   if (fn) fn(result, onAdvance);
 }
 
-let genAnim = null;
-
 export async function startPipeline() {
   state.currentStep = -1;
+  state.viewingStep = null;
+  state.stopped = false;
+  state.paused = false;
   resetLog();
   await advanceStep();
 }
@@ -37,14 +38,17 @@ export async function startPipeline() {
 export async function advanceStep() {
   state.currentStep++;
   if (state.currentStep >= STEPS.length) {
+    state.viewingStep = null;
     showCompletion();
     return;
   }
 
   const step = STEPS[state.currentStep];
+  clearCurrentMessages();
   updatePipeline(state.currentStep, 'active');
 
-  genAnim = showGenerating(state.currentStep);
+  showGenerating(state.currentStep);
+  state.stepRunning = true;
 
   const delay = isConfigured() ? 0 : (3000 + Math.random() * 2000);
   const [result] = await Promise.all([
@@ -52,12 +56,24 @@ export async function advanceStep() {
     sleep(delay)
   ]);
 
-  genAnim.stop();
+  await waitForResume();
+  if (state.stopped) return;
+
+  const currentAnim = getGenAnim();
+  if (currentAnim) currentAnim.stop();
+  setGenAnim(null);
+  state.stepRunning = false;
   state.data[dataKeyOf(step)] = result;
   updatePipeline(state.currentStep, 'done');
 
-  const onAdvance = () => advanceStep();
+  if (state.viewingStep !== null) {
+    if (state.mode === 'auto') {
+      setTimeout(() => advanceStep(), 2000);
+    }
+    return;
+  }
 
+  const onAdvance = () => advanceStep();
   renderStep(step.id, result, onAdvance);
 }
 
@@ -68,16 +84,25 @@ export async function reviseStep(stepId, feedback) {
   updatePipeline(stepIndex, 'active');
 
   const step = STEPS[stepIndex];
+  clearCurrentMessages();
   const stepLabel = t(step.labelKey);
   addAgentMessage(step.icon, t('ui.receivedFeedback', { step: stepLabel, feedback }));
 
-  genAnim = showGenerating(stepIndex);
+  showGenerating(stepIndex);
+  state.stepRunning = true;
   const delay = isConfigured() ? 0 : (2500 + Math.random() * 1500);
   const [result] = await Promise.all([
     runAgent(stepId, feedback),
     sleep(delay)
   ]);
-  genAnim.stop();
+
+  await waitForResume();
+  if (state.stopped) return;
+
+  const currentAnim = getGenAnim();
+  if (currentAnim) currentAnim.stop();
+  setGenAnim(null);
+  state.stepRunning = false;
 
   state.data[dataKeyOf(step)] = result;
   updatePipeline(stepIndex, 'done');
@@ -85,7 +110,6 @@ export async function reviseStep(stepId, feedback) {
   addAgentMessage(step.icon, t('ui.revisionComplete'));
 
   const onAdvance = () => advanceStep();
-
   renderStep(stepId, result, onAdvance);
 }
 

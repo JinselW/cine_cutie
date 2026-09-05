@@ -64,6 +64,11 @@ const en = {
   'ui.mix': 'Mix',
   'ui.output': 'Output',
   'ui.duration': 'Duration',
+  'ui.aspectRatio': 'Aspect Ratio',
+  'ui.pause': 'Pause',
+  'ui.resume': 'Resume',
+  'ui.stop': 'Stop',
+  'ui.stepPaused': 'Paused',
 
   'ui.planningTitle': 'Creative Direction',
   'ui.planningTheme': 'Theme',
@@ -282,6 +287,11 @@ const zh = {
   'ui.mix': '混音',
   'ui.output': '输出',
   'ui.duration': '时长',
+  'ui.aspectRatio': '画面比例',
+  'ui.pause': '暂停',
+  'ui.resume': '继续',
+  'ui.stop': '停止',
+  'ui.stepPaused': '已暂停',
 
   'ui.planningTitle': '创意方向',
   'ui.planningTheme': '主题',
@@ -492,6 +502,9 @@ export function applyLang() {
     const clips = Math.ceil(val / 5);
     durationHint.textContent = t('ui.durationInputHint', { count: clips });
   }
+
+  const lblAspectRatio = $('#lblAspectRatio');
+  if (lblAspectRatio) lblAspectRatio.textContent = t('ui.aspectRatio');
 
   const settingsTitle = $('#settingsTitle');
   if (settingsTitle) settingsTitle.textContent = t('settings.title');

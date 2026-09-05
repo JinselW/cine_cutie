@@ -2,6 +2,7 @@ import { registerProvider } from './registry.js';
 import { addAgentMessage } from '../ui/render.js';
 import { t } from '../i18n.js';
 import { getConfig as getImageConfig } from './image.js';
+import { state } from '../state.js';
 
 const videoProvider = {
   id: 'video',
@@ -90,7 +91,8 @@ const videoProvider = {
             model: dsConfig.videoModel,
             duration: 5,
             resolution: '720P',
-            seed: 42
+            seed: 42,
+            aspectRatio: state.aspectRatio
           })
         });
 
