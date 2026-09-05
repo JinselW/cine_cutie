@@ -3,6 +3,7 @@ export const state = {
   currentStep: -1,
   genre: 'fantasy',
   userInput: '',
+  totalDuration: 30,
   media: [],
   theme: 'dark',
   lang: 'zh',
@@ -11,17 +12,12 @@ export const state = {
     providers: {}
   },
   data: {
-    planning: null,
-    screenplay: null,
-    characters: null,
-    visualDesign: null,
+    script: null,
+    characterDesign: null,
     storyboard: null,
-    shots: null,
-    curatedShots: null,
-    editTimeline: null,
-    audio: null,
-    postProduction: null,
-    video: null
+    referenceImages: null,
+    videoClips: null,
+    finalVideo: null
   }
 };
 
@@ -29,6 +25,7 @@ export function resetState() {
   state.currentStep = -1;
   state.genre = 'fantasy';
   state.userInput = '';
+  state.totalDuration = 30;
   state.media = [];
   state.entities = {};
   for (const k of Object.keys(state.data)) state.data[k] = null;

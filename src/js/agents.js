@@ -11,7 +11,7 @@ function buildContext(stepId) {
   const d = state.data;
   const constraints = buildConsistencyConstraints(state.entities);
 
-  const ctx = { userInput: state.userInput, genre: state.genre, media: state.media, constraints };
+  const ctx = { userInput: state.userInput, genre: state.genre, media: state.media, totalDuration: state.totalDuration, constraints };
   for (const key of keys) {
     if (d[key] != null) ctx[key] = d[key];
   }

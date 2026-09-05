@@ -5,13 +5,18 @@ import { setMascot } from './render.js';
 import { t } from '../i18n.js';
 import { getExecutionLog, getTotalTokens, getAverageQuality } from '../observability.js';
 
+function mediaUrl(p) {
+  if (!p) return '';
+  return p.startsWith('/api/media/') ? p : '/api/media/' + p;
+}
+
 function feedbackPanel(stepId, approveKey = 'ui.approve') {
   return `
     <div class="feedback-area" style="width:100%">
       <textarea id="feedbackInput" placeholder="${t('ui.feedbackPlaceholder')}"></textarea>
       <div class="feedback-hint">${t('ui.feedbackHint')}</div>
       <div class="action-row" style="margin-top:10px">
-        <button class="action-btn primary" id="approveBtn">✅ ${t(approveKey)}</button>
+        <button class="action-btn primary" id="approveBtn">${t(approveKey)}</button>
         <button class="action-btn rose" id="reviseBtn">${t('ui.revise')}</button>
       </div>
     </div>
@@ -39,353 +44,208 @@ function bindFeedback(stepId, approveCallback) {
   });
 }
 
-export function renderPlanning(data, onAdvance) {
+export function renderScript(data, onAdvance) {
   const el = $('#stepContent');
-  const keyElements = (data.keyElements || []).map(e => `<li style="color:var(--cream2);font-size:0.85rem;margin-bottom:4px">${escapeHtml(e)}</li>`).join('');
-  const refs = (data.visualReferences || []).map(r => `<span class="film-ref">${escapeHtml(r)}</span>`).join('');
+  const chars = (data.characters || []).map(c => `
+    <div class="char-card">
+      <div class="char-name">${escapeHtml(c.name)}</div>
+      <div class="char-desc">${escapeHtml(c.desc)}</div>
+      <div style="font-size:0.75rem;color:var(--cream3);margin-top:4px;font-style:italic">${escapeHtml(c.appearance || '')}</div>
+    </div>
+  `).join('');
+
+  const settings = (data.settings || []).map(s => `
+    <div style="background:var(--bg3);border-radius:var(--radius-xs);padding:12px">
+      <div style="font-size:0.85rem;color:var(--cream);font-weight:600">${escapeHtml(s.name)}</div>
+      <div style="font-size:0.78rem;color:var(--cream3);margin-top:4px">${escapeHtml(s.desc)}</div>
+    </div>
+  `).join('');
+
+  const episodes = (data.episodes || []).map(ep => `
+    <div style="background:var(--bg3);border-radius:var(--radius-xs);padding:12px;margin-bottom:8px">
+      <div style="font-size:0.85rem;color:var(--gold);font-weight:700">${escapeHtml(ep.title)}</div>
+      <div style="font-size:0.78rem;color:var(--cream2);margin-top:4px">${escapeHtml(ep.summary)}</div>
+      <div style="margin-top:8px">
+        ${(ep.segments || []).map(seg => `
+          <div style="font-size:0.75rem;color:var(--cream3);padding:2px 0">
+            <span style="color:var(--cream2)">${escapeHtml(seg.title)}</span> — ${escapeHtml(seg.description)}
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  `).join('');
 
   el.innerHTML = `
     <div class="result-card">
-      <h3>🧠 ${t('ui.planningTitle')}</h3>
+      <h3>${t('ui.scriptTitle', { title: escapeHtml(data.title) })}</h3>
+      <div style="color:var(--cream2);font-size:0.85rem;margin-bottom:12px;font-style:italic">${escapeHtml(data.logline)}</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
         <div style="background:var(--bg3);border-radius:var(--radius-xs);padding:12px">
-          <div style="font-size:0.75rem;color:var(--gold);font-weight:700;margin-bottom:4px">${t('ui.planningTheme')}</div>
-          <div style="font-size:0.9rem;color:var(--cream)">${escapeHtml(data.theme)}</div>
+          <div style="font-size:0.75rem;color:var(--gold);font-weight:700;margin-bottom:4px">${t('ui.scriptCharacters')}</div>
+          ${chars || '<div style="color:var(--cream3);font-size:0.8rem">—</div>'}
         </div>
         <div style="background:var(--bg3);border-radius:var(--radius-xs);padding:12px">
-          <div style="font-size:0.75rem;color:var(--gold);font-weight:700;margin-bottom:4px">${t('ui.planningTone')}</div>
-          <div style="font-size:0.9rem;color:var(--cream)">${escapeHtml(data.tone)}</div>
+          <div style="font-size:0.75rem;color:var(--gold);font-weight:700;margin-bottom:4px">${t('ui.scriptSettings')}</div>
+          ${settings || '<div style="color:var(--cream3);font-size:0.8rem">—</div>'}
         </div>
       </div>
-      <div style="background:var(--bg3);border-radius:var(--radius-xs);padding:12px;margin-bottom:12px">
-        <div style="font-size:0.75rem;color:var(--gold);font-weight:700;margin-bottom:4px">${t('ui.planningDirection')}</div>
-        <div style="font-size:0.85rem;color:var(--cream2);line-height:1.6">${escapeHtml(data.creativeDirection)}</div>
-      </div>
-      <div style="background:var(--bg3);border-radius:var(--radius-xs);padding:12px;margin-bottom:12px">
-        <div style="font-size:0.75rem;color:var(--gold);font-weight:700;margin-bottom:8px">${t('ui.planningKeyElements')}</div>
-        <ul style="margin:0;padding-left:18px">${keyElements}</ul>
-      </div>
-      <div style="background:var(--bg3);border-radius:var(--radius-xs);padding:12px">
-        <div style="font-size:0.75rem;color:var(--gold);font-weight:700;margin-bottom:8px">${t('ui.planningReferences')}</div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap">${refs}</div>
+      <div>
+        <div style="font-size:0.75rem;color:var(--gold);font-weight:700;margin-bottom:8px">${t('ui.scriptEpisodes')}</div>
+        ${episodes}
       </div>
     </div>
     <div class="action-row" id="actionRow"></div>
   `;
 
   if (state.mode === 'interactive') {
-    $('#actionRow').innerHTML = feedbackPanel('planning', 'ui.approvePlan');
-    bindFeedback('planning', onAdvance);
+    $('#actionRow').innerHTML = feedbackPanel('script', 'ui.approveScript');
+    bindFeedback('script', onAdvance);
   } else {
     autoAdvance(2000, onAdvance);
   }
   setMascot('happy');
 }
 
-export function renderScreenplay(data, onAdvance) {
+export function renderCharacterDesign(data, onAdvance) {
   const el = $('#stepContent');
-  el.innerHTML = `
-    <div class="result-card">
-      <h3>${t('ui.screenplayHeader', { title: escapeHtml(data.title) })}</h3>
-      <div class="content" id="screenplayContent">${escapeHtml(data.text)}</div>
+  const { isConfigured: dsConfigured } = getDashScopeStatus();
+
+  const charCards = (data.characters || []).map(c => `
+    <div class="char-card" style="text-align:center">
+      ${c.imagePath
+        ? `<img src="${mediaUrl(c.imagePath)}" alt="${escapeHtml(c.name)}" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:var(--radius-xs);margin-bottom:8px">`
+        : `<div style="width:100%;aspect-ratio:1;background:var(--bg3);border-radius:var(--radius-xs);display:flex;align-items:center;justify-content:center;margin-bottom:8px;color:var(--cream3);font-size:0.75rem">${t('ui.charDesignNoImage')}</div>`}
+      <div class="char-name">${escapeHtml(c.name)}</div>
+      <div class="char-desc">${escapeHtml(c.desc)}</div>
     </div>
-    <div class="action-row" id="actionRow"></div>
-  `;
-  const actions = $('#actionRow');
-  if (state.mode === 'interactive') {
-    actions.innerHTML = feedbackPanel('screenplay') + `
-      <div class="action-row" style="margin-top:8px">
-        <button class="action-btn" id="editBtn">${t('ui.editDirectly')}</button>
-      </div>
-    `;
-    bindFeedback('screenplay', () => {
-      if ($('#screenplayContent').contentEditable === 'true') {
-        state.data.screenplay.text = $('#screenplayContent').textContent;
-      }
-      onAdvance();
-    });
-    const editBtn = $('#editBtn');
-    if (editBtn) editBtn.addEventListener('click', () => {
-      const content = $('#screenplayContent');
-      content.contentEditable = content.contentEditable === 'true' ? 'false' : 'true';
-      editBtn.textContent = content.contentEditable === 'true' ? t('ui.saveEdits') : t('ui.editDirectly');
-    });
-  } else {
-    autoAdvance(1500, onAdvance);
-  }
-  setMascot('happy');
-}
+  `).join('');
 
-export function renderCharacters(data, onAdvance) {
-  const el = $('#stepContent');
-  let html = '<div class="char-grid">';
-  data.forEach((char, i) => {
-    html += `
-      <div class="char-card" style="animation-delay:${i * 0.1}s">
-        <div class="char-avatar" style="background:${char.color}20;border:2px solid ${char.color}">${char.emoji}</div>
-        <div class="char-name">${escapeHtml(char.name)}</div>
-        <div class="char-role">${escapeHtml(char.role)}</div>
-        <div class="char-desc">${escapeHtml(char.desc)}</div>
-      </div>
-    `;
-  });
-  html += '</div><div class="action-row" id="actionRow"></div>';
-  el.innerHTML = html;
-
-  if (state.mode === 'interactive') {
-    $('#actionRow').innerHTML = feedbackPanel('characters', 'ui.approveCharacters');
-    bindFeedback('characters', onAdvance);
-  } else {
-    autoAdvance(1500, onAdvance);
-  }
-  setMascot('happy');
-}
-
-export function renderVisualDesign(data, onAdvance) {
-  const el = $('#stepContent');
-  let swatches = '';
-  data.palette.forEach(c => {
-    swatches += `
-      <div class="color-swatch" style="background:${c.hex}">
-        <div class="swatch-label">${escapeHtml(c.name)}</div>
-        <div class="swatch-hex">${c.hex}</div>
-        <div class="swatch-role">${escapeHtml(c.role)}</div>
-      </div>
-    `;
-  });
+  const settingCards = (data.settings || []).map(s => `
+    <div style="text-align:center">
+      ${s.imagePath
+        ? `<img src="${mediaUrl(s.imagePath)}" alt="${escapeHtml(s.name)}" style="width:100%;aspect-ratio:16/9;object-fit:cover;border-radius:var(--radius-xs);margin-bottom:8px">`
+        : `<div style="width:100%;aspect-ratio:16/9;background:var(--bg3);border-radius:var(--radius-xs);display:flex;align-items:center;justify-content:center;color:var(--cream3);font-size:0.75rem">${t('ui.charDesignNoImage')}</div>`}
+      <div style="font-size:0.85rem;color:var(--cream);font-weight:600">${escapeHtml(s.name)}</div>
+      <div style="font-size:0.75rem;color:var(--cream3)">${escapeHtml(s.desc)}</div>
+    </div>
+  `).join('');
 
   el.innerHTML = `
     <div class="result-card">
-      <h3>${t('ui.visualStyleHeader', { style: escapeHtml(data.style) })}</h3>
-      <p style="color:var(--cream2);font-size:0.9rem;line-height:1.7;margin-bottom:16px">${escapeHtml(data.description)}</p>
-      <div class="color-swatch-grid">${swatches}</div>
+      <h3>🎨 ${t('ui.charDesignTitle')}</h3>
+      ${!dsConfigured ? `<div style="background:var(--bg3);border-radius:var(--radius-xs);padding:12px;margin-bottom:16px;color:var(--gold);font-size:0.85rem">${t('ui.charDesignConfigNeeded')}</div>` : ''}
+      <div style="font-size:0.75rem;color:var(--gold);font-weight:700;margin-bottom:8px">${t('ui.charDesignCharacters')}</div>
+      <div class="char-grid">${charCards}</div>
     </div>
     <div class="result-card">
-      <h3>${t('ui.lighting')}</h3>
-      <div class="content">${escapeHtml(data.lighting)}</div>
-    </div>
-    <div class="result-card">
-      <h3>${t('ui.cameraStyle')}</h3>
-      <div class="content">${escapeHtml(data.cameraStyle)}</div>
+      <h3>${t('ui.charDesignSettings')}</h3>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px">${settingCards}</div>
     </div>
     <div class="action-row" id="actionRow"></div>
   `;
 
   if (state.mode === 'interactive') {
-    $('#actionRow').innerHTML = feedbackPanel('visualDesign', 'ui.approveDesign');
-    bindFeedback('visualDesign', onAdvance);
+    $('#actionRow').innerHTML = feedbackPanel('characterDesign', 'ui.approveCharacterDesign');
+    bindFeedback('characterDesign', onAdvance);
   } else {
-    autoAdvance(1500, onAdvance);
+    autoAdvance(2000, onAdvance);
   }
   setMascot('happy');
 }
 
 export function renderStoryboard(data, onAdvance) {
   const el = $('#stepContent');
-  let html = '<div class="storyboard-grid">';
-  data.forEach((scene, i) => {
-    html += `
-      <div class="scene-card" style="animation-delay:${i * 0.08}s">
-        <div class="scene-thumb" style="background:${scene.color}">
-          <span>${scene.icon}</span>
+
+  const episodes = (data.episodes || []).map(ep => {
+    const shots = (ep.segments || []).flatMap((seg, si) =>
+      (seg.shots || []).map((sh, shi) => `
+        <div style="background:var(--bg3);border-radius:var(--radius-xs);padding:10px">
+          <div style="font-size:0.75rem;color:var(--gold);font-weight:700">${t('ui.storyboardShot', { num: si + 1 })}</div>
+          <div style="font-size:0.8rem;color:var(--cream);margin-top:4px">${escapeHtml(sh.description)}</div>
+          <div style="font-size:0.7rem;color:var(--cream3);margin-top:4px">${escapeHtml(sh.type)} · ${escapeHtml(sh.camera)} · ${t('ui.storyboardDuration', { seconds: sh.duration })}</div>
         </div>
-        <div class="scene-info">
-          <div class="scene-num">${t('ui.scenePrefix', { num: scene.num })}</div>
-          <div class="scene-title">${escapeHtml(scene.title)}</div>
-          <div class="scene-desc">${escapeHtml(scene.desc)}</div>
-        </div>
+      `)
+    ).join('');
+
+    return `
+      <div class="result-card">
+        <h3>${t('ui.storyboardEpisode', { num: ep.episode })}</h3>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px">${shots}</div>
       </div>
     `;
-  });
-  html += '</div><div class="action-row" id="actionRow"></div>';
-  el.innerHTML = html;
+  }).join('');
+
+  el.innerHTML = `
+    <div style="margin-bottom:8px;font-size:0.85rem;color:var(--cream2)">${t('ui.storyboardTitle')}</div>
+    ${episodes}
+    <div class="action-row" id="actionRow"></div>
+  `;
 
   if (state.mode === 'interactive') {
     $('#actionRow').innerHTML = feedbackPanel('storyboard', 'ui.approveStoryboard');
     bindFeedback('storyboard', onAdvance);
   } else {
-    autoAdvance(1500, onAdvance);
+    autoAdvance(2000, onAdvance);
   }
   setMascot('happy');
 }
 
-export function renderShotGen(shots, storyboard, onAdvance) {
+export function renderReferenceImages(data, onAdvance) {
   const el = $('#stepContent');
-  let html = '';
-  storyboard.forEach(scene => {
-    const takes = shots[scene.num] || [];
-    html += `<div class="result-card"><h3>🎥 ${t('ui.scenePrefix', { num: scene.num })}: ${escapeHtml(scene.title)}</h3><div class="take-grid">`;
-    takes.forEach(take => {
-      const statusColor = take.label === 'perfect' ? '#00e5a0' : take.label === 'great' ? 'var(--gold)' : take.label === 'good' ? 'var(--cream2)' : 'var(--rose)';
-      const qualityLabel = t(`quality.${take.label}`);
-      html += `
-        <div class="take-card">
-          <div class="take-header">
-            <span class="take-num">${t('ui.takePrefix', { num: take.takeNum })}</span>
-            <span class="take-badge" style="background:${statusColor}20;color:${statusColor};border:1px solid ${statusColor}">${qualityLabel}</span>
-          </div>
-          <div class="take-angle">${escapeHtml(take.angle)}</div>
-          <div class="take-comp">${escapeHtml(take.composition)}</div>
-          <div class="take-score">
-            <div class="score-bar"><div class="score-fill" style="width:${take.score}%;background:${statusColor}"></div></div>
-            <span class="score-num">${take.score}/100</span>
-          </div>
-        </div>
-      `;
-    });
-    html += '</div></div>';
-  });
-  html += '<div class="action-row" id="actionRow"></div>';
-  el.innerHTML = html;
+  const { isConfigured: dsConfigured } = getDashScopeStatus();
+
+  const shots = (data.shots || []).map(sh => `
+    <div style="text-align:center">
+      ${sh.imagePath
+        ? `<img src="${mediaUrl(sh.imagePath)}" alt="${escapeHtml(sh.shot_id)}" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:var(--radius-xs);margin-bottom:4px">`
+        : `<div style="width:100%;aspect-ratio:1;background:var(--bg3);border-radius:var(--radius-xs);display:flex;align-items:center;justify-content:center;color:var(--cream3);font-size:0.7rem;margin-bottom:4px">${sh.status === 'pending' ? t('ui.refImagesPending') : '—'}</div>`}
+      <div style="font-size:0.7rem;color:var(--cream3)">${escapeHtml(sh.shot_id)}</div>
+    </div>
+  `).join('');
+
+  el.innerHTML = `
+    <div class="result-card">
+      <h3>🖼️ ${t('ui.refImagesTitle')}</h3>
+      ${!dsConfigured ? `<div style="background:var(--bg3);border-radius:var(--radius-xs);padding:12px;margin-bottom:16px;color:var(--gold);font-size:0.85rem">${t('ui.refImagesConfigNeeded')}</div>` : ''}
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px">${shots}</div>
+    </div>
+    <div class="action-row" id="actionRow"></div>
+  `;
 
   if (state.mode === 'interactive') {
-    $('#actionRow').innerHTML = feedbackPanel('shotGen', 'ui.approveShots');
-    bindFeedback('shotGen', onAdvance);
-  } else {
-    autoAdvance(3000, onAdvance);
-  }
-  setMascot('happy');
-}
-
-export function renderShotCuration(curated, storyboard, onAdvance) {
-  const el = $('#stepContent');
-  let html = '';
-  storyboard.forEach(scene => {
-    const c = curated[scene.num];
-    if (!c) return;
-    const selectedQualityLabel = t(`quality.${c.selected.label}`);
-    html += `
-      <div class="result-card">
-        <h3>🔍 ${t('ui.scenePrefix', { num: scene.num })}: ${escapeHtml(scene.title)}</h3>
-        <div class="take-grid">
-          <div class="take-card selected">
-            <div class="take-header">
-              <span class="take-num">${t('ui.takeSelected', { num: c.selected.takeNum })}</span>
-              <span class="take-badge" style="background:#00e5a020;color:#00e5a0;border:1px solid #00e5a0">${selectedQualityLabel}</span>
-            </div>
-            <div class="take-angle">${escapeHtml(c.selected.angle)}</div>
-            <div class="take-comp">${escapeHtml(c.selected.composition)}</div>
-            <div class="take-score">
-              <div class="score-bar"><div class="score-fill" style="width:${c.selected.score}%;background:#00e5a0"></div></div>
-              <span class="score-num">${c.selected.score}/100</span>
-            </div>
-          </div>
-          ${c.rejected.map(rej => {
-            const rejectedQualityLabel = t(`quality.${rej.label}`);
-            return `
-            <div class="take-card rejected">
-              <div class="take-header">
-                <span class="take-num">${t('ui.takePrefix', { num: rej.takeNum })}</span>
-                <span class="take-badge" style="opacity:0.5">${rejectedQualityLabel}</span>
-              </div>
-              <div class="take-angle" style="opacity:0.5">${escapeHtml(rej.angle)}</div>
-              <div class="take-score">
-                <div class="score-bar"><div class="score-fill" style="width:${rej.score}%;opacity:0.4"></div></div>
-                <span class="score-num" style="opacity:0.5">${rej.score}/100</span>
-              </div>
-            </div>
-          `;
-          }).join('')}
-        </div>
-        <p style="color:var(--cream3);font-size:0.8rem;margin-top:8px;font-style:italic">${escapeHtml(c.reason)}</p>
-      </div>
-    `;
-  });
-  html += '<div class="action-row" id="actionRow"></div>';
-  el.innerHTML = html;
-
-  if (state.mode === 'interactive') {
-    $('#actionRow').innerHTML = feedbackPanel('shotCuration', 'ui.approveSelections');
-    bindFeedback('shotCuration', onAdvance);
+    $('#actionRow').innerHTML = feedbackPanel('referenceImages', 'ui.approveReferenceImages');
+    bindFeedback('referenceImages', onAdvance);
   } else {
     autoAdvance(2000, onAdvance);
   }
   setMascot('happy');
 }
 
-export function renderEditing(timeline, onAdvance) {
+export function renderVideoGeneration(data, onAdvance) {
   const el = $('#stepContent');
-  let clips = '';
-  timeline.clips.forEach((clip, i) => {
-    clips += `
-      <div class="timeline-clip" style="animation-delay:${i * 0.1}s">
-        <div class="clip-scene">${t('ui.scenePrefix', { num: clip.sceneNum })}</div>
-        <div class="clip-title">${escapeHtml(clip.sceneTitle)}</div>
-        <div class="clip-meta">${clip.duration} · ${escapeHtml(clip.shot?.angle || t('ui.na'))}</div>
-        ${clip.transition ? `<div class="timeline-transition">→ ${escapeHtml(clip.transition)}</div>` : ''}
-      </div>
-    `;
-  });
+  const { isConfigured: dsConfigured } = getDashScopeStatus();
+
+  const clips = (data.clips || []).map(clip => `
+    <div style="text-align:center">
+      ${clip.videoPath && clip.status === 'complete'
+        ? `<video src="${mediaUrl(clip.videoPath)}" controls style="width:100%;aspect-ratio:16/9;border-radius:var(--radius-xs);margin-bottom:4px;background:#000"></video>`
+        : `<div style="width:100%;aspect-ratio:16/9;background:var(--bg3);border-radius:var(--radius-xs);display:flex;align-items:center;justify-content:center;color:var(--cream3);font-size:0.7rem;margin-bottom:4px">${clip.status === 'pending' ? t('ui.videoGenPending') : '—'}</div>`}
+      <div style="font-size:0.7rem;color:var(--cream3)">${escapeHtml(clip.shot_id)}</div>
+    </div>
+  `).join('');
 
   el.innerHTML = `
     <div class="result-card">
-      <h3>${t('ui.editTimeline')}</h3>
-      <div style="color:var(--cream3);font-size:0.85rem;margin-bottom:12px">
-        ${t('ui.totalRuntime')}: <strong style="color:var(--cream)">${timeline.totalDuration}</strong> · 
-        ${t('ui.pacing')}: <strong style="color:var(--cream)">${escapeHtml(timeline.pacing)}</strong>
-      </div>
-      <div class="timeline-bar">${clips}</div>
+      <h3>🎥 ${t('ui.videoGenTitle')}</h3>
+      ${!dsConfigured ? `<div style="background:var(--bg3);border-radius:var(--radius-xs);padding:12px;margin-bottom:16px;color:var(--gold);font-size:0.85rem">${t('ui.videoGenConfigNeeded')}</div>` : ''}
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px">${clips}</div>
     </div>
     <div class="action-row" id="actionRow"></div>
   `;
 
   if (state.mode === 'interactive') {
-    $('#actionRow').innerHTML = feedbackPanel('editing', 'ui.approveEdit');
-    bindFeedback('editing', onAdvance);
-  } else {
-    autoAdvance(2000, onAdvance);
-  }
-  setMascot('happy');
-}
-
-export function renderAudio(data, onAdvance) {
-  const el = $('#stepContent');
-  const m = data.music;
-
-  let sceneTracks = '';
-  data.sceneAudio.forEach(sa => {
-    sceneTracks += `
-      <div style="background:var(--bg3);border-radius:var(--radius-xs);padding:12px;margin-bottom:8px">
-        <div style="font-size:0.8rem;color:var(--gold);font-weight:700">${t('ui.scenePrefix', { num: sa.sceneNum })}: ${escapeHtml(sa.sceneTitle)}</div>
-        <div style="font-size:0.78rem;color:var(--cream3);margin-top:4px">🎵 ${escapeHtml(sa.musicCue)} · ${t('ui.sfx')}: ${sa.sfx.map(s => escapeHtml(s)).join(', ')}</div>
-        <div style="font-size:0.75rem;color:var(--cream3);margin-top:2px">${t('ui.durationLabel')}: ${sa.duration}</div>
-      </div>
-    `;
-  });
-
-  el.innerHTML = `
-    <div class="result-card">
-      <h3>${t('ui.musicDirection')}</h3>
-      <div class="audio-tracks">
-        <div class="audio-track">
-          <div class="track-label">${t('ui.theme')}</div>
-          <div class="track-info">${escapeHtml(m.theme)} · ${m.tempo}</div>
-          <div class="track-wave"></div>
-        </div>
-        <div class="audio-track">
-          <div class="track-label">${t('ui.instruments')}</div>
-          <div class="track-info">${escapeHtml(m.instruments)}</div>
-        </div>
-        <div class="audio-track">
-          <div class="track-label">${t('ui.mood')}</div>
-          <div class="track-info">${escapeHtml(m.mood)}</div>
-        </div>
-      </div>
-    </div>
-    <div class="result-card">
-      <h3>${t('ui.sceneAudio')}</h3>
-      ${sceneTracks}
-    </div>
-    <div class="result-card">
-      <h3>${t('ui.mixNotes')}</h3>
-      <div class="content">${t('ui.dialogue')}: ${escapeHtml(data.mixNotes.dialogue)}<br>${t('ui.music')}: ${escapeHtml(data.mixNotes.music)}<br>${t('ui.sfx')}: ${escapeHtml(data.mixNotes.sfx)}</div>
-    </div>
-    <div class="action-row" id="actionRow"></div>
-  `;
-
-  if (state.mode === 'interactive') {
-    $('#actionRow').innerHTML = feedbackPanel('audio', 'ui.approveAudio');
-    bindFeedback('audio', onAdvance);
+    $('#actionRow').innerHTML = feedbackPanel('videoGeneration', 'ui.approveVideoGeneration');
+    bindFeedback('videoGeneration', onAdvance);
   } else {
     autoAdvance(2000, onAdvance);
   }
@@ -394,31 +254,28 @@ export function renderAudio(data, onAdvance) {
 
 export function renderPostProduction(data, onAdvance) {
   const el = $('#stepContent');
-  const vfxList = data.vfx.map(v => `
-    <div class="vfx-item">
-      <span class="vfx-type">${escapeHtml(v.type)}</span>
-      <span class="vfx-desc">${escapeHtml(v.description)}</span>
-    </div>
-  `).join('');
+  const { isConfigured: dsConfigured } = getDashScopeStatus();
+
+  const hasVideo = data.finalVideo && data.status === 'complete';
 
   el.innerHTML = `
     <div class="result-card">
-      <h3>${t('ui.colorGradingHeader', { name: escapeHtml(data.colorGrading.name) })}</h3>
-      <div class="content">${escapeHtml(data.colorGrading.description)}</div>
-    </div>
-    <div class="result-card">
-      <h3>${t('ui.visualEffects')}</h3>
-      <div class="vfx-list">${vfxList}</div>
-    </div>
-    <div class="result-card">
-      <h3>${t('ui.finalMix')}</h3>
-      <div class="content">${t('ui.mix')}: ${escapeHtml(data.finalMix)}<br>${t('ui.output')}: ${escapeHtml(data.outputFormat)}</div>
+      <h3>🎬 ${t('ui.postProdTitle')}</h3>
+      ${!dsConfigured
+        ? `<div style="background:var(--bg3);border-radius:var(--radius-xs);padding:12px;margin-bottom:16px;color:var(--gold);font-size:0.85rem">${t('ui.postProdConfigNeeded')}</div>`
+        : ''}
+      ${hasVideo
+        ? `<div style="text-align:center">
+            <video src="${mediaUrl(data.finalVideo)}" controls style="width:100%;max-width:800px;border-radius:var(--radius-xs);margin-bottom:16px;background:#000"></video>
+            <a href="${mediaUrl(data.finalVideo)}" download class="action-btn primary">${t('ui.postProdDownload')}</a>
+          </div>`
+        : `<div style="color:var(--cream3);font-size:0.85rem;text-align:center;padding:40px 0">${data.status === 'no-clips' ? 'No video clips available' : data.status === 'failed' ? 'Render failed' : '—'}</div>`}
     </div>
     <div class="action-row" id="actionRow"></div>
   `;
 
   if (state.mode === 'interactive') {
-    $('#actionRow').innerHTML = feedbackPanel('postProduction', 'ui.approvePost');
+    $('#actionRow').innerHTML = feedbackPanel('postProduction', 'ui.approvePostProduction');
     bindFeedback('postProduction', onAdvance);
   } else {
     autoAdvance(2000, onAdvance);
@@ -426,79 +283,15 @@ export function renderPostProduction(data, onAdvance) {
   setMascot('happy');
 }
 
-export function renderFinalFilm(filmData, onAdvance) {
-  const el = $('#stepContent');
-  const scenes = state.data.storyboard || [];
-
-  el.innerHTML = `
-    <div class="result-card">
-      <h3>🎞️ ${escapeHtml(filmData.title)}</h3>
-      <div class="video-preview" id="videoPreview">
-        <div class="play-icon" id="playBtn"></div>
-        <div class="video-player-content" id="playerContent" style="display:none"></div>
-        <div class="video-progress" id="videoProgress" style="width:0"></div>
-      </div>
-      <div style="margin-top:12px;text-align:center">
-        <div style="font-weight:700;font-size:1.1rem">${escapeHtml(filmData.title)}</div>
-        <div style="color:var(--cream3);font-size:0.82rem;margin-top:4px">${escapeHtml(filmData.genre)} · ${escapeHtml(filmData.runtime)} · ${filmData.scenes} ${t('ui.scenes')}</div>
-        <div style="color:var(--cream3);font-size:0.78rem;margin-top:2px">${t('ui.clickPlay')}</div>
-      </div>
-    </div>
-    <div class="action-row" id="actionRow"></div>
-  `;
-
-  let playing = false;
-  let sceneIdx = 0;
-  const screenplay = state.data.screenplay;
-
-  $('#playBtn').addEventListener('click', () => {
-    if (playing) return;
-    playing = true;
-    const preview = $('#videoPreview');
-    const content = $('#playerContent');
-    const progress = $('#videoProgress');
-    preview.classList.add('playing');
-    content.style.display = 'flex';
-
-    function playScene() {
-      if (sceneIdx >= scenes.length) {
-        content.innerHTML = `<div class="scene-text" style="opacity:1;font-size:1.4rem;font-weight:700">${t('ui.theEnd')}<br><span style="font-size:0.9rem;font-weight:400;color:var(--cream3)">${escapeHtml(filmData.title)}</span></div>`;
-        setTimeout(() => {
-          preview.classList.remove('playing');
-          content.style.display = 'none';
-          progress.style.width = '0';
-          playing = false;
-          sceneIdx = 0;
-        }, 3000);
-        return;
-      }
-      const scene = scenes[sceneIdx];
-      const actScenes = screenplay ? screenplay.acts.flatMap(a => a.scenes) : [];
-      const actScene = actScenes[sceneIdx];
-      content.innerHTML = `
-        <div style="font-size:0.7rem;color:var(--gold);margin-bottom:8px">${t('ui.scenePrefix', { num: scene.num })}</div>
-        <div class="scene-text" key="${sceneIdx}">${actScene ? escapeHtml(actScene.location) : escapeHtml(scene.title)}</div>
-        <div class="scene-text" style="animation-delay:0.5s;font-size:0.85rem;color:var(--cream2)">${actScene ? escapeHtml(actScene.action.substring(0, 150)) + '...' : escapeHtml(scene.desc)}</div>
-      `;
-      progress.style.width = ((sceneIdx + 1) / scenes.length * 100) + '%';
-      sceneIdx++;
-      setTimeout(playScene, 3000);
+function getDashScopeStatus() {
+  try {
+    const saved = localStorage.getItem('cine-cutie-dashscope');
+    if (saved) {
+      const cfg = JSON.parse(saved);
+      return { isConfigured: !!cfg.apiKey };
     }
-    playScene();
-  });
-
-  if (state.mode === 'interactive') {
-    $('#actionRow').innerHTML = `
-      <div class="feedback-area" style="width:100%">
-        <div class="action-row">
-          <button class="action-btn primary" id="finalizeBtn">${t('ui.finalize')}</button>
-        </div>
-      </div>
-    `;
-    $('#finalizeBtn').addEventListener('click', onAdvance);
-  } else {
-    autoAdvance(scenes.length * 3000 + 4000, onAdvance);
-  }
+  } catch {}
+  return { isConfigured: false };
 }
 
 export function renderExecutionLog() {
@@ -577,22 +370,27 @@ export function renderExecutionLog() {
   `;
 
   $('#backBtn').addEventListener('click', () => {
-    renderFinalFilm(state.data.video || state.data.postProduction || {}, () => {});
+    renderPostProduction(state.data.finalVideo || {}, () => {});
   });
 }
 
 export function showCompletion() {
   const el = $('#stepContent');
-  const title = state.data.screenplay?.title || 'Your Film';
+  const title = state.data.script?.title || 'Your Film';
+  const finalVideo = state.data.finalVideo;
+  const hasVideo = finalVideo?.finalVideo && finalVideo?.status === 'complete';
+
   el.innerHTML = `
     <div class="completion">
       <div class="big-icon">🎉</div>
       <h2>${escapeHtml(title)}</h2>
       <p>${t('ui.filmComplete')}</p>
+      ${hasVideo ? `<video src="${mediaUrl(finalVideo.finalVideo)}" controls style="width:100%;max-width:800px;border-radius:var(--radius-xs);margin:16px auto;background:#000"></video>` : ''}
       <div style="margin-top:24px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
         <button class="action-btn primary" onclick="location.reload()">${t('ui.createAnother')}</button>
         <button class="action-btn" id="exportBtn">${t('ui.exportProject')}</button>
         <button class="action-btn" id="logBtn">📊 ${t('log.viewLog')}</button>
+        ${hasVideo ? `<a href="${mediaUrl(finalVideo.finalVideo)}" download class="action-btn">${t('ui.postProdDownload')}</a>` : ''}
       </div>
     </div>
   `;
@@ -600,20 +398,20 @@ export function showCompletion() {
 
   $('#exportBtn').addEventListener('click', () => {
     const d = state.data;
-    const data = {
-      title: d.screenplay?.title || 'Untitled',
-      genre: d.screenplay?.genre || 'Unknown',
-      screenplay: d.screenplay?.text || '',
-      characters: d.characters?.map(c => ({ name: c.name, role: c.role, desc: c.desc })) || [],
-      visualDesign: d.visualDesign ? { style: d.visualDesign.style, palette: d.visualDesign.palette } : null,
-      storyboard: d.storyboard?.map(s => ({ num: s.num, title: s.title, desc: s.desc })) || [],
+    const exportData = {
+      title: d.script?.title || 'Untitled',
+      genre: d.script?.genre || 'Unknown',
+      characters: d.script?.characters || [],
+      settings: d.script?.settings || [],
+      episodes: d.script?.episodes || [],
+      storyboard: d.storyboard || null,
       exportedAt: new Date().toISOString()
     };
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${data.title.replace(/\s+/g, '_')}_project.json`;
+    a.download = `${exportData.title.replace(/\s+/g, '_')}_project.json`;
     a.click();
     URL.revokeObjectURL(url);
   });

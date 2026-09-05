@@ -1,106 +1,59 @@
 export const STEPS = [
   {
-    id: 'planning', label: 'Creative Planning', icon: '🧠',
-    labelKey: 'steps.planning.label', agentKey: 'steps.planning.agent',
-    genKeys: ['steps.planning.gen.0', 'steps.planning.gen.1', 'steps.planning.gen.2', 'steps.planning.gen.3'],
-    capability: 'text', accepts: ['text', 'image'],
-    agent: 'Creative Planner',
-    contextKeys: [],
-    genMessages: ['Analyzing your idea...', 'Identifying themes...', 'Setting creative direction...', 'Building the plan...']
-  },
-  {
-    id: 'screenplay', label: 'Screenplay', icon: '📝',
-    labelKey: 'steps.screenplay.label', agentKey: 'steps.screenplay.agent',
-    genKeys: ['steps.screenplay.gen.0', 'steps.screenplay.gen.1', 'steps.screenplay.gen.2', 'steps.screenplay.gen.3'],
+    id: 'script', label: 'Script', icon: '📝',
+    labelKey: 'steps.script.label', agentKey: 'steps.script.agent',
+    genKeys: ['steps.script.gen.0', 'steps.script.gen.1', 'steps.script.gen.2', 'steps.script.gen.3'],
     capability: 'text', accepts: ['text', 'image'],
     agent: 'Scriptwriter',
-    contextKeys: ['planning'],
-    genMessages: ['Crafting your story...', 'Developing plot twists...', 'Polishing dialogue...', 'Structuring scenes...']
+    contextKeys: [],
+    genMessages: ['Analyzing your idea...', 'Developing characters...', 'Structuring scenes...', 'Polishing the script...']
   },
   {
-    id: 'characters', label: 'Character Design', icon: '🎭',
-    labelKey: 'steps.characters.label', agentKey: 'steps.characters.agent',
-    genKeys: ['steps.characters.gen.0', 'steps.characters.gen.1', 'steps.characters.gen.2', 'steps.characters.gen.3'],
-    capability: 'text', accepts: ['image'],
+    id: 'characterDesign', label: 'Character & Scene Design', icon: '🎨',
+    labelKey: 'steps.characterDesign.label', agentKey: 'steps.characterDesign.agent',
+    genKeys: ['steps.characterDesign.gen.0', 'steps.characterDesign.gen.1', 'steps.characterDesign.gen.2', 'steps.characterDesign.gen.3'],
+    capability: 'image', accepts: [],
     agent: 'Character Designer',
-    contextKeys: ['planning', 'screenplay'],
-    genMessages: ['Designing unique characters...', 'Giving them souls...', 'Adding depth...', 'Perfecting details...']
-  },
-  {
-    id: 'visualDesign', label: 'Visual Design', icon: '🎨',
-    labelKey: 'steps.visualDesign.label', agentKey: 'steps.visualDesign.agent',
-    genKeys: ['steps.visualDesign.gen.0', 'steps.visualDesign.gen.1', 'steps.visualDesign.gen.2', 'steps.visualDesign.gen.3'],
-    capability: 'text', accepts: ['image'],
-    agent: 'Art Director',
-    contextKeys: ['planning', 'screenplay'],
-    genMessages: ['Choosing color palette...', 'Setting visual tone...', 'Designing atmosphere...', 'Building mood boards...']
+    contextKeys: ['script'],
+    genMessages: ['Designing characters...', 'Creating scene concepts...', 'Adding visual details...', 'Finalizing designs...']
   },
   {
     id: 'storyboard', label: 'Storyboard', icon: '📋',
     labelKey: 'steps.storyboard.label', agentKey: 'steps.storyboard.agent',
     genKeys: ['steps.storyboard.gen.0', 'steps.storyboard.gen.1', 'steps.storyboard.gen.2', 'steps.storyboard.gen.3'],
-    capability: 'text', accepts: ['image'],
+    capability: 'text', accepts: [],
     agent: 'Storyboard Artist',
-    contextKeys: ['planning', 'screenplay', 'characters', 'visualDesign'],
-    genMessages: ['Composing visual frames...', 'Setting the mood...', 'Arranging shots...', 'Building atmosphere...']
+    contextKeys: ['script'],
+    genMessages: ['Breaking down scenes...', 'Planning shot sequences...', 'Defining camera angles...', 'Building the storyboard...']
   },
   {
-    id: 'shotGen', label: 'Shot Generation', icon: '🎥',
-    labelKey: 'steps.shotGen.label', agentKey: 'steps.shotGen.agent',
-    genKeys: ['steps.shotGen.gen.0', 'steps.shotGen.gen.1', 'steps.shotGen.gen.2', 'steps.shotGen.gen.3'],
-    capability: 'text', accepts: [],
-    agent: 'Shot Director',
-    dataKey: 'shots',
-    contextKeys: ['planning', 'storyboard'],
-    genMessages: ['Setting up camera angles...', 'Rolling Take 1...', 'Adjusting lighting...', 'Capturing Take 3...']
+    id: 'referenceImages', label: 'Reference Images', icon: '🖼️',
+    labelKey: 'steps.referenceImages.label', agentKey: 'steps.referenceImages.agent',
+    genKeys: ['steps.referenceImages.gen.0', 'steps.referenceImages.gen.1', 'steps.referenceImages.gen.2', 'steps.referenceImages.gen.3'],
+    capability: 'image', accepts: [],
+    agent: 'Image Director',
+    contextKeys: ['script', 'storyboard', 'characterDesign'],
+    genMessages: ['Preparing image prompts...', 'Generating reference frames...', 'Evaluating compositions...', 'Finalizing references...']
   },
   {
-    id: 'shotCuration', label: 'Shot Curation', icon: '🔍',
-    labelKey: 'steps.shotCuration.label', agentKey: 'steps.shotCuration.agent',
-    genKeys: ['steps.shotCuration.gen.0', 'steps.shotCuration.gen.1', 'steps.shotCuration.gen.2', 'steps.shotCuration.gen.3'],
-    capability: 'text', accepts: [],
-    agent: 'Shot Curator',
-    dataKey: 'curatedShots',
-    contextKeys: ['planning', 'storyboard', 'shots'],
-    genMessages: ['Reviewing compositions...', 'Evaluating emotional impact...', 'Selecting best takes...', 'Finalizing selections...']
-  },
-  {
-    id: 'editing', label: 'Editing', icon: '✂️',
-    labelKey: 'steps.editing.label', agentKey: 'steps.editing.agent',
-    genKeys: ['steps.editing.gen.0', 'steps.editing.gen.1', 'steps.editing.gen.2', 'steps.editing.gen.3'],
-    capability: 'text', accepts: [],
-    agent: 'Film Editor',
-    dataKey: 'editTimeline',
-    contextKeys: ['planning', 'storyboard', 'curatedShots'],
-    genMessages: ['Assembling selected shots...', 'Adding transitions...', 'Adjusting pacing...', 'Fine-tuning cuts...']
-  },
-  {
-    id: 'audio', label: 'Audio Design', icon: '🎵',
-    labelKey: 'steps.audio.label', agentKey: 'steps.audio.agent',
-    genKeys: ['steps.audio.gen.0', 'steps.audio.gen.1', 'steps.audio.gen.2', 'steps.audio.gen.3'],
-    capability: 'text', accepts: ['audio'],
-    agent: 'Composer',
-    contextKeys: ['planning', 'screenplay', 'storyboard'],
-    genMessages: ['Composing main theme...', 'Adding sound effects...', 'Mixing dialogue...', 'Balancing audio levels...']
+    id: 'videoGeneration', label: 'Video Generation', icon: '🎥',
+    labelKey: 'steps.videoGeneration.label', agentKey: 'steps.videoGeneration.agent',
+    genKeys: ['steps.videoGeneration.gen.0', 'steps.videoGeneration.gen.1', 'steps.videoGeneration.gen.2', 'steps.videoGeneration.gen.3'],
+    capability: 'video', accepts: [],
+    agent: 'Video Director',
+    dataKey: 'videoClips',
+    contextKeys: ['script', 'storyboard', 'referenceImages'],
+    genMessages: ['Setting up shots...', 'Generating video clips...', 'Reviewing motion quality...', 'Finalizing clips...']
   },
   {
     id: 'postProduction', label: 'Post-Production', icon: '🎬',
     labelKey: 'steps.postProduction.label', agentKey: 'steps.postProduction.agent',
     genKeys: ['steps.postProduction.gen.0', 'steps.postProduction.gen.1', 'steps.postProduction.gen.2', 'steps.postProduction.gen.3'],
-    capability: 'text', accepts: [],
+    capability: 'render', accepts: [],
     agent: 'Post-Production Artist',
-    contextKeys: ['planning', 'visualDesign', 'editTimeline'],
-    genMessages: ['Color grading...', 'Adding visual effects...', 'Final audio mix...', 'Rendering final cut...']
-  },
-  {
-    id: 'final', label: 'Final Film', icon: '🎞️',
-    labelKey: 'steps.final.label', agentKey: 'steps.final.agent',
-    genKeys: ['steps.final.gen.0', 'steps.final.gen.1', 'steps.final.gen.2', 'steps.final.gen.3'],
-    capability: 'text', accepts: [],
-    agent: 'Director',
-    dataKey: 'video',
-    contextKeys: ['screenplay', 'storyboard', 'editTimeline'],
-    genMessages: ['Final touches...', 'Encoding video...', 'Adding soundtrack...', 'Almost there...']
+    dataKey: 'finalVideo',
+    contextKeys: ['script', 'storyboard', 'videoClips'],
+    genMessages: ['Assembling clips...', 'Adding transitions...', 'Color grading...', 'Rendering final video...']
   }
 ];
 

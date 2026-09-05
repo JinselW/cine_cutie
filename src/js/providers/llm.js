@@ -172,28 +172,15 @@ function parseJson(raw) {
 function validate(stepId, data) {
   if (data == null) return false;
   switch (stepId) {
-    case 'planning':
-      return data.theme && data.keyElements && Array.isArray(data.keyElements);
-    case 'screenplay':
-      return data.title && data.acts && Array.isArray(data.acts) && data.acts.length >= 2;
-    case 'characters':
-      return Array.isArray(data) && data.length >= 2 && data[0].name;
-    case 'visualDesign':
-      return data.style && Array.isArray(data.palette) && data.palette.length >= 4;
+    case 'script':
+      return data.title
+        && Array.isArray(data.characters) && data.characters.length >= 1
+        && Array.isArray(data.episodes) && data.episodes.length >= 1;
     case 'storyboard':
-      return Array.isArray(data) && data.length >= 3 && data[0].num != null;
-    case 'shotGen':
-      return typeof data === 'object' && !Array.isArray(data) && Object.keys(data).length >= 1;
-    case 'shotCuration':
-      return typeof data === 'object' && !Array.isArray(data);
-    case 'editing':
-      return data.clips && Array.isArray(data.clips) && data.clips.length >= 1;
-    case 'audio':
-      return data.music && Array.isArray(data.sceneAudio);
-    case 'postProduction':
-      return data.colorGrading && Array.isArray(data.vfx);
-    case 'final':
-      return data.title && data.status;
+      return Array.isArray(data.episodes) && data.episodes.length >= 1
+        && data.episodes[0].segments
+        && data.episodes[0].segments[0]?.shots
+        && data.episodes[0].segments[0].shots.length >= 1;
     default:
       return true;
   }
@@ -214,16 +201,6 @@ async function fallbackToTemplate(stepId, genre, context, reason) {
   throw reason;
 }
 
-function buildFinalFilmLocal(context) {
-  return {
-    title: context.screenplay?.title || 'Untitled Film',
-    genre: context.screenplay?.genre || 'Unknown',
-    runtime: context.editTimeline?.totalDuration || 'N/A',
-    scenes: context.storyboard?.length || 0,
-    status: 'Complete'
-  };
-}
-
 const llmProvider = {
   id: 'llm',
   name: 'OpenAI-compatible API',
@@ -234,10 +211,6 @@ const llmProvider = {
       const tpl = getTemplateProvider();
       if (tpl) return tpl.generate({ step, genre, context });
       return null;
-    }
-
-    if (step === 'final') {
-      return buildFinalFilmLocal(context);
     }
 
     resetStepMetrics();
@@ -274,6 +247,35 @@ const llmProvider = {
 
     if (!validate(step, parsed)) {
       return fallbackToTemplate(step, genre, context, new LLMError('llm.errSchema', `Validation failed for step ${step}`));
+    }
+
+    if (step === 'storyboard' && context.totalDuration) {
+      const maxClips = Math.ceil(context.totalDuration / 5);
+      let totalShots = 0;
+      for (const ep of (parsed.episodes || [])) {
+        for (const seg of (ep.segments || [])) {
+          totalShots += (seg.shots || []).length;
+        }
+      }
+      if (totalShots > maxClips) {
+        let remaining = maxClips;
+        outer: for (const ep of (parsed.episodes || [])) {
+          for (const seg of (ep.segments || [])) {
+            if (seg.shots && seg.shots.length > remaining) {
+              seg.shots = seg.shots.slice(0, remaining);
+            }
+            remaining -= (seg.shots || []).length;
+            if (remaining <= 0) {
+              seg.shots = seg.shots || [];
+              break outer;
+            }
+          }
+        }
+        for (const ep of (parsed.episodes || [])) {
+          ep.segments = (ep.segments || []).filter(seg => (seg.shots || []).length > 0);
+        }
+        parsed.episodes = (parsed.episodes || []).filter(ep => (ep.segments || []).length > 0);
+      }
     }
 
     let currentResult = parsed;

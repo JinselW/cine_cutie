@@ -5,65 +5,17 @@ import { updateStepMetrics } from '../observability.js';
 const CRITIQUE_SYSTEM = `You are a film production quality reviewer. You evaluate the output of AI film agents for quality, coherence, and creativity. Reply ONLY with valid JSON. No markdown, no commentary, no code fences.`;
 
 const CRITERIA = {
-  planning: [
-    'Theme is specific and compelling (not generic)',
-    'Creative direction is actionable and visually evocative',
-    'Key elements are concrete and distinct from each other',
-    'Visual references are real films that match the tone'
-  ],
-  screenplay: [
-    'Story has a clear beginning, middle, and end',
-    'Characters have distinct voices in dialogue',
-    'Scene descriptions are vivid and cinematic',
-    'Story aligns with the creative direction'
-  ],
-  characters: [
-    'Each character has a distinct role and personality',
-    'Character descriptions are vivid and visual',
-    'Characters serve the story well',
-    'Character names and emojis are memorable'
-  ],
-  visualDesign: [
-    'Color palette is harmonious and genre-appropriate',
-    'Visual style is distinctive and cohesive',
-    'Lighting and camera style complement the story mood',
-    'Color roles are clearly defined'
+  script: [
+    'Story has a clear structure with episodes and segments',
+    'Characters are visually distinctive with detailed appearance descriptions',
+    'Settings are vivid and specific enough for image generation',
+    'Story aligns with the user\'s input and genre'
   ],
   storyboard: [
-    'Scenes cover the full story arc',
-    'Each scene has a distinct visual identity',
-    'Scene descriptions are cinematic and specific',
-    'Scene flow creates visual rhythm'
-  ],
-  shotGen: [
-    'Camera angles are varied and appropriate',
-    'Compositions follow cinematography principles',
-    'Quality scores are realistic and well-distributed',
-    'Shots serve the storytelling'
-  ],
-  shotCuration: [
-    'Best takes are selected based on clear criteria',
-    'Rejection reasons are specific',
-    'Selections create visual consistency across scenes',
-    'Reasons reference specific composition details'
-  ],
-  editing: [
-    'Clip durations match scene complexity',
-    'Transitions are varied and appropriate',
-    'Pacing description matches the edit choices',
-    'Total duration is correctly calculated'
-  ],
-  audio: [
-    'Music direction matches the film tone',
-    'Scene audio choices support the narrative',
-    'SFX are specific and cinematic',
-    'Mix notes are technically sound'
-  ],
-  postProduction: [
-    'Color grading complements the visual design',
-    'VFX choices enhance without overwhelming',
-    'Output format is professional',
-    'Final mix description is technically complete'
+    'Shots cover all segments from the script',
+    'Shot prompts are detailed enough for image generation',
+    'Camera angles and movements are varied and cinematic',
+    'Shot durations create good pacing'
   ]
 };
 
@@ -71,18 +23,17 @@ const SCORE_THRESHOLD = 7;
 const MAX_RETRIES = 2;
 
 function buildCritiquePrompt(stepId, data, context) {
-  const criteria = CRITERIA[stepId] || CRITERIA.screenplay;
+  const criteria = CRITERIA[stepId] || CRITERIA.script;
   const dataStr = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
 
   let contextStr = '';
-  if (context.planning) {
-    contextStr += `\nCREATIVE DIRECTION: Theme="${context.planning.theme}", Tone="${context.planning.tone}"`;
+  if (context.script?.title) {
+    contextStr += `\nSCRIPT: "${context.script.title}" (${context.script.genre})`;
   }
-  if (context.screenplay?.title) {
-    contextStr += `\nSCREENPLAY: "${context.screenplay.title}" (${context.screenplay.genre})`;
-  }
-  if (context.storyboard) {
-    contextStr += `\nSTORYBOARD: ${context.storyboard.length} scenes`;
+  if (context.storyboard?.episodes) {
+    const shotCount = context.storyboard.episodes.reduce((n, ep) =>
+      n + ep.segments.reduce((m, seg) => m + (seg.shots?.length || 0), 0), 0);
+    contextStr += `\nSTORYBOARD: ${context.storyboard.episodes.length} episodes, ${shotCount} shots`;
   }
 
   return [
@@ -129,7 +80,7 @@ function parseCritiqueResponse(raw) {
 }
 
 export async function critiqueOutput(stepId, data, context, callChatFn) {
-  if (stepId === 'final' || stepId === 'planning') return null;
+  if (stepId !== 'script' && stepId !== 'storyboard') return null;
 
   const messages = buildCritiquePrompt(stepId, data, context);
 
