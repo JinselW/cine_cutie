@@ -1,136 +1,188 @@
 # Cine-Cutie
 
-AI Movie Creation Agent -- 一句话灵感，完整短片制作。
+**一句话灵感 → 完整 AI 短片**
 
-Cine-Cutie 是一个基于多 Agent 协作的 AI 电影创作系统。用户只需输入一句话的故事灵感，系统便会自动完成从创意规划、剧本编写、角色设计、视觉风格、分镜、镜头生成与甄选、剪辑、音频设计、后期制作到最终成片的完整电影制作流程。
+Cine-Cutie 是一个端到端的 AI 电影创作系统。输入一句话故事灵感，自动完成剧本、角色设计、分镜、图片生成、视频生成到最终剪辑成片的全流程。
 
-## 核心特性
+## 特性
 
-- **11 步专业 Pipeline**: 模拟真实电影制作流程，每步由专属 Agent 负责
-- **Self-Critique 质量保障**: 每个步骤自动评分，低于阈值自动重试（最多 2 次），保留最优结果
-- **跨步骤一致性追踪**: 自动提取角色名、视觉风格等实体，注入后续步骤确保一致性
-- **上下文裁剪**: 每个步骤只接收所需上下文，减少 30-50% token 消耗
-- **可观测性**: 完整的执行日志，记录每步耗时、token 消耗、质量评分、重试次数
-- **双模式**: Auto Pilot（全自动）和 Co-Create（逐步协作）
-- **中英双语**: 完整 i18n 支持
-- **优雅降级**: LLM 未配置或出错时自动回退到模板生成
+- **6 步全自动 Pipeline**：剧本 → 角色&场景设计 → 分镜 → 参考图片 → 视频生成 → 后期合成
+- **端到端视频输出**：不只是文本规划——真正调用 DashScope API 生成图片和视频，最终用 ffmpeg 拼接成片
+- **角色一致性**：每个角色生成一张规范肖像，所有包含该角色的视频片段复用同一张图作为 i2v 首帧，保持角色外貌贯穿全片
+- **跨语言角色匹配**：支持中/英文名匹配（enName），确保角色名在不同语言 prompt 中正确关联
+- **运镜指令**：从分镜数据提取 camera 参数（pan/tilt/zoom/dolly/tracking），自动转为视频 motion prompt
+- **剧情连贯性约束**：剧本和分镜 prompt 内置叙事弧（setup → climax → resolution）和镜头间连续性要求
+- **Self-Critique 质量保障**：每步输出自动评分，低于阈值重试，保留最优结果
+- **跨步骤实体追踪**：自动提取角色名、外貌、场景等实体，注入后续步骤确保一致性
+- **Seed 可复现**：图片和视频生成支持 seed 参数，相同输入产出稳定
+- **优雅降级**：未配置 API Key 时自动使用模板生成，仍可体验完整流程
+- **中英双语**：完整 i18n 支持
+- **LRU 缓存**：LLM 调用结果缓存，减少重复请求
 
 ## 快速开始
 
+### 前置要求
+
+- Node.js >= 18
+- DashScope API Key（[阿里云百炼](https://dashscope.console.aliyun.com/) 申请）
+- ffmpeg（用于最终视频拼接，`winget install ffmpeg` 或 `brew install ffmpeg`）
+
+### 安装 & 启动
+
 ```bash
-# 安装依赖
 npm install
-
-# 启动开发服务器
-npm run dev
-
-# 构建生产版本
 npm run build
+npm run server
 ```
 
-打开浏览器访问开发服务器地址，点击设置按钮配置你的 LLM API：
-- **API Endpoint**: OpenAI 兼容的 API 地址（默认 `https://api.openai.com/v1`）
-- **API Key**: 你的 API 密钥
-- **Model**: 模型名称（如 `gpt-4o-mini`、`deepseek-chat` 等）
+打开浏览器访问 `http://localhost:3006`。
 
-也可以不配置 API，使用内置模板体验完整流程。
+### 配置 API
 
-## 技术栈
+点击页面右上角设置按钮，填入 DashScope API Key。系统使用以下模型：
 
-- **前端**: 原生 HTML + CSS + JavaScript (ES Modules)
-- **构建**: Vite 6
-- **API**: OpenAI-compatible Chat Completions API
-- **存储**: localStorage（配置持久化）
-- **无框架依赖**: 零运行时依赖，极轻量
+| 用途 | 模型 |
+|------|------|
+| 图片生成 | `wanx2.1-t2i-turbo` |
+| 视频生成 | `wanx2.1-i2v-turbo` |
+| 文本生成 | 任意 OpenAI 兼容 API（需自行配置 endpoint + key） |
+
+### 开发模式
+
+```bash
+npm run dev    # Vite 开发服务器（前端热更新）
+npm run server # 另一个终端启动后端 API
+```
+
+## Pipeline 流程
+
+```
+用户输入（一句话故事 + 时长）
+        │
+        ▼
+┌──────────────────┐
+│  1. 剧本生成      │  LLM → 角色列表 + 场景列表 + 故事文本
+│     Script        │  内置叙事弧约束：setup → development → climax → resolution
+└────────┬─────────┘
+         │
+         ▼
+┌──────────────────┐
+│  2. 角色&场景设计  │  每个角色/场景 → DashScope 文生图 → 规范肖像
+│    CharDesign    │  保留 appearance + imageUrl 供后续步骤复用
+└────────┬─────────┘
+         │
+         ▼
+┌──────────────────┐
+│  3. 分镜生成      │  LLM → 按集/段/镜头层级组织，含 camera 运镜参数
+│    Storyboard    │  内置镜头间连续性约束
+└────────┬─────────┘
+         │
+         ▼
+┌──────────────────┐
+│  4. 参考图片      │  每个镜头 → DashScope 文生图（prompt 含角色外貌描述）
+│    RefImages     │  生成首帧参考图 + 公网 URL
+└────────┬─────────┘
+         │
+         ▼
+┌──────────────────┐
+│  5. 视频生成      │  匹配角色规范图 → 作为 i2v 首帧（同一角色全片同一张脸）
+│    VideoGen      │  无匹配角色时用镜头参考图；自动附加运镜 motion prompt
+└────────┬─────────┘
+         │
+         ▼
+┌──────────────────┐
+│  6. 后期合成      │  ffmpeg 拼接所有视频片段 → 输出最终 MP4
+│    PostProd      │
+└──────────────────┘
+```
+
+## 角色一致性方案
+
+核心问题：每个镜头独立生成图片，同一角色在不同镜头中长相不一致。
+
+解决方案：
+
+1. **角色设计阶段**：为每个角色生成一张规范肖像（正面、studio lighting），保存 `imagePath`（本地路径）和 `imageUrl`（公网 URL）
+2. **参考图片阶段**：镜头 prompt 中注入匹配角色的 `appearance` 描述
+3. **视频生成阶段**：解析每个镜头 prompt 中提到的角色名（支持中文名 + enName 匹配），找到该角色的规范图 `imageUrl`，作为 `wanx2.1-i2v-turbo` 的 `img_url` 参数
+
+```
+镜头 prompt 提到 "小明" → 匹配到角色 小明 的规范图 → 用该图作为 i2v 首帧
+镜头 prompt 提到 "Xiao Ming" → 通过 enName 匹配 → 同一张规范图
+镜头 prompt 无角色名 → 使用镜头参考图作为 fallback
+```
 
 ## 项目结构
 
 ```
 cine-cutie/
-├── index.html                  # 入口页面
-├── vite.config.js              # Vite 构建配置
+├── index.html                    # 入口页面
+├── vite.config.js                # Vite 构建配置
+├── package.json
+├── Dockerfile
+│
+├── server/                       # Express 后端 (port 3006)
+│   ├── index.js                  # API 路由：LLM 代理、图片/视频生成、任务管理、媒体服务
+│   ├── dashscope.js              # DashScope API 封装：submitImageTask, submitVideoTask, pollTask
+│   ├── cache.js                  # LRU 缓存
+│   ├── tasks.js                  # 异步任务状态管理
+│   └── render.js                 # ffmpeg 视频拼接
+│
 ├── src/
-│   ├── css/
-│   │   ├── base.css            # CSS 变量、主题、基础样式
-│   │   ├── animations.css      # 动画定义
-│   │   ├── components.css      # 组件样式（模态框、按钮等）
-│   │   ├── pipeline.css        # Pipeline 和步骤内容样式
-│   │   └── responsive.css      # 响应式适配
+│   ├── css/                      # 样式（base, components, pipeline, animations, responsive）
 │   └── js/
-│       ├── main.js             # 应用入口，事件绑定
-│       ├── config.js           # Pipeline 步骤配置（STEPS）
-│       ├── state.js            # 全局状态管理
-│       ├── engine.js           # Pipeline 引擎（推进、修改、渲染调度）
-│       ├── agents.js           # Agent 运行器（上下文构建、实体提取）
-│       ├── observability.js    # 执行日志与可观测性
-│       ├── i18n.js             # 国际化（中/英）
-│       ├── media.js            # 文件上传处理
-│       ├── utils.js            # 工具函数
+│       ├── main.js               # 应用入口
+│       ├── config.js             # 6 步 Pipeline 配置（STEPS, contextKeys）
+│       ├── state.js              # 全局状态
+│       ├── engine.js             # Pipeline 引擎（推进、渲染调度）
+│       ├── agents.js             # Agent 运行器（上下文构建、实体提取）
+│       ├── i18n.js               # 国际化（中/英）
+│       ├── observability.js      # 执行日志
 │       ├── providers/
-│       │   ├── registry.js     # Provider 注册与调度
-│       │   ├── llm.js          # LLM Provider（API 调用、重试、评分）
-│       │   ├── template.js     # 模板 Provider（离线降级）
-│       │   ├── prompts.js      # 所有步骤的 Prompt 模板
-│       │   ├── critic.js       # Self-Critique 质量评审
-│       │   └── consistency.js  # 实体追踪与一致性约束
-│       ├── ui/
-│       │   ├── render.js       # UI 渲染工具（pipeline 进度条、吉祥物等）
-│       │   ├── views.js        # 各步骤的视图渲染 + 执行日志视图
-│       │   └── settings.js     # 设置面板逻辑
-│       └── templates/          # 离线模板数据
-└── docs/
-    ├── ARCHITECTURE.md         # 系统架构文档
-    └── SCORING.md              # 竞赛评分对照
+│       │   ├── registry.js       # Provider 注册与调度
+│       │   ├── llm.js            # LLM Provider（OpenAI 兼容 API）
+│       │   ├── image.js          # 图片 Provider（DashScope 文生图 + 角色规范图管理）
+│       │   ├── video.js          # 视频 Provider（DashScope i2v + 角色图匹配 + 运镜指令）
+│       │   ├── template.js       # 模板 Provider（离线降级）
+│       │   ├── prompts.js        # 所有步骤的 Prompt 模板
+│       │   ├── critic.js         # Self-Critique 质量评审
+│       │   ├── consistency.js    # 实体追踪与一致性约束
+│       │   └── render.js         # 后期渲染 Provider
+│       └── ui/
+│           ├── render.js         # UI 渲染工具
+│           ├── views.js          # 各步骤视图
+│           └── settings.js       # 设置面板
+│
+└── media/                        # 生成的图片/视频文件存储
 ```
 
-## 架构概览
+## API 接口
 
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/api/chat/completions` | POST | LLM 代理（转发到 OpenAI 兼容 API，带 LRU 缓存） |
+| `/api/generate/image` | POST | 批量文生图（DashScope wanx2.1-t2i-turbo） |
+| `/api/generate/video` | POST | 批量图生视频（DashScope wanx2.1-i2v-turbo） |
+| `/api/render/final` | POST | ffmpeg 拼接视频片段 |
+| `/api/task/:id` | GET | 查询异步任务状态 |
+| `/api/media/:filename` | GET | 获取生成的媒体文件 |
+| `/api/health` | GET | 健康检查 |
+
+## 技术栈
+
+- **前端**：原生 HTML/CSS/JS (ES Modules)，零框架依赖
+- **构建**：Vite 6
+- **后端**：Node.js + Express
+- **AI 模型**：DashScope（通义万相 wanx2.1 系列）
+- **视频处理**：ffmpeg（通过 ffmpeg-static）
+- **部署**：Docker 支持
+
+## Docker 部署
+
+```bash
+docker build -t cine-cutie .
+docker run -p 3006:3006 cine-cutie
 ```
-用户输入
-    │
-    ▼
-┌─────────────────────────────────────────────────────┐
-│                   Engine (engine.js)                 │
-│  startPipeline → advanceStep → renderStep → next    │
-└──────────┬──────────────────────────────────────────┘
-           │
-           ▼
-┌─────────────────────────────────────────────────────┐
-│              Agent Runner (agents.js)                │
-│  buildContext → provider.generate → extractEntities  │
-└──────────┬──────────────────────────────────────────┘
-           │
-     ┌─────┴─────┐
-     ▼           ▼
-┌─────────┐ ┌──────────┐
-│  LLM    │ │ Template │   ← Provider Registry
-│Provider │ │ Provider │
-└────┬────┘ └──────────┘
-     │
-     ├─→ buildMessages (prompts.js)
-     ├─→ callChat (API)
-     ├─→ critiqueOutput (critic.js)  ← Self-Critique
-     ├─→ validate (schema check)
-     └─→ consumeStepMetrics → observability.js
-```
-
-详细架构说明请查看 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
-
-## Pipeline 步骤
-
-| # | 步骤 | Agent | 说明 |
-|---|------|-------|------|
-| 1 | Creative Planning | Creative Planner | 分析用户输入，生成创意方向文档 |
-| 2 | Screenplay | Scriptwriter | 编写三幕式剧本 |
-| 3 | Character Design | Character Designer | 设计 3-5 个角色 |
-| 4 | Visual Design | Art Director | 定义视觉风格、色彩方案 |
-| 5 | Storyboard | Storyboard Artist | 创建 7-9 个场景的分镜 |
-| 6 | Shot Generation | Shot Director | 每场景生成 3 个镜头 |
-| 7 | Shot Curation | Shot Curator | 为每场景选择最佳镜头 |
-| 8 | Editing | Film Editor | 组装剪辑时间线 |
-| 9 | Audio Design | Composer | 设计音乐和音效 |
-| 10 | Post-Production | Post-Production Artist | 调色、VFX、最终混音 |
-| 11 | Final Film | Director | 汇总成片信息 |
 
 ## 许可证
 
