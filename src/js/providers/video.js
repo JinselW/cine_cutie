@@ -25,6 +25,17 @@ const videoProvider = {
     const apiClips = [];
     const clipIndexMap = [];
 
+    const characters = context.characterDesign?.characters || [];
+    const storyboard = context.storyboard;
+    const allStoryboardShots = [];
+    if (storyboard?.episodes) {
+      for (const ep of storyboard.episodes) {
+        for (const seg of (ep.segments || [])) {
+          for (const shot of (seg.shots || [])) allStoryboardShots.push(shot);
+        }
+      }
+    }
+
     for (let i = 0; i < total; i++) {
       const shot = refImages.shots[i];
       if (!shot.imagePath || !shot.imageUrl) {
@@ -34,10 +45,26 @@ const videoProvider = {
         clipIndexMap.push(-1);
         continue;
       }
+
+      const shotText = ((shot.prompt || '') + ' ' + (shot.description || '')).toLowerCase();
+      let matchedChar = null;
+      for (const c of characters) {
+        if (!c.imageUrl) continue;
+        const names = [c.name, c.enName].filter(Boolean).map(n => n.toLowerCase());
+        if (names.some(n => n && shotText.includes(n))) {
+          matchedChar = c;
+          break;
+        }
+      }
+
+      const imageUrl = matchedChar?.imageUrl || shot.imageUrl;
+      const sbShot = allStoryboardShots[i];
+      const videoPrompt = buildVideoPrompt(shot, sbShot);
+
       clipIndexMap.push(apiClips.length);
       apiClips.push({
-        prompt: shot.prompt || `Video of ${shot.shot_id}`,
-        imageUrl: shot.imageUrl,
+        prompt: videoPrompt,
+        imageUrl,
         shotIndex: i
       });
     }
@@ -62,7 +89,8 @@ const videoProvider = {
             clips: apiClips.map(c => ({ prompt: c.prompt, imageUrl: c.imageUrl })),
             model: dsConfig.videoModel,
             duration: 5,
-            resolution: '720P'
+            resolution: '720P',
+            seed: 42
           })
         });
 
@@ -134,6 +162,29 @@ const videoProvider = {
     return { clips };
   }
 };
+
+function buildVideoPrompt(shot, storyboardShot) {
+  const base = shot.prompt || `Scene of ${shot.shot_id}`;
+  const camera = storyboardShot?.camera || '';
+  const motion = cameraToMotion(camera);
+  return `${base}, ${motion}`;
+}
+
+function cameraToMotion(camera) {
+  const map = {
+    'pan-left': 'camera slowly pans left',
+    'pan-right': 'camera slowly pans right',
+    'tilt-up': 'camera slowly tilts up',
+    'tilt-down': 'camera slowly tilts down',
+    'zoom-in': 'camera slowly zooms in',
+    'zoom-out': 'camera slowly zooms out',
+    'dolly-in': 'camera dollies in',
+    'dolly-out': 'camera dollies out',
+    'static': 'static camera, subtle motion',
+    'tracking': 'camera tracks the subject smoothly'
+  };
+  return map[camera] || 'subtle natural motion';
+}
 
 function buildPlaceholder(context) {
   const refImages = context.referenceImages;

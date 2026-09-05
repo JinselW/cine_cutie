@@ -91,7 +91,7 @@ app.post('/api/chat/completions', async (req, res) => {
 });
 
 app.post('/api/generate/image', async (req, res) => {
-  const { prompts, model, size } = req.body;
+  const { prompts, model, size, seed } = req.body;
   const apiKey = req.headers['x-api-key'];
 
   if (!apiKey) {
@@ -118,7 +118,7 @@ app.post('/api/generate/image', async (req, res) => {
           console.log(`[ImageBatch] task=${task.id} image ${i + 1}/${prompts.length}`);
           updateTask(task.id, { status: 'running', current: i + 1, progress: Math.round((i / prompts.length) * 100) });
 
-          const taskId = await submitImageTask(prompts[i], { model, size, apiKey });
+          const taskId = await submitImageTask(prompts[i], { model, size, apiKey, seed });
 
           let pollResult;
           for (let attempt = 0; attempt < 120; attempt++) {
@@ -173,7 +173,7 @@ app.post('/api/generate/image', async (req, res) => {
 });
 
 app.post('/api/generate/video', async (req, res) => {
-  const { clips, model, duration, resolution } = req.body;
+  const { clips, model, duration, resolution, seed } = req.body;
   const apiKey = req.headers['x-api-key'];
 
   if (!apiKey) {
@@ -212,7 +212,7 @@ app.post('/api/generate/video', async (req, res) => {
             : `${req.protocol}://${req.get('host')}${clip.imageUrl}`;
           console.log(`[VideoBatch] task=${task.id} clip ${i + 1} imageUrl=${imageUrl}`);
 
-          const taskId = await submitVideoTask(clip.prompt, imageUrl, { model, duration, resolution, apiKey });
+          const taskId = await submitVideoTask(clip.prompt, imageUrl, { model, duration, resolution, apiKey, seed });
 
           let pollResult;
           for (let attempt = 0; attempt < 240; attempt++) {
