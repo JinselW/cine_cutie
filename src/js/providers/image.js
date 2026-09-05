@@ -1,20 +1,46 @@
 import { registerProvider } from './registry.js';
 
-const CFG_KEY = 'cine-cutie-dashscope';
+const SETTINGS_KEY = 'cine-cutie-settings';
+const OLD_DS_KEY = 'cine-cutie-dashscope';
 
-let config = { apiKey: '', imageModel: 'wanx2.1-t2i-turbo', videoModel: 'wanx2.1-i2v-plus' };
+let config = { apiKey: '', imageModel: 'wanx2.1-t2i-turbo', videoModel: 'wanx2.1-i2v-plus', refVideoModel: 'wan2.7-r2v' };
 
 function loadConfig() {
   try {
-    const saved = localStorage.getItem(CFG_KEY);
-    if (saved) config = { ...config, ...JSON.parse(saved) };
+    const saved = localStorage.getItem(SETTINGS_KEY);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      config.apiKey = parsed.apiProviders?.dashscope?.apiKey || '';
+      config.imageModel = parsed.models?.image?.name || 'wanx2.1-t2i-turbo';
+      config.videoModel = parsed.models?.video?.name || 'wanx2.1-i2v-plus';
+      config.refVideoModel = parsed.models?.refVideo?.name || 'wan2.7-r2v';
+    } else {
+      const oldSaved = localStorage.getItem(OLD_DS_KEY);
+      if (oldSaved) {
+        const old = JSON.parse(oldSaved);
+        config = { ...config, ...old };
+      }
+    }
   } catch {}
 }
 
 function saveConfig(cfg) {
-  config = { ...config, ...cfg };
+  if (cfg.apiKey !== undefined) config.apiKey = cfg.apiKey;
+  if (cfg.imageModel !== undefined) config.imageModel = cfg.imageModel;
+  if (cfg.videoModel !== undefined) config.videoModel = cfg.videoModel;
+  if (cfg.refVideoModel !== undefined) config.refVideoModel = cfg.refVideoModel;
+
   try {
-    localStorage.setItem(CFG_KEY, JSON.stringify(config));
+    const saved = localStorage.getItem(SETTINGS_KEY);
+    let parsed = saved ? JSON.parse(saved) : {};
+    if (!parsed.apiProviders) parsed.apiProviders = {};
+    if (!parsed.apiProviders.dashscope) parsed.apiProviders.dashscope = {};
+    if (cfg.apiKey !== undefined) parsed.apiProviders.dashscope.apiKey = cfg.apiKey;
+    if (!parsed.models) parsed.models = {};
+    if (cfg.imageModel !== undefined) parsed.models.image = { name: cfg.imageModel };
+    if (cfg.videoModel !== undefined) parsed.models.video = { name: cfg.videoModel };
+    if (cfg.refVideoModel !== undefined) parsed.models.refVideo = { name: cfg.refVideoModel };
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(parsed));
   } catch {}
 }
 

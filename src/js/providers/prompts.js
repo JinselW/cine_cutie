@@ -1,6 +1,19 @@
 const JSON_RULE = 'Reply ONLY with valid JSON. No markdown, no commentary, no code fences.';
 const LANG_RULE = 'Write all creative content (titles, descriptions, dialogue, etc.) in the SAME LANGUAGE as the user\'s story idea. Keep all JSON keys in English exactly as specified.';
 
+const STYLE_HINTS = {
+  cinematic: 'cinematic film look, natural lighting, realistic tones',
+  fantasy: 'magical atmosphere, ethereal lighting, mythical elements',
+  scifi: 'futuristic, neon-lit, high-tech, sleek metallic surfaces',
+  anime: 'anime art style, vibrant colors, Japanese animation aesthetic',
+  noir: 'high contrast black and white, dramatic shadows, 1940s detective mood',
+  horror: 'dark atmosphere, eerie lighting, unsettling shadows',
+  romance: 'warm golden tones, soft focus, dreamy atmosphere',
+  comedy: 'bright saturated colors, upbeat energy, exaggerated expressions',
+  adventure: 'epic landscapes, dynamic lighting, warm earth tones',
+  documentary: 'naturalistic, handheld camera feel, raw authentic look'
+};
+
 export const PROMPTS = {
   script: {
     system: `You are Cine-Cutie's Scriptwriter, a professional screenwriter who creates structured scripts for AI video production. ${JSON_RULE} ${LANG_RULE}`,
@@ -15,6 +28,7 @@ STORY IDEA:
 ${ctx.userInput || 'A creative story'}
 
 GENRE: ${ctx.genre}
+VISUAL STYLE: ${STYLE_HINTS[ctx.genre] || ctx.genre || 'cinematic film look'}
 
 TARGET DURATION: ${totalDuration} seconds total (~${maxClips} video clips at 5s each)
 
