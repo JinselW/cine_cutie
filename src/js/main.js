@@ -1,5 +1,8 @@
 import './providers/template.js';
 import './providers/llm.js';
+import './providers/image.js';
+import './providers/video.js';
+import './providers/render.js';
 import { $, $$, detectGenre } from './utils.js';
 import { state } from './state.js';
 import { STEPS } from './config.js';
@@ -55,6 +58,14 @@ fileInput.addEventListener('change', () => {
   fileInput.value = '';
 });
 
+function updateDurationHint() {
+  const val = Math.max(5, parseInt($('#totalDuration').value) || 30);
+  const clips = Math.ceil(val / 5);
+  $('#durationHint').textContent = t('ui.durationInputHint', { count: clips });
+}
+$('#totalDuration').addEventListener('input', updateDurationHint);
+updateDurationHint();
+
 function renderMediaList() {
   const fl = $('#fileList');
   const media = listMedia();
@@ -89,6 +100,7 @@ $('#startBtn').addEventListener('click', () => {
 
   state.userInput = input;
   state.genre = detectGenre(input);
+  state.totalDuration = Math.max(5, Math.min(120, parseInt($('#totalDuration').value) || 30));
 
   const btn = $('#startBtn');
   btn.disabled = true;

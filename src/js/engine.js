@@ -4,31 +4,26 @@ import { runAgent } from './agents.js';
 import { t } from './i18n.js';
 import { updatePipeline, showGenerating, setMascot, addAgentMessage } from './ui/render.js';
 import {
-  renderPlanning, renderScreenplay, renderCharacters, renderVisualDesign, renderStoryboard,
-  renderShotGen, renderShotCuration, renderEditing, renderAudio,
-  renderPostProduction, renderFinalFilm, showCompletion
+  renderScript, renderCharacterDesign, renderStoryboard,
+  renderReferenceImages, renderVideoGeneration, renderPostProduction,
+  showCompletion
 } from './ui/views.js';
 import { sleep } from './utils.js';
 import { isConfigured } from './providers/llm.js';
 import { resetLog } from './observability.js';
 
 const RENDERERS = {
-  planning: (r, _sb, cb) => renderPlanning(r, cb),
-  screenplay: (r, _sb, cb) => renderScreenplay(r, cb),
-  characters: (r, _sb, cb) => renderCharacters(r, cb),
-  visualDesign: (r, _sb, cb) => renderVisualDesign(r, cb),
-  storyboard: (r, _sb, cb) => renderStoryboard(r, cb),
-  shotGen: (r, sb, cb) => renderShotGen(r, sb, cb),
-  shotCuration: (r, sb, cb) => renderShotCuration(r, sb, cb),
-  editing: (r, _sb, cb) => renderEditing(r, cb),
-  audio: (r, _sb, cb) => renderAudio(r, cb),
-  postProduction: (r, _sb, cb) => renderPostProduction(r, cb),
-  final: (r, _sb, cb) => renderFinalFilm(r, cb),
+  script: (r, cb) => renderScript(r, cb),
+  characterDesign: (r, cb) => renderCharacterDesign(r, cb),
+  storyboard: (r, cb) => renderStoryboard(r, cb),
+  referenceImages: (r, cb) => renderReferenceImages(r, cb),
+  videoGeneration: (r, cb) => renderVideoGeneration(r, cb),
+  postProduction: (r, cb) => renderPostProduction(r, cb),
 };
 
 function renderStep(stepId, result, onAdvance) {
   const fn = RENDERERS[stepId];
-  if (fn) fn(result, state.data.storyboard, onAdvance);
+  if (fn) fn(result, onAdvance);
 }
 
 let genAnim = null;
@@ -51,7 +46,7 @@ export async function advanceStep() {
 
   genAnim = showGenerating(state.currentStep);
 
-  const delay = isConfigured() ? 0 : (step.id === 'shotGen' ? 4000 : 3000 + Math.random() * 2000);
+  const delay = isConfigured() ? 0 : (3000 + Math.random() * 2000);
   const [result] = await Promise.all([
     runAgent(step.id),
     sleep(delay)
@@ -77,7 +72,7 @@ export async function reviseStep(stepId, feedback) {
   addAgentMessage(step.icon, t('ui.receivedFeedback', { step: stepLabel, feedback }));
 
   genAnim = showGenerating(stepIndex);
-  const delay = isConfigured() ? 0 : (stepId === 'shotGen' ? 3500 : 2500 + Math.random() * 1500);
+  const delay = isConfigured() ? 0 : (2500 + Math.random() * 1500);
   const [result] = await Promise.all([
     runAgent(stepId, feedback),
     sleep(delay)

@@ -1,10 +1,11 @@
 import { $ } from '../utils.js';
 import { t } from '../i18n.js';
 import { saveConfig, getConfig, isConfigured, testConnection } from '../providers/llm.js';
+import { saveConfig as saveDashScopeConfig, getConfig as getDashScopeConfig, isConfigured as isDashScopeConfigured } from '../providers/image.js';
 
 function updateIndicator() {
   const dot = $('#llmDot');
-  if (dot) dot.classList.toggle('active', isConfigured());
+  if (dot) dot.classList.toggle('active', isConfigured() || isDashScopeConfigured());
 }
 
 function showStatus(msg, ok) {
@@ -30,6 +31,15 @@ function openModal() {
   $('#cfgModel').value = cfg.model || '';
   $('#cfgJsonMode').checked = cfg.jsonMode !== false;
   $('#cfgProxy').checked = cfg.useProxy === true;
+
+  const dsCfg = getDashScopeConfig();
+  const dsKeyInput = $('#cfgDashScopeKey');
+  if (dsKeyInput) dsKeyInput.value = dsCfg.apiKey || '';
+  const dsImgInput = $('#cfgImageModel');
+  if (dsImgInput) dsImgInput.value = dsCfg.imageModel || 'wanx2.1-t2i-turbo';
+  const dsVidInput = $('#cfgVideoModel');
+  if (dsVidInput) dsVidInput.value = dsCfg.videoModel || 'wanx2.1-i2v-turbo';
+
   clearStatus();
   modal.classList.remove('hidden');
 }
@@ -48,8 +58,21 @@ function handleSave() {
 
   if (!apiKey && !model) {
     saveConfig({ endpoint: '', apiKey: '', model: '', jsonMode, useProxy });
+    const dsKeyEl = $('#cfgDashScopeKey');
+    if (dsKeyEl) {
+      saveDashScopeConfig({
+        apiKey: dsKeyEl.value.trim(),
+        imageModel: ($('#cfgImageModel')?.value.trim() || 'wanx2.1-t2i-turbo'),
+        videoModel: ($('#cfgVideoModel')?.value.trim() || 'wanx2.1-i2v-turbo')
+      });
+    }
     closeModal();
     updateIndicator();
+    return;
+  }
+
+  if (model && /t2v|i2v|video/i.test(model)) {
+    showStatus('⚠️ 模型名称看起来像视频模型，这里应填文本模型（如 qwen-plus）', false);
     return;
   }
 
@@ -59,6 +82,16 @@ function handleSave() {
   }
 
   saveConfig({ endpoint: endpoint || 'https://api.openai.com/v1', apiKey, model, jsonMode, useProxy });
+
+  const dsKeyEl = $('#cfgDashScopeKey');
+  if (dsKeyEl) {
+    saveDashScopeConfig({
+      apiKey: dsKeyEl.value.trim(),
+      imageModel: ($('#cfgImageModel')?.value.trim() || 'wanx2.1-t2i-turbo'),
+      videoModel: ($('#cfgVideoModel')?.value.trim() || 'wanx2.1-i2v-turbo')
+    });
+  }
+
   updateIndicator();
   showStatus(t('settings.saved'), true);
   setTimeout(closeModal, 1200);
@@ -68,6 +101,11 @@ async function handleTest() {
   const apiKey = $('#cfgApiKey').value.trim();
   const model = $('#cfgModel').value.trim();
   const endpoint = $('#cfgEndpoint').value.trim();
+
+  if (model && /t2v|i2v|video/i.test(model)) {
+    showStatus('⚠️ 模型名称看起来像视频模型，这里应填文本模型（如 qwen-plus）', false);
+    return;
+  }
 
   if (!apiKey || !model) {
     showStatus(t('settings.apiKey') + ' & ' + t('settings.model') + ' required', false);

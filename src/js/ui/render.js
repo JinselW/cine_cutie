@@ -6,30 +6,13 @@ export function buildPipelineBar() {
   const container = $('#pipeline');
   container.innerHTML = '';
 
-  const half = Math.ceil(STEPS.length / 2);
-  const row1 = STEPS.slice(0, half);
-  const row2 = STEPS.slice(half);
-
-  const topRow = document.createElement('div');
-  topRow.className = 'pipeline-row';
-  row1.forEach((step, i) => {
-    if (i > 0) topRow.appendChild(createLine(i - 1, 'top'));
-    topRow.appendChild(createNode(step, i));
+  const row = document.createElement('div');
+  row.className = 'pipeline-row';
+  STEPS.forEach((step, i) => {
+    if (i > 0) row.appendChild(createLine(i - 1));
+    row.appendChild(createNode(step, i));
   });
-  container.appendChild(topRow);
-
-  const connector = document.createElement('div');
-  connector.className = 'pipeline-connector';
-  connector.innerHTML = '<div class="connector-line"></div>';
-  container.appendChild(connector);
-
-  const bottomRow = document.createElement('div');
-  bottomRow.className = 'pipeline-row';
-  row2.forEach((step, i) => {
-    if (i > 0) bottomRow.appendChild(createLine(half + i - 1, 'bottom'));
-    bottomRow.appendChild(createNode(step, half + i));
-  });
-  container.appendChild(bottomRow);
+  container.appendChild(row);
 }
 
 function createNode(step, index) {
@@ -41,7 +24,7 @@ function createNode(step, index) {
   return node;
 }
 
-function createLine(index, row) {
+function createLine(index) {
   const line = document.createElement('div');
   line.className = 'pipe-line pipe-line-sm';
   line.id = `line${index}`;

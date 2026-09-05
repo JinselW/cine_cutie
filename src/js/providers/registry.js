@@ -30,7 +30,7 @@ export function getActiveProvider(capability) {
   const id = activeProviders[capability];
   if (id && providers[id]) return providers[id];
   const available = getProviders(capability);
-  return available[0] || null;
+  return available[available.length - 1] || null;
 }
 
 export function setActiveProvider(capability, id) {

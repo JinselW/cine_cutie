@@ -44,6 +44,13 @@
     <div class="section-title"><span class="icon">🎬</span> Tell me your story idea</div>
     <div class="input-area">
       <textarea id="userInput" placeholder="One sentence, a paragraph, or a wild idea — anything that sparks your imagination...&#10;&#10;e.g. &quot;A shy librarian discovers she can enter books and meet their characters&quot;"></textarea>
+      <div class="duration-row">
+        <label for="totalDuration" id="lblDuration">视频总时长（秒）</label>
+        <div class="duration-input-wrap">
+          <input type="number" id="totalDuration" value="30" min="5" max="120" step="5">
+          <span class="duration-hint" id="durationHint">每个片段约 5 秒，将生成 6 个镜头</span>
+        </div>
+      </div>
       <div class="file-upload" id="fileUpload">
         <span>📎 Drop files here or click to upload (images, audio, video, text)</span>
         <input type="file" id="fileInput" multiple accept="image/*,audio/*,video/*,.txt,.pdf,.docx,.md">
@@ -91,8 +98,9 @@
         </div>
       </div>
       <div class="modal-field">
-        <label for="cfgModel" id="lblModel">Model</label>
-        <input type="text" id="cfgModel" placeholder="gpt-4o-mini">
+        <label for="cfgModel" id="lblModel">Model <span style="font-size:0.75rem;color:var(--cream3);font-weight:400" id="modelHint">(Text model only)</span></label>
+        <input type="text" id="cfgModel" placeholder="qwen-plus, qwen-turbo, gpt-4o-mini...">
+        <div class="field-hint" id="modelHintText" style="font-size:0.72rem;color:var(--cream3);margin-top:4px">用于剧本和分镜生成。不要填视频模型（如 wan2.x-t2v-xxx）</div>
       </div>
       <div class="modal-field modal-field-row">
         <label id="lblJsonMode">JSON Mode</label>
@@ -107,6 +115,20 @@
           <input type="checkbox" id="cfgProxy">
           <span class="toggle-slider"></span>
         </label>
+      </div>
+      <div class="modal-divider"></div>
+      <div class="modal-section-title" id="dashscopeTitle">DashScope Settings</div>
+      <div class="modal-field">
+        <label for="cfgDashScopeKey" id="lblDashScopeKey">DashScope API Key</label>
+        <input type="password" id="cfgDashScopeKey" placeholder="sk-...">
+      </div>
+      <div class="modal-field">
+        <label for="cfgImageModel" id="lblImageModel">Image Model</label>
+        <input type="text" id="cfgImageModel" placeholder="wanx2.1-t2i-turbo">
+      </div>
+      <div class="modal-field">
+        <label for="cfgVideoModel" id="lblVideoModel">Video Model</label>
+        <input type="text" id="cfgVideoModel" placeholder="wanx2.1-i2v-turbo">
       </div>
       <div class="modal-actions">
         <button id="testConnBtn" class="action-btn" type="button">
