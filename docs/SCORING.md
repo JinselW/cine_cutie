@@ -34,7 +34,7 @@
 | Post-Production Artist | 后期制作 | "expert in color grading, VFX" |
 | Director | 最终汇总 | "overseeing the final film assembly" |
 
-**调度机制**: `engine.js` 按配置顺序推进，`agents.js` 统一运行。
+**调度机制**: `engine.js` 按配置顺序推进，`orchestrator.js` 调度 Agent 执行。
 
 ### 1.2 Planner Agent — 规划能力
 
@@ -224,7 +224,7 @@
 | `src/js/providers/critic.js` | ~183 | 质量评审、评分、重试反馈 |
 | `src/js/providers/consistency.js` | ~148 | 实体提取、约束生成 |
 | `src/js/engine.js` | ~98 | Pipeline 引擎、Renderer Registry |
-| `src/js/agents.js` | ~57 | Agent 运行、上下文裁剪 |
+| `src/js/orchestrator.js` | ~440 | 编排器、Agent 调度、恢复、回滚 |
 | `src/js/observability.js` | ~58 | 执行日志 |
 | `src/js/ui/views.js` | ~620 | 所有步骤视图 + 执行日志视图 |
 | `src/js/i18n.js` | ~430 | 中英双语字典 |

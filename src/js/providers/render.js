@@ -1,72 +1,80 @@
 import { registerProvider } from './registry.js';
-import { addAgentMessage } from '../ui/render.js';
-import { t } from '../i18n.js';
 
 const renderProvider = {
   id: 'render',
   name: 'FFmpeg Render',
   capabilities: ['render'],
 
-  async generate({ step, genre, context }) {
-    if (step !== 'postProduction') return null;
+  async generate({ items, signal } = {}) {
+    const validPaths = (items || [])
+      .filter(item => item.videoPath && item.status === 'complete')
+      .map(item => item.videoPath);
 
-    const videoClips = context.videoClips;
-    const validPaths = (videoClips?.clips || [])
-      .filter(c => c.videoPath && c.status === 'complete')
-      .map(c => c.videoPath);
-
-    if (validPaths.length === 0) {
-      addAgentMessage('⚠️', t('ui.postProdNoClips'));
-      return { episodes: [], finalVideo: '', status: 'no-clips' };
+    if (!validPaths.length) {
+      return { finalVideo: '', status: 'no-clips', error: 'No valid video clips' };
     }
 
-    addAgentMessage('🎬', t('ui.postProdRendering'));
+    if (signal?.aborted) {
+      return { finalVideo: '', status: 'failed', error: 'Cancelled' };
+    }
 
     try {
       const res = await fetch('/api/render/final', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ videoPaths: validPaths })
+        signal,
+        body: JSON.stringify({ videoPaths: validPaths }),
       });
 
       if (!res.ok) {
         const errText = await res.text().catch(() => '');
-        addAgentMessage('⚠️', `Render failed: ${errText.substring(0, 100)}`);
-        return { episodes: [], finalVideo: '', status: 'failed' };
+        return { finalVideo: '', status: 'failed', error: `HTTP ${res.status}: ${errText.substring(0, 100)}` };
       }
 
       const { taskId } = await res.json();
+      const startTime = Date.now();
+      const MAX_WAIT = 6 * 60 * 1000;
 
-      let finalPath = '';
       for (let attempt = 0; attempt < 120; attempt++) {
+        if (signal?.aborted) {
+          return { finalVideo: '', status: 'failed', error: 'Cancelled' };
+        }
+        if (Date.now() - startTime > MAX_WAIT) {
+          return { finalVideo: '', status: 'failed', error: 'Timeout' };
+        }
         await new Promise(r => setTimeout(r, 3000));
-        const pollController = new AbortController();
-        const pollTimeout = setTimeout(() => pollController.abort(), 30000);
-        const taskRes = await fetch(`/api/task/${taskId}`, { signal: pollController.signal });
-        clearTimeout(pollTimeout);
-        const taskData = await taskRes.json();
+
+        const ctrl = new AbortController();
+        const tid = setTimeout(() => ctrl.abort(), 30000);
+        if (signal) {
+          if (signal.aborted) { ctrl.abort(); clearTimeout(tid); break; }
+          signal.addEventListener('abort', () => ctrl.abort(), { once: true });
+        }
+        let taskData;
+        try {
+          const taskRes = await fetch(`/api/task/${taskId}`, { signal: ctrl.signal });
+          clearTimeout(tid);
+          taskData = await taskRes.json();
+        } catch {
+          clearTimeout(tid);
+          if (signal?.aborted) break;
+          continue;
+        }
+
         if (taskData.status === 'completed') {
-          finalPath = taskData.result?.path || '';
-          break;
+          const finalPath = taskData.result?.path || '';
+          return { finalVideo: finalPath, status: finalPath ? 'complete' : 'failed', error: finalPath ? null : 'No output' };
         }
         if (taskData.status === 'failed') {
-          addAgentMessage('⚠️', `Render failed: ${taskData.error || 'Unknown error'}`);
-          return { episodes: [], finalVideo: '', status: 'failed' };
+          return { finalVideo: '', status: 'failed', error: taskData.error || 'Render failed' };
         }
       }
 
-      addAgentMessage('🎬', t('ui.postProdComplete'));
-
-      return {
-        episodes: (context.storyboard?.episodes || []).map(ep => ({ episode: ep.episode })),
-        finalVideo: finalPath,
-        status: finalPath ? 'complete' : 'failed'
-      };
+      return { finalVideo: '', status: 'failed', error: 'Timeout' };
     } catch (err) {
-      addAgentMessage('⚠️', `Render error: ${err.message}`);
-      return { episodes: [], finalVideo: '', status: 'failed' };
+      return { finalVideo: '', status: 'failed', error: err.message };
     }
-  }
+  },
 };
 
 registerProvider(renderProvider);
