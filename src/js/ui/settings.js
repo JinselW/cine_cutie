@@ -2,6 +2,7 @@ import { $, $$ } from '../utils.js';
 import { t } from '../i18n.js';
 import { saveConfig, getConfig, isConfigured, testConnection, inferProvider, MODEL_PRESETS, IMAGE_PRESETS, VIDEO_PRESETS, REF_VIDEO_PRESETS, PROVIDER_DEFAULTS } from '../providers/llm.js';
 import { saveConfig as saveDashScopeConfig } from '../providers/image.js';
+import { setActiveProvider } from '../providers/registry.js';
 
 const PROVIDER_LIST = ['openai', 'deepseek', 'dashscope', 'ark', 'kling', 'gemini'];
 const CUSTOM_VALUE = '__custom__';
@@ -134,6 +135,21 @@ function openModal() {
   $('#cfgJsonMode').checked = cfg.jsonMode !== false;
   $('#cfgProxy').checked = cfg.useProxy === true;
 
+  const comfyCfg = loadComfySshConfig();
+  $('#comfySshHost').value = comfyCfg.host || '';
+  $('#comfySshPort').value = comfyCfg.port || '';
+  $('#comfySshUser').value = comfyCfg.user || '';
+  $('#comfySshComfyPort').value = comfyCfg.comfyPort || '';
+  $('#comfyEnableLightning').checked = comfyCfg.enableLightning || false;
+
+  try {
+    const prefs = JSON.parse(localStorage.getItem('cine-cutie-providers') || '{}');
+    const videoProviderSelect = $('#cfgVideoProvider');
+    if (videoProviderSelect && prefs.video) {
+      videoProviderSelect.value = prefs.video;
+    }
+  } catch {}
+
   clearStatus();
   modal.classList.remove('hidden');
 }
@@ -207,6 +223,13 @@ function handleSave() {
     videoModel: videoName || 'wanx2.1-i2v-plus',
     refVideoModel: refVideoName || 'wan2.7-r2v',
   });
+
+  saveComfySshConfig();
+
+  const videoProviderSelect = $('#cfgVideoProvider');
+  if (videoProviderSelect?.value) {
+    setActiveProvider('video', videoProviderSelect.value);
+  }
 
   updateIndicator();
   showStatus(t('settings.saved'), true);
@@ -284,6 +307,54 @@ function setupModelSelectChange(selectId, customWrapId, presets) {
   });
 }
 
+function loadComfySshConfig() {
+  try {
+    const saved = localStorage.getItem('cine-cutie-comfy-ssh');
+    if (saved) return JSON.parse(saved);
+  } catch {}
+  return {};
+}
+
+function saveComfySshConfig() {
+  const config = {
+    host: $('#comfySshHost')?.value?.trim() || '',
+    port: parseInt($('#comfySshPort')?.value) || 6078,
+    user: $('#comfySshUser')?.value?.trim() || 'Developer',
+    comfyPort: parseInt($('#comfySshComfyPort')?.value) || 8188,
+    enableLightning: $('#comfyEnableLightning')?.checked || false,
+  };
+  localStorage.setItem('cine-cutie-comfy-ssh', JSON.stringify(config));
+  return config;
+}
+
+async function handleComfyTest() {
+  const config = saveComfySshConfig();
+  const statusEl = $('#comfyTestStatus');
+  const btn = $('#comfyTestBtn');
+  if (!config.host) {
+    if (statusEl) { statusEl.textContent = 'Host required'; statusEl.className = 'settings-status err'; }
+    return;
+  }
+  btn.disabled = true;
+  if (statusEl) { statusEl.textContent = 'Connecting...'; statusEl.className = 'settings-status'; }
+
+  try {
+    const res = await fetch('/api/comfyui/status', {
+      headers: { 'X-Ssh-Config': JSON.stringify(config) },
+    });
+    const data = await res.json();
+    if (data.comfyui?.online) {
+      const gpuInfo = data.comfyui.gpu?.map(g => `${g.name} (${g.vram_free}/${g.vram_total}MB)`).join(', ') || 'OK';
+      if (statusEl) { statusEl.textContent = `Connected! GPU: ${gpuInfo}`; statusEl.className = 'settings-status ok'; }
+    } else {
+      if (statusEl) { statusEl.textContent = `ComfyUI offline: ${data.comfyui?.error || 'unknown'}`; statusEl.className = 'settings-status err'; }
+    }
+  } catch (err) {
+    if (statusEl) { statusEl.textContent = `Error: ${err.message}`; statusEl.className = 'settings-status err'; }
+  }
+  btn.disabled = false;
+}
+
 export function initSettings() {
   const settingsBtn = $('#settingsBtn');
   const settingsClose = $('#settingsClose');
@@ -317,6 +388,9 @@ export function initSettings() {
 
   const testBtn = $('#testConnBtn');
   if (testBtn) testBtn.addEventListener('click', handleTest);
+
+  const comfyTestBtn = $('#comfyTestBtn');
+  if (comfyTestBtn) comfyTestBtn.addEventListener('click', handleComfyTest);
 
   updateIndicator();
 }

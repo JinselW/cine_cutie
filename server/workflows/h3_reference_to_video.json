@@ -1,0 +1,426 @@
+{
+  "92": {
+    "inputs": {
+      "filename_prefix": "video/MiniMax_H3",
+      "format": "auto",
+      "format.codec": "auto",
+      "codec": "auto",
+      "video": [
+        "130",
+        0
+      ]
+    },
+    "class_type": "SaveVideo",
+    "_meta": {
+      "title": "保存视频"
+    }
+  },
+  "115": {
+    "inputs": {
+      "aspect_ratio": "16:9 (Widescreen)",
+      "megapixels": 0.7,
+      "multiple": 32
+    },
+    "class_type": "ResolutionSelector",
+    "_meta": {
+      "title": "Resolution Selector (Size)"
+    }
+  },
+  "119": {
+    "inputs": {
+      "vae_name": "minimax_h3_video_vae_fp16.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "加载VAE"
+    }
+  },
+  "120": {
+    "inputs": {
+      "vae_name": "minimax_h3_audio_vae_fp32.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "加载VAE"
+    }
+  },
+  "121": {
+    "inputs": {
+      "samples": [
+        "125",
+        0
+      ],
+      "vae": [
+        "120",
+        0
+      ]
+    },
+    "class_type": "VAEDecodeAudio",
+    "_meta": {
+      "title": "VAE解码（音频）"
+    }
+  },
+  "122": {
+    "inputs": {
+      "samples": [
+        "125",
+        0
+      ],
+      "vae": [
+        "119",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE解码"
+    }
+  },
+  "123": {
+    "inputs": {
+      "sampler_name": "res_multistep"
+    },
+    "class_type": "KSamplerSelect",
+    "_meta": {
+      "title": "K采样器选择"
+    }
+  },
+  "124": {
+    "inputs": {
+      "scheduler": "simple",
+      "steps": [
+        "142",
+        0
+      ],
+      "denoise": 1,
+      "model": [
+        "127",
+        0
+      ]
+    },
+    "class_type": "BasicScheduler",
+    "_meta": {
+      "title": "基本调度器"
+    }
+  },
+  "125": {
+    "inputs": {
+      "noise": [
+        "129",
+        0
+      ],
+      "guider": [
+        "126",
+        0
+      ],
+      "sampler": [
+        "123",
+        0
+      ],
+      "sigmas": [
+        "124",
+        0
+      ],
+      "latent_image": [
+        "136",
+        1
+      ]
+    },
+    "class_type": "SamplerCustomAdvanced",
+    "_meta": {
+      "title": "自定义采样器（高级）"
+    }
+  },
+  "126": {
+    "inputs": {
+      "model": [
+        "141",
+        0
+      ],
+      "conditioning": [
+        "136",
+        0
+      ]
+    },
+    "class_type": "BasicGuider",
+    "_meta": {
+      "title": "基本引导器"
+    }
+  },
+  "127": {
+    "inputs": {
+      "unet_name": "minimax_h3_fl2va_pruned_int8_convrot.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "UNet加载器"
+    }
+  },
+  "128": {
+    "inputs": {
+      "clip_name": "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+      "type": "minimax",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "加载CLIP"
+    }
+  },
+  "129": {
+    "inputs": {
+      "noise_seed": 1020638165801107
+    },
+    "class_type": "RandomNoise",
+    "_meta": {
+      "title": "随机噪波"
+    }
+  },
+  "130": {
+    "inputs": {
+      "fps": 24,
+      "bit_depth": 8,
+      "color_space": "sRGB",
+      "images": [
+        "122",
+        0
+      ],
+      "audio": [
+        "121",
+        0
+      ]
+    },
+    "class_type": "CreateVideo",
+    "_meta": {
+      "title": "创建视频"
+    }
+  },
+  "131": {
+    "inputs": {
+      "expression": "max(5, round(a * 24)) + (5 - (max(5, round(a * 24)) % 17)) % 17",
+      "values.a": [
+        "132",
+        0
+      ]
+    },
+    "class_type": "ComfyMathExpression",
+    "_meta": {
+      "title": "数学表达式"
+    }
+  },
+  "132": {
+    "inputs": {
+      "value": 5
+    },
+    "class_type": "PrimitiveFloat",
+    "_meta": {
+      "title": "Float (Duration)"
+    }
+  },
+  "136": {
+    "inputs": {
+      "prompt": [
+        "138",
+        0
+      ],
+      "width": [
+        "115",
+        0
+      ],
+      "height": [
+        "115",
+        1
+      ],
+      "length": [
+        "131",
+        1
+      ],
+      "ref_image_size": "match",
+      "clip": [
+        "128",
+        0
+      ],
+      "vae": [
+        "119",
+        0
+      ],
+      "audio_vae": [
+        "120",
+        0
+      ],
+      "ref_images.ref_image_0": [
+        "137",
+        0
+      ],
+      "ref_images.ref_image_1": [
+        "149",
+        0
+      ],
+      "ref_images.ref_image_2": [
+        "150",
+        0
+      ],
+      "ref_images.ref_image_3": [
+        "151",
+        0
+      ],
+      "ref_images.ref_image_4": [
+        "154",
+        0
+      ],
+      "ref_images.ref_image_5": [
+        "155",
+        0
+      ]
+    },
+    "class_type": "MiniMaxH3ReferenceToVideo",
+    "_meta": {
+      "title": "MiniMax H3 参考转视频"
+    }
+  },
+  "137": {
+    "inputs": {
+      "image": "1 (2).png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "加载图像"
+    }
+  },
+  "138": {
+    "inputs": {
+      "value": "anime cel-shaded animation style, Psycho-Pass aesthetic, Makoto Shinkai background art quality, cool blue-grey institutional color palette, soft diffused overhead lighting, 16:9\n\nReference image guide — six images, each with a specific role:\n\nImage 1 (conference room) — style and composition anchor. A cold-toned institutional meeting room: long dark conference table with grey office chairs, a large data display screen on the left wall showing declining trend charts with a small planet visualization and gauge dials at the bottom, large curved windows on the right revealing a Mars dome city under an orange-red sky. This image defines the room layout, lighting, color palette, and overall visual style. The video must closely match this image's look and composition.\n\nImages 2 & 3 (Bureau Chief) — character appearance reference. A 55-year-old man: short silver-grey hair (darker on top, grey temples), deep-set dark eyes, visible age lines on the face, fair skin, wearing a formal dark institutional uniform. These define his face, expression, and clothing.\n\nImages 4 & 5 (Female Scientist) — character appearance reference. A 32-year-old woman: black shoulder-length hair with natural bangs, cold ice-blue eyes, fair cool-toned skin, delicate features, wearing a professional institutional outfit. These define her face, expression, and clothing.\n\nImage 6 (documents) — document style reference. Old weathered paper files and folders scattered messily on a dark surface: aged manila folders, yellowed and stained papers with faded text and charts, pages slightly curled, a pen among the papers. Warm beige and yellow-brown tones contrasting with the cool room. This defines the look, texture, and scattered arrangement of the documents on the table.\n\n---\n\nSCENE LAYOUT (all fixed, nothing moves):\n\nThe room matches Image 1. Long dark conference table centered. Data screen on the left wall. Curved windows on the right showing Mars city outside. All walls, furniture, windows, screen frame stay completely still.\n\nBureau Chief: stands beside the data screen on the left, body turned sideways toward the screen (profile or three-quarter view, NOT facing the camera). Brow furrowed, expression grave and serious, eyes locked on the declining curves on the screen. Still posture, no walking, no gesturing.\n\nFemale Scientist: sits at the conference table on the side opposite the screen. Head turned toward the screen, eyes focused on the same data. Expression calm and analytical. Upright posture. On the table directly in front of her: documents scattered in disarray matching Image 6 — old yellowed folders and papers spread messily, some overlapping, a pen among them. NOT neatly stacked. Hands resting near the documents. No speaking, no gesturing.\n\n---\n\nANIMATIONS (only these things move, everything else is still):\n\n1. Planet on screen: A small orange-red planet (Mars) on the data screen rotates slowly and subtly — a gentle, barely noticeable rotation. The planet is orange-red on ALL sides at ALL times. As it rotates, every angle that comes into view is the same rusty orange-red Martian surface. The color never shifts — no blue, no green, no Earth-like features appear on any side during the entire rotation. The planet stays Mars-colored throughout. Rotation is smooth, about a quarter turn over the full shot. No morphing, no shape distortion.\n\n2. Gauge needles: The circular dial indicators at the bottom of the data screen twitch very slightly — minimal micro-movements, just a few degrees of tremble, as if showing live fluctuating data. Needles do NOT swing wildly.\n\n3. Camera: Starts from a medium-wide shot of the full conference room (matching Image 1 composition — screen on left, table center, Bureau Chief by screen, Female Scientist opposite, windows on right). Slowly and steadily pushes in toward the Bureau Chief. By the end, the frame has tightened to a medium shot with the Bureau Chief and screen dominant, Female Scientist still visible but smaller. Movement is smooth, continuous, no jerks or speed changes. Push-in direction is slightly angled toward the Bureau Chief's position, not straight down the table center.\n\n---\n\nMOOD:\n\nCold, institutional, heavy with unspoken tension. Cool blue-grey room. Declining data curves. Bureau Chief's furrowed brow. Female Scientist's quiet intensity. Scattered old documents. The weight of crisis conveyed through atmosphere and expression alone. No one speaks. No one moves dramatically.\n\n---\n\nNEGATIVE PROMPTS:\n\nNo text overlays, no logos, no watermarks, no Chinese characters, no deformed structures, no floating objects, no sudden style changes, no photorealistic elements, no structures sliding or teleporting, no characters walking or changing position, no dramatic gestures, no mouth movements, no facial deformities, no expression changes, no camera shakes or jerks, no sudden lighting changes, the planet on screen must remain orange-red on all sides at all times and must never turn blue green or Earth-like, the planet must not morph or distort, gauge needles must only move minimally, Bureau Chief must face the screen not the camera, Female Scientist must look toward the screen not the camera, documents must appear scattered and weathered not neatly stacked, no people visible outside the windows"
+    },
+    "class_type": "PrimitiveStringMultiline",
+    "_meta": {
+      "title": "Input Text (Prompt)"
+    }
+  },
+  "141": {
+    "inputs": {
+      "switch": [
+        "146",
+        0
+      ],
+      "on_false": [
+        "127",
+        0
+      ],
+      "on_true": [
+        "145",
+        0
+      ]
+    },
+    "class_type": "ComfySwitchNode",
+    "_meta": {
+      "title": "If/Else Switch (model)"
+    }
+  },
+  "142": {
+    "inputs": {
+      "switch": [
+        "146",
+        0
+      ],
+      "on_false": [
+        "143",
+        0
+      ],
+      "on_true": [
+        "144",
+        0
+      ]
+    },
+    "class_type": "ComfySwitchNode",
+    "_meta": {
+      "title": "If/Else Switch (Steps)"
+    }
+  },
+  "143": {
+    "inputs": {
+      "value": 20
+    },
+    "class_type": "PrimitiveInt",
+    "_meta": {
+      "title": "Int (Full)"
+    }
+  },
+  "144": {
+    "inputs": {
+      "value": 4
+    },
+    "class_type": "PrimitiveInt",
+    "_meta": {
+      "title": "Int (Lightning LoRA)"
+    }
+  },
+  "145": {
+    "inputs": {
+      "lora_name": "minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors",
+      "strength_model": 1,
+      "model": [
+        "127",
+        0
+      ]
+    },
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": {
+      "title": "LoRA加载器（仅模型）"
+    }
+  },
+  "146": {
+    "inputs": {
+      "value": false
+    },
+    "class_type": "PrimitiveBoolean",
+    "_meta": {
+      "title": "Boolean (Enable Lightning LoRA)"
+    }
+  },
+  "149": {
+    "inputs": {
+      "image": "2.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "加载图像"
+    }
+  },
+  "150": {
+    "inputs": {
+      "image": "3.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "加载图像"
+    }
+  },
+  "151": {
+    "inputs": {
+      "image": "4.jpg"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "加载图像"
+    }
+  },
+  "154": {
+    "inputs": {
+      "image": "5.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "加载图像"
+    }
+  },
+  "155": {
+    "inputs": {
+      "image": "6.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "加载图像"
+    }
+  }
+}

@@ -1,9 +1,12 @@
+import 'dotenv/config';
 import express from 'express';
 import multer from 'multer';
 import { LRUCache } from './cache.js';
 import { submitImageTask, submitVideoTask, submitVideoTaskV2, pollTask, downloadFile, detectVideoMode, fileToDataUri } from './dashscope.js';
 import { createTask, getTask, updateTask } from './tasks.js';
 import { concatVideos, checkFfmpeg } from './render.js';
+import { submitWorkflow, pollUntilDone, downloadOutput, uploadImageToComfy, checkComfyUIStatus } from './comfyui.js';
+import { ensureTunnel, closeTunnel, getTunnelStatus } from './ssh-tunnel.js';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
@@ -18,6 +21,20 @@ fs.mkdirSync(MEDIA_DIR, { recursive: true });
 
 const UPLOADS_DIR = path.join(MEDIA_DIR, 'uploads');
 fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+
+function buildSshConfig(partial) {
+  const password = process.env.COMFY_SSH_PASSWORD;
+  if (!password) {
+    return null;
+  }
+  return {
+    host: partial?.host,
+    port: partial?.port || 6078,
+    user: partial?.user || 'Developer',
+    password,
+    comfyPort: partial?.comfyPort || 8188,
+  };
+}
 
 const upload = multer({
   storage: multer.diskStorage({
@@ -389,6 +406,162 @@ app.post('/api/render/final', async (req, res) => {
   });
 
   res.json({ taskId: task.id });
+});
+
+app.post('/api/generate/video-comfy', async (req, res) => {
+  const { clips, sshConfig: clientSsh, duration, aspectRatio, enableLightning, uploads } = req.body;
+
+  if (!clientSsh?.host || !clientSsh?.user) {
+    return res.status(400).json({ error: 'Missing SSH config (host, user required)' });
+  }
+
+  const sshConfig = buildSshConfig(clientSsh);
+  if (!sshConfig) {
+    return res.status(500).json({ error: 'COMFY_SSH_PASSWORD not set on server' });
+  }
+
+  if (!Array.isArray(clips) || clips.length === 0) {
+    return res.status(400).json({ error: 'Missing clips array' });
+  }
+
+  const task = createTask('video-comfy', { total: clips.length });
+
+  (async () => {
+    const results = [];
+    console.log(`[ComfyUI] task=${task.id} starting ${clips.length} clips`);
+
+    try {
+      const tunnel = await ensureTunnel(sshConfig);
+      console.log(`[ComfyUI] tunnel ready at localhost:${tunnel.port}`);
+    } catch (err) {
+      updateTask(task.id, { status: 'failed', error: `SSH tunnel failed: ${err.message}` });
+      return;
+    }
+
+    for (let i = 0; i < clips.length; i++) {
+      const clip = clips[i];
+      let lastError = null;
+
+      for (let retry = 0; retry <= 2; retry++) {
+        if (retry > 0) {
+          console.log(`[ComfyUI] task=${task.id} clip ${i + 1} retry ${retry}/2`);
+          await new Promise(r => setTimeout(r, 3000));
+        }
+        try {
+          updateTask(task.id, { status: 'running', current: i + 1, progress: Math.round((i / clips.length) * 100) });
+
+          let refImageFiles = [];
+          if (uploads?.referenceImages?.length > 0) {
+            for (const ref of uploads.referenceImages) {
+              if (ref.localPath) {
+                const remoteName = `ref_${task.id}_${i}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}${path.extname(ref.localPath)}`;
+                await uploadImageToComfy(sshConfig, ref.localPath, remoteName);
+                refImageFiles.push(remoteName);
+              }
+            }
+          }
+
+          const promptId = await submitWorkflow(sshConfig, {
+            prompt: clip.prompt || 'Scene animation',
+            seed: clip.seed ?? Math.floor(Math.random() * 1e15),
+            duration: duration || 5,
+            refImageFiles,
+            enableLightning: enableLightning || false,
+            aspectRatio: aspectRatio || '16:9',
+          });
+
+          console.log(`[ComfyUI] task=${task.id} clip ${i + 1} submitted, prompt_id=${promptId}`);
+
+          const result = await pollUntilDone(sshConfig, promptId, { timeoutMs: 600000 });
+
+          if (result.status === 'success' && result.outputs.length > 0) {
+            const output = result.outputs[0];
+            const downloaded = await downloadOutput(sshConfig, output, MEDIA_DIR);
+            results.push({ index: i, status: 'ok', path: `/api/media/${downloaded.localName}`, prompt: clip.prompt });
+            console.log(`[ComfyUI] task=${task.id} clip ${i + 1} OK → ${downloaded.localName}`);
+            lastError = null;
+            break;
+          } else {
+            lastError = result.message || 'No output from ComfyUI';
+            console.log(`[ComfyUI] task=${task.id} clip ${i + 1} FAILED: ${lastError}`);
+          }
+        } catch (err) {
+          lastError = err.message;
+          console.log(`[ComfyUI] task=${task.id} clip ${i + 1} ERROR: ${err.message}`);
+        }
+      }
+
+      if (lastError) {
+        results.push({ index: i, status: 'error', error: lastError });
+      }
+    }
+
+    const successCount = results.filter(r => r.status === 'ok').length;
+    console.log(`[ComfyUI] task=${task.id} completed: ${successCount}/${clips.length} succeeded`);
+    updateTask(task.id, {
+      status: 'completed',
+      progress: 100,
+      result: { clips: results, total: clips.length, success: successCount }
+    });
+  })().catch(err => {
+    console.error(`[ComfyUI] task=${task.id} FATAL: ${err.message}`);
+    updateTask(task.id, { status: 'failed', error: err.message });
+  });
+
+  res.json({ taskId: task.id });
+});
+
+app.post('/api/upload/comfy', upload.array('files', 10), async (req, res) => {
+  if (!req.files?.length) {
+    return res.status(400).json({ error: 'No files uploaded' });
+  }
+
+  const clientSsh = req.body.sshConfig ? JSON.parse(req.body.sshConfig) : null;
+  if (!clientSsh?.host) {
+    return res.status(400).json({ error: 'Missing sshConfig in form data' });
+  }
+
+  const sshConfig = buildSshConfig(clientSsh);
+  if (!sshConfig) {
+    return res.status(500).json({ error: 'COMFY_SSH_PASSWORD not set on server' });
+  }
+
+  const uploaded = [];
+  for (const file of req.files) {
+    try {
+      const remoteName = await uploadImageToComfy(sshConfig, file.path, file.filename);
+      uploaded.push({ localPath: file.path, remoteName, path: `/api/media/uploads/${file.filename}` });
+    } catch (err) {
+      uploaded.push({ localPath: file.path, error: err.message, path: `/api/media/uploads/${file.filename}` });
+    }
+  }
+
+  res.json({ files: uploaded });
+});
+
+app.get('/api/comfyui/status', async (req, res) => {
+  const sshConfigStr = req.headers['x-ssh-config'];
+  if (!sshConfigStr) {
+    return res.json({ tunnel: getTunnelStatus(), comfyui: { online: false, error: 'No SSH config provided' } });
+  }
+
+  try {
+    const clientSsh = JSON.parse(sshConfigStr);
+    const sshConfig = buildSshConfig(clientSsh);
+    if (!sshConfig) {
+      return res.json({ tunnel: getTunnelStatus(), comfyui: { online: false, error: 'COMFY_SSH_PASSWORD not set on server' } });
+    }
+    const tunnel = getTunnelStatus();
+    const comfyStatus = await checkComfyUIStatus(sshConfig);
+    res.json({ tunnel, comfyui: comfyStatus });
+  } catch (err) {
+    res.json({ tunnel: getTunnelStatus(), comfyui: { online: false, error: err.message } });
+  }
+});
+
+app.post('/api/comfyui/tunnel/close', (req, res) => {
+  closeTunnel();
+  res.json({ ok: true });
 });
 
 app.get('/api/task/:id', (req, res) => {
