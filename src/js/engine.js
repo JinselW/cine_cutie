@@ -1,5 +1,5 @@
-import { startPipeline, reviseStep } from './orchestrator.js';
+import { startPipeline, reviseStep, restoreSession } from './orchestrator.js';
 
 window.__reviseStep = reviseStep;
 
-export { startPipeline };
+export { startPipeline, restoreSession };

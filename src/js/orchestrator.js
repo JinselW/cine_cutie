@@ -3,7 +3,7 @@ import { state } from './state.js';
 import { t } from './i18n.js';
 import {
   updatePipeline, showGenerating, addAgentMessage, setGenAnim,
-  clearCurrentMessages, waitForResume, getGenAnim,
+  clearCurrentMessages, waitForResume, getGenAnim, setPipelineControls,
 } from './ui/render.js';
 import {
   renderScript, renderCharacterDesign, renderStoryboard,
@@ -29,6 +29,7 @@ import { validateStoryboard } from './agents/storyboardAgent.js';
 import { ExecutionCheckpoint } from './orchestrator/executionCheckpoint.js';
 import { RunState, RunStatus } from './orchestrator/runState.js';
 import { CancellationToken } from './orchestrator/cancellationToken.js';
+import { registerAgent, resolveAgent } from './orchestrator/agentRegistry.js';
 
 const RENDERERS = {
   script: (r, cb) => renderScript(r, cb),
@@ -50,18 +51,17 @@ const POST_VALIDATORS = {
 
 class Orchestrator {
   #store = new ArtifactStore();
-  #agents = new Map();
   #checkpoint = new ExecutionCheckpoint();
   #runState = new RunState();
   #token = null;
 
   constructor() {
-    this.#agents.set('script', new ScriptAgent());
-    this.#agents.set('storyboard', new StoryboardAgent());
-    this.#agents.set('characterDesign', new CharacterAgent());
-    this.#agents.set('referenceImages', new ReferenceAgent());
-    this.#agents.set('videoGeneration', new VideoAgent());
-    this.#agents.set('postProduction', new EditorAgent());
+    registerAgent('script', new ScriptAgent());
+    registerAgent('storyboard', new StoryboardAgent());
+    registerAgent('characterDesign', new CharacterAgent());
+    registerAgent('referenceImages', new ReferenceAgent());
+    registerAgent('videoGeneration', new VideoAgent());
+    registerAgent('postProduction', new EditorAgent());
     initObservability(this.#store);
   }
 
@@ -111,10 +111,19 @@ class Orchestrator {
     state.stepRunning = true;
 
     const delay = isConfigured() ? 0 : (3000 + Math.random() * 2000);
-    const [result] = await Promise.all([
-      this.#runMigratedStep(step),
-      sleep(delay),
-    ]);
+    let result;
+    try {
+      [result] = await Promise.all([
+        this.#runMigratedStep(step),
+        sleep(delay),
+      ]);
+    } catch (err) {
+      if (!state.stopped) throw err;
+      this.#runState.markInterrupted();
+      this.#runState.persist();
+      this.#checkpoint.persist();
+      return;
+    }
 
     await waitForResume();
     if (state.stopped) {
@@ -150,7 +159,7 @@ class Orchestrator {
   }
 
   async #runMigratedStep(step) {
-    const agent = this.#agents.get(step.id);
+    const agent = resolveAgent(step.id);
     const agentName = step.agent || 'Agent';
     logStepStart(step.id, agentName);
 
@@ -268,10 +277,16 @@ class Orchestrator {
     state.stepRunning = true;
 
     const delay = isConfigured() ? 0 : (2500 + Math.random() * 1500);
-    const [result] = await Promise.all([
-      this.#runMigratedRevision(step, feedback),
-      sleep(delay),
-    ]);
+    let result;
+    try {
+      [result] = await Promise.all([
+        this.#runMigratedRevision(step, feedback),
+        sleep(delay),
+      ]);
+    } catch (err) {
+      if (!state.stopped) throw err;
+      return;
+    }
 
     await waitForResume();
     if (state.stopped) return;
@@ -291,7 +306,7 @@ class Orchestrator {
   }
 
   async #runMigratedRevision(step, feedback) {
-    const agent = this.#agents.get(step.id);
+    const agent = resolveAgent(step.id);
     const agentName = step.agent || 'Agent';
     logStepStart(step.id, agentName);
 
@@ -454,3 +469,5 @@ export function resumePipeline() {
 export function stopPipeline() {
   getOrchestrator().stopPipeline();
 }
+
+setPipelineControls({ pause: pausePipeline, resume: resumePipeline, stop: stopPipeline });

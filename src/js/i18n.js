@@ -70,6 +70,7 @@ const en = {
   'ui.resume': 'Resume',
   'ui.stop': 'Stop',
   'ui.stepPaused': 'Paused',
+  'ui.sessionRestored': 'Restored your previous unfinished session — review it or start a new one',
 
   'ui.planningTitle': 'Creative Direction',
   'ui.planningTheme': 'Theme',
@@ -328,6 +329,7 @@ const zh = {
   'ui.resume': '继续',
   'ui.stop': '停止',
   'ui.stepPaused': '已暂停',
+  'ui.sessionRestored': '已恢复上次未完成的会话，可查看进度或重新开拍',
 
   'ui.planningTitle': '创意方向',
   'ui.planningTheme': '主题',
