@@ -2,6 +2,7 @@ import './providers/template.js';
 import './providers/llm.js';
 import './providers/image.js';
 import './providers/video.js';
+import './providers/videoComfy.js';
 import './providers/render.js';
 import { $, $$ } from './utils.js';
 import { state } from './state.js';
