@@ -211,6 +211,37 @@
 
       <div class="modal-divider"></div>
 
+      <!-- Module: ComfyUI SSH Connection -->
+      <div class="modal-section-title">ComfyUI (DGX Spark)</div>
+
+      <div class="comfy-ssh-grid">
+        <div class="modal-field">
+          <label>SSH Host</label>
+          <input type="text" id="comfySshHost" placeholder="106.13.186.155">
+        </div>
+        <div class="modal-field">
+          <label>SSH Port</label>
+          <input type="number" id="comfySshPort" placeholder="6078">
+        </div>
+        <div class="modal-field">
+          <label>Username</label>
+          <input type="text" id="comfySshUser" placeholder="Developer">
+        </div>
+        <div class="modal-field">
+          <label>ComfyUI Port</label>
+          <input type="number" id="comfySshComfyPort" placeholder="8188">
+        </div>
+      </div>
+      <div class="modal-field modal-field-row">
+        <label>Enable Lightning LoRA (faster, fewer steps)</label>
+        <label class="toggle-switch">
+          <input type="checkbox" id="comfyEnableLightning">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+
+      <div class="modal-divider"></div>
+
       <!-- Module 2: Model Selection -->
       <div class="modal-section-title" id="modelSelectionTitle">Model Selection</div>
 
@@ -261,49 +292,6 @@
           <input type="checkbox" id="cfgProxy">
           <span class="toggle-slider"></span>
         </label>
-      </div>
-
-      <div class="modal-divider"></div>
-
-      <!-- Module: ComfyUI SSH Connection -->
-      <div class="modal-section-title">ComfyUI (DGX Spark)</div>
-
-      <div class="modal-field">
-        <label>Video Provider</label>
-        <select id="cfgVideoProvider" class="model-select">
-          <option value="video">DashScope (Cloud API)</option>
-          <option value="video-comfy">ComfyUI (DGX Spark / H3)</option>
-        </select>
-      </div>
-
-      <div class="comfy-ssh-grid">
-        <div class="modal-field">
-          <label>SSH Host</label>
-          <input type="text" id="comfySshHost" placeholder="106.13.186.155">
-        </div>
-        <div class="modal-field">
-          <label>SSH Port</label>
-          <input type="number" id="comfySshPort" placeholder="6078">
-        </div>
-        <div class="modal-field">
-          <label>Username</label>
-          <input type="text" id="comfySshUser" placeholder="Developer">
-        </div>
-        <div class="modal-field">
-          <label>ComfyUI Port</label>
-          <input type="number" id="comfySshComfyPort" placeholder="8188">
-        </div>
-      </div>
-      <div class="modal-field modal-field-row">
-        <label>Enable Lightning LoRA (faster, fewer steps)</label>
-        <label class="toggle-switch">
-          <input type="checkbox" id="comfyEnableLightning">
-          <span class="toggle-slider"></span>
-        </label>
-      </div>
-      <div style="display:flex;gap:8px;align-items:center;margin-top:4px">
-        <button id="comfyTestBtn" class="action-btn" type="button" style="font-size:0.8rem;padding:4px 12px">Test Connection</button>
-        <span id="comfyTestStatus" class="settings-status" style="margin:0"></span>
       </div>
 
       <div class="modal-actions">
