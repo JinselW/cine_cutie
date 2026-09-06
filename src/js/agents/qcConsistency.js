@@ -1,4 +1,4 @@
-import { QCVerdict, Severity } from '../agents/qcTypes.js';
+import { QCVerdict, Severity } from './qcTypes.js';
 
 export function extractEntities(stepId, data) {
   const entities = {};

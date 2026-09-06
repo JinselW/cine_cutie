@@ -1,13 +1,21 @@
 import { BaseAgent } from './baseAgent.js';
 import { RetryAgent, ItemRetryStrategy } from './retryAgent.js';
-import { checkConsistency } from '../providers/consistency.js';
+import { QCAgent, SCORE_THRESHOLD, reportScore, reportRetry } from './qcAgent.js';
 import { getActiveProvider } from '../providers/registry.js';
 import { createArtifact, ArtifactKind, ArtifactStatus, recordItemAttempt } from '../artifacts/artifactTypes.js';
-import { QCVerdict, Severity } from './qcTypes.js';
 import { addAgentMessage } from '../ui/render.js';
 import { t } from '../i18n.js';
 
 const MAX_ITEM_ATTEMPTS = 3;
+const MAX_STAGE_RETRIES = 1;
+
+function applyVisualRetryFeedback(items, critique) {
+  const note = (critique.suggestions || []).join('; ');
+  for (const item of items) {
+    item.seed = (item.seed ?? 42) + 13;
+    if (note) item.prompt = `${item.prompt}\n${note}`;
+  }
+}
 
 const CAMERA_MOTION_MAP = Object.freeze({
   'pan-left': 'camera slowly pans left',
@@ -24,10 +32,12 @@ const CAMERA_MOTION_MAP = Object.freeze({
 
 export class VideoAgent extends BaseAgent {
   #retryAgent;
+  #qcAgent;
 
   constructor() {
     super({ name: 'Video Director', stepId: 'videoGeneration' });
     this.#retryAgent = new RetryAgent();
+    this.#qcAgent = new QCAgent({ stepId: 'videoGeneration' });
   }
 
   async run(ctx, _token) {
@@ -50,23 +60,40 @@ export class VideoAgent extends BaseAgent {
       status: ArtifactStatus.GENERATING,
     });
 
-    const results = await this.#generateItems(items, artifact, ctx, _token);
-    const data = this.#assembleResult(results, refImages);
+    let bestData = null, bestCrit = null, bestScore = -Infinity;
 
-    const l2Check = checkConsistency('videoGeneration', data, ctx.entities || {});
-    const complete = data.clips.filter(c => c.status === 'complete').length;
+    for (let attempt = 0; attempt <= MAX_STAGE_RETRIES; attempt++) {
+      if (_token?.signal?.aborted) break;
 
-    artifact.data = data;
+      const results = await this.#generateItems(items, artifact, ctx, _token);
+      const data = this.#assembleResult(results, refImages);
+
+      const crit = await this.#qcAgent.process({ data, entities: ctx.entities || {}, ...ctx });
+      reportScore(crit.score, '🎥');
+      if (crit.score > bestScore) { bestScore = crit.score; bestData = data; bestCrit = crit; }
+
+      if (crit.score >= SCORE_THRESHOLD || attempt === MAX_STAGE_RETRIES) break;
+      if (crit.source === 'structural') break;
+
+      reportRetry(crit.score, attempt + 1, MAX_STAGE_RETRIES, '🎥');
+      applyVisualRetryFeedback(items, crit);
+    }
+
+    const finalData = bestData || { clips: [] };
+    const complete = finalData.clips.filter(c => c.status === 'complete').length;
+
+    artifact.data = finalData;
     artifact.status = complete > 0 ? ArtifactStatus.COMPLETE : ArtifactStatus.FAILED;
 
     return {
       artifacts: [artifact],
       metadata: {
-        totalClips: data.clips.length,
+        totalClips: finalData.clips.length,
         completeClips: complete,
-        failedClips: data.clips.filter(c => c.status === 'failed').length,
-        qualityScore: l2Check.verdict === QCVerdict.PASS ? 10 : l2Check.verdict === QCVerdict.CONDITIONAL_PASS ? 7 : 5,
-        consistencyIssues: l2Check.issues || [],
+        failedClips: finalData.clips.filter(c => c.status === 'failed').length,
+        qualityScore: bestCrit?.score ?? 0,
+        consistencyIssues: bestCrit?.consistency?.issues || [],
+        verdict: bestCrit?.verdict ?? null,
       },
     };
   }
@@ -111,29 +138,52 @@ export class VideoAgent extends BaseAgent {
       status: ArtifactStatus.GENERATING,
     });
 
-    const results = await this.#generateItemsWithUploads(items, artifact, ctx, _token);
-    const resultById = new Map(results.map(r => [r.id, r]));
-    const data = { clips: items.map(item => {
-      const r = resultById.get(item.id);
-      return {
-        shot_id: item.id,
-        videoPath: r?.videoPath || '',
-        status: r?.status === 'complete' ? 'complete' : 'failed',
-      };
-    }) };
+    const assemble = (results) => {
+      const resultById = new Map(results.map(r => [r.id, r]));
+      return { clips: items.map(item => {
+        const r = resultById.get(item.id);
+        return {
+          shot_id: item.id,
+          videoPath: r?.videoPath || '',
+          status: r?.status === 'complete' ? 'complete' : 'failed',
+        };
+      }) };
+    };
 
-    const complete = data.clips.filter(c => c.status === 'complete').length;
-    artifact.data = data;
+    let bestData = null, bestCrit = null, bestScore = -Infinity;
+
+    for (let attempt = 0; attempt <= MAX_STAGE_RETRIES; attempt++) {
+      if (_token?.signal?.aborted) break;
+
+      const results = await this.#generateItemsWithUploads(items, artifact, ctx, _token);
+      const data = assemble(results);
+
+      const crit = await this.#qcAgent.process({ data, entities: ctx.entities || {}, ...ctx });
+      reportScore(crit.score, '🎥');
+      if (crit.score > bestScore) { bestScore = crit.score; bestData = data; bestCrit = crit; }
+
+      if (crit.score >= SCORE_THRESHOLD || attempt === MAX_STAGE_RETRIES) break;
+      if (crit.source === 'structural') break;
+
+      reportRetry(crit.score, attempt + 1, MAX_STAGE_RETRIES, '🎥');
+      applyVisualRetryFeedback(items, crit);
+    }
+
+    const finalData = bestData || { clips: [] };
+    const complete = finalData.clips.filter(c => c.status === 'complete').length;
+
+    artifact.data = finalData;
     artifact.status = complete > 0 ? ArtifactStatus.COMPLETE : ArtifactStatus.FAILED;
 
     return {
       artifacts: [artifact],
       metadata: {
-        totalClips: data.clips.length,
+        totalClips: finalData.clips.length,
         completeClips: complete,
-        failedClips: data.clips.filter(c => c.status === 'failed').length,
-        qualityScore: complete > 0 ? 8 : 5,
-        consistencyIssues: [],
+        failedClips: finalData.clips.filter(c => c.status === 'failed').length,
+        qualityScore: bestCrit?.score ?? 0,
+        consistencyIssues: bestCrit?.consistency?.issues || [],
+        verdict: bestCrit?.verdict ?? null,
       },
     };
   }
