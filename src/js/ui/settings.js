@@ -6,6 +6,7 @@ import { setActiveProvider } from '../providers/registry.js';
 
 const PROVIDER_LIST = ['openai', 'deepseek', 'dashscope', 'ark', 'kling', 'gemini'];
 const CUSTOM_VALUE = '__custom__';
+const COMFY_MODEL = '__comfyui__';
 
 function updateIndicator() {
   const dot = $('#llmDot');
@@ -26,7 +27,7 @@ function clearStatus() {
   el.className = 'settings-status';
 }
 
-function populateModelSelect(selectEl, presets, currentProvider, currentName) {
+function populateModelSelect(selectEl, presets, currentProvider, currentName, includeComfy = false) {
   selectEl.innerHTML = '';
 
   if (presets === MODEL_PRESETS) {
@@ -50,6 +51,14 @@ function populateModelSelect(selectEl, presets, currentProvider, currentName) {
       if (m === currentName) opt.selected = true;
       selectEl.appendChild(opt);
     }
+
+    if (includeComfy) {
+      const comfyOpt = document.createElement('option');
+      comfyOpt.value = COMFY_MODEL;
+      comfyOpt.textContent = 'ComfyUI (DGX Spark / H3)';
+      if (currentName === COMFY_MODEL) comfyOpt.selected = true;
+      selectEl.appendChild(comfyOpt);
+    }
   }
 
   const customOpt = document.createElement('option');
@@ -59,7 +68,7 @@ function populateModelSelect(selectEl, presets, currentProvider, currentName) {
 
   const isCustom = presets === MODEL_PRESETS
     ? !Object.values(MODEL_PRESETS).some(list => list.includes(currentName))
-    : !presets.includes(currentName);
+    : (currentName !== COMFY_MODEL && !presets.includes(currentName));
 
   if (isCustom && currentName) {
     customOpt.selected = true;
@@ -110,10 +119,23 @@ function openModal() {
     imageCustomWrap?.classList.add('hidden');
   }
 
+  let comfyActive = false;
+  try {
+    const prefs = JSON.parse(localStorage.getItem('cine-cutie-providers') || '{}');
+    comfyActive = cfg.models.video.name === COMFY_MODEL
+      || cfg.models.refVideo.name === COMFY_MODEL
+      || prefs.video === 'video-comfy';
+  } catch {
+    comfyActive = cfg.models.video.name === COMFY_MODEL || cfg.models.refVideo.name === COMFY_MODEL;
+  }
+
   const videoSelect = $('#cfgVideoModel');
   const videoCustomWrap = $('#videoModelCustomWrap');
   const videoCustomInput = $('#cfgVideoModelCustom');
-  const isVideoCustom = populateModelSelect(videoSelect, VIDEO_PRESETS, null, cfg.models.video.name);
+  const isVideoCustom = populateModelSelect(
+    videoSelect, VIDEO_PRESETS, null,
+    comfyActive ? COMFY_MODEL : cfg.models.video.name, true,
+  );
   if (isVideoCustom) {
     videoCustomWrap?.classList.remove('hidden');
     if (videoCustomInput) videoCustomInput.value = cfg.models.video.name;
@@ -124,7 +146,10 @@ function openModal() {
   const refVideoSelect = $('#cfgRefVideoModel');
   const refVideoCustomWrap = $('#refVideoModelCustomWrap');
   const refVideoCustomInput = $('#cfgRefVideoModelCustom');
-  const isRefVideoCustom = populateModelSelect(refVideoSelect, REF_VIDEO_PRESETS, null, cfg.models.refVideo.name);
+  const isRefVideoCustom = populateModelSelect(
+    refVideoSelect, REF_VIDEO_PRESETS, null,
+    comfyActive ? COMFY_MODEL : cfg.models.refVideo.name, true,
+  );
   if (isRefVideoCustom) {
     refVideoCustomWrap?.classList.remove('hidden');
     if (refVideoCustomInput) refVideoCustomInput.value = cfg.models.refVideo.name;
@@ -141,14 +166,6 @@ function openModal() {
   $('#comfySshUser').value = comfyCfg.user || '';
   $('#comfySshComfyPort').value = comfyCfg.comfyPort || '';
   $('#comfyEnableLightning').checked = comfyCfg.enableLightning || false;
-
-  try {
-    const prefs = JSON.parse(localStorage.getItem('cine-cutie-providers') || '{}');
-    const videoProviderSelect = $('#cfgVideoProvider');
-    if (videoProviderSelect && prefs.video) {
-      videoProviderSelect.value = prefs.video;
-    }
-  } catch {}
 
   clearStatus();
   modal.classList.remove('hidden');
@@ -205,6 +222,10 @@ function handleSave() {
   const jsonMode = $('#cfgJsonMode').checked;
   const useProxy = $('#cfgProxy').checked;
 
+  const comfyChosen = videoName === COMFY_MODEL || refVideoName === COMFY_MODEL;
+  const realVideoModel = (!videoName || videoName === COMFY_MODEL) ? 'wanx2.1-i2v-plus' : videoName;
+  const realRefVideoModel = (!refVideoName || refVideoName === COMFY_MODEL) ? 'wan2.7-r2v' : refVideoName;
+
   saveConfig({
     apiProviders,
     models: {
@@ -220,16 +241,13 @@ function handleSave() {
   saveDashScopeConfig({
     apiKey: apiProviders.dashscope?.apiKey || '',
     imageModel: imageName || 'wanx2.1-t2i-turbo',
-    videoModel: videoName || 'wanx2.1-i2v-plus',
-    refVideoModel: refVideoName || 'wan2.7-r2v',
+    videoModel: realVideoModel,
+    refVideoModel: realRefVideoModel,
   });
 
   saveComfySshConfig();
 
-  const videoProviderSelect = $('#cfgVideoProvider');
-  if (videoProviderSelect?.value) {
-    setActiveProvider('video', videoProviderSelect.value);
-  }
+  setActiveProvider('video', comfyChosen ? 'video-comfy' : 'video');
 
   updateIndicator();
   showStatus(t('settings.saved'), true);
@@ -283,14 +301,43 @@ async function handleTest() {
 
   const result = await testConnection();
 
+  const videoName = getSelectValue($('#cfgVideoModel'), $('#cfgVideoModelCustom'));
+  const refVideoName = getSelectValue($('#cfgRefVideoModel'), $('#cfgRefVideoModelCustom'));
+  const comfyChosen = videoName === COMFY_MODEL || refVideoName === COMFY_MODEL;
+
+  let comfyLine = null;
+  if (comfyChosen) {
+    const config = saveComfySshConfig();
+    if (!config.host) {
+      comfyLine = { ok: false, msg: 'ComfyUI: Host required' };
+    } else {
+      try {
+        const res = await fetch('/api/comfyui/status', {
+          headers: { 'X-Ssh-Config': JSON.stringify(config) },
+        });
+        const data = await res.json();
+        if (data.comfyui?.online) {
+          const gpuInfo = data.comfyui.gpu?.map(g => `${g.name} (${g.vram_free}/${g.vram_total}MB)`).join(', ') || 'OK';
+          comfyLine = { ok: true, msg: `ComfyUI: Connected (GPU ${gpuInfo})` };
+        } else {
+          comfyLine = { ok: false, msg: `ComfyUI: offline (${data.comfyui?.error || 'unknown'})` };
+        }
+      } catch (err) {
+        comfyLine = { ok: false, msg: `ComfyUI: ${err.message}` };
+      }
+    }
+  }
+
   btn.disabled = false;
   textEl.textContent = t('settings.test');
 
-  if (result.ok) {
-    showStatus(t('settings.testOk'), true);
-  } else {
-    showStatus(result.error, false);
+  let ok = result.ok;
+  const parts = [`LLM: ${result.ok ? t('settings.testOk') : result.error}`];
+  if (comfyLine) {
+    ok = ok && comfyLine.ok;
+    parts.push(comfyLine.msg);
   }
+  showStatus(parts.join(' · '), ok);
 }
 
 function setupModelSelectChange(selectId, customWrapId, presets) {
@@ -327,32 +374,34 @@ function saveComfySshConfig() {
   return config;
 }
 
-async function handleComfyTest() {
-  const config = saveComfySshConfig();
-  const statusEl = $('#comfyTestStatus');
-  const btn = $('#comfyTestBtn');
-  if (!config.host) {
-    if (statusEl) { statusEl.textContent = 'Host required'; statusEl.className = 'settings-status err'; }
-    return;
-  }
-  btn.disabled = true;
-  if (statusEl) { statusEl.textContent = 'Connecting...'; statusEl.className = 'settings-status'; }
+function linkVideoSelects() {
+  const pairs = [
+    { select: $('#cfgVideoModel'), wrap: $('#videoModelCustomWrap'), presets: VIDEO_PRESETS },
+    { select: $('#cfgRefVideoModel'), wrap: $('#refVideoModelCustomWrap'), presets: REF_VIDEO_PRESETS },
+  ];
 
-  try {
-    const res = await fetch('/api/comfyui/status', {
-      headers: { 'X-Ssh-Config': JSON.stringify(config) },
+  const resetToDefault = (entry) => {
+    entry.select.value = entry.presets[0];
+    entry.wrap?.classList.add('hidden');
+  };
+
+  const setToComfy = (entry) => {
+    entry.select.value = COMFY_MODEL;
+    entry.wrap?.classList.add('hidden');
+  };
+
+  pairs.forEach((entry, i) => {
+    const other = pairs[1 - i];
+    if (!entry.select) return;
+    entry.select.addEventListener('change', () => {
+      const val = entry.select.value;
+      if (val === COMFY_MODEL) {
+        setToComfy(other);
+      } else if (val !== CUSTOM_VALUE && other.select.value === COMFY_MODEL) {
+        resetToDefault(other);
+      }
     });
-    const data = await res.json();
-    if (data.comfyui?.online) {
-      const gpuInfo = data.comfyui.gpu?.map(g => `${g.name} (${g.vram_free}/${g.vram_total}MB)`).join(', ') || 'OK';
-      if (statusEl) { statusEl.textContent = `Connected! GPU: ${gpuInfo}`; statusEl.className = 'settings-status ok'; }
-    } else {
-      if (statusEl) { statusEl.textContent = `ComfyUI offline: ${data.comfyui?.error || 'unknown'}`; statusEl.className = 'settings-status err'; }
-    }
-  } catch (err) {
-    if (statusEl) { statusEl.textContent = `Error: ${err.message}`; statusEl.className = 'settings-status err'; }
-  }
-  btn.disabled = false;
+  });
 }
 
 export function initSettings() {
@@ -389,8 +438,7 @@ export function initSettings() {
   const testBtn = $('#testConnBtn');
   if (testBtn) testBtn.addEventListener('click', handleTest);
 
-  const comfyTestBtn = $('#comfyTestBtn');
-  if (comfyTestBtn) comfyTestBtn.addEventListener('click', handleComfyTest);
+  linkVideoSelects();
 
   updateIndicator();
 }
