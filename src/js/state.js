@@ -8,6 +8,7 @@ export const state = {
   totalDuration: 30,
   aspectRatio: '16:9',
   imageSize: '1280*720',
+  resolution: '720P',
   uploads: { firstFrame: null, lastFrame: null, referenceImages: [] },
   theme: 'dark',
   lang: 'zh',
@@ -42,6 +43,7 @@ export function resetState() {
   state.totalDuration = 30;
   state.aspectRatio = '16:9';
   state.imageSize = '1280*720';
+  state.resolution = '720P';
   state.uploads = { firstFrame: null, lastFrame: null, referenceImages: [] };
   state.entities = {};
   for (const k of Object.keys(state.data)) state.data[k] = null;

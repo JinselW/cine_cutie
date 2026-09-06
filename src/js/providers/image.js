@@ -1,4 +1,6 @@
 import { registerProvider } from './registry.js';
+import { state } from '../state.js';
+import { computeImageSize, DEFAULT_RESOLUTION } from '../utils/resolution.js';
 
 const SETTINGS_KEY = 'cine-cutie-settings';
 const OLD_DS_KEY = 'cine-cutie-dashscope';
@@ -104,7 +106,7 @@ async function generateImages(prompts, ids, seeds, externalSignal) {
       body: JSON.stringify({
         prompts,
         model: config.imageModel,
-        size: '1024*1024',
+        size: computeImageSize(state.aspectRatio, state.resolution || DEFAULT_RESOLUTION),
         seed: seeds[0] || 42,
       }),
     });

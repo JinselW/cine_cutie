@@ -65,6 +65,7 @@ const en = {
   'ui.output': 'Output',
   'ui.duration': 'Duration',
   'ui.aspectRatio': 'Aspect Ratio',
+  'ui.resolution': 'Resolution',
   'ui.pause': 'Pause',
   'ui.resume': 'Resume',
   'ui.stop': 'Stop',
@@ -322,6 +323,7 @@ const zh = {
   'ui.output': '输出',
   'ui.duration': '时长',
   'ui.aspectRatio': '画面比例',
+  'ui.resolution': '分辨率',
   'ui.pause': '暂停',
   'ui.resume': '继续',
   'ui.stop': '停止',
@@ -576,6 +578,9 @@ export function applyLang() {
 
   const lblAspectRatio = $('#lblAspectRatio');
   if (lblAspectRatio) lblAspectRatio.textContent = t('ui.aspectRatio');
+
+  const lblResolution = $('#lblResolution');
+  if (lblResolution) lblResolution.textContent = t('ui.resolution');
 
   const lblVisualStyle = $('#lblVisualStyle');
   if (lblVisualStyle) lblVisualStyle.textContent = t('ui.lblVisualStyle');

@@ -19,7 +19,7 @@ function loadWorkflowTemplate() {
   return JSON.parse(fs.readFileSync(templatePath, 'utf-8'));
 }
 
-function buildWorkflow({ prompt, seed, duration, refImageFiles, enableLightning = false, aspectRatio = '16:9' }) {
+function buildWorkflow({ prompt, seed, duration, refImageFiles, enableLightning = false, aspectRatio = '16:9', megapixels }) {
   const workflow = loadWorkflowTemplate();
 
   workflow[NODE_IDS.prompt].inputs.value = prompt;
@@ -28,11 +28,16 @@ function buildWorkflow({ prompt, seed, duration, refImageFiles, enableLightning 
 
   const aspectMap = {
     '16:9': '16:9 (Widescreen)',
-    '9:16': '9:16 (Vertical)',
+    '9:16': '9:16 (Portrait Widescreen)',
     '1:1': '1:1 (Square)',
     '4:3': '4:3 (Standard)',
+    '3:4': '3:4 (Portrait Standard)',
+    '21:9': '21:9 (Ultrawide)',
   };
   workflow[NODE_IDS.resolution].inputs.aspect_ratio = aspectMap[aspectRatio] || '16:9 (Widescreen)';
+  if (Number.isFinite(megapixels)) {
+    workflow[NODE_IDS.resolution].inputs.megapixels = megapixels;
+  }
 
   workflow[NODE_IDS.loraSwitch].inputs.value = enableLightning;
 
@@ -66,8 +71,8 @@ async function comfyRequest(sshConfig, endpoint, { method = 'GET', body = null, 
   return res.json();
 }
 
-export async function submitWorkflow(sshConfig, { prompt, seed, duration, refImageFiles, enableLightning, aspectRatio, signal }) {
-  const workflow = buildWorkflow({ prompt, seed, duration, refImageFiles, enableLightning, aspectRatio });
+export async function submitWorkflow(sshConfig, { prompt, seed, duration, refImageFiles, enableLightning, aspectRatio, megapixels, signal }) {
+  const workflow = buildWorkflow({ prompt, seed, duration, refImageFiles, enableLightning, aspectRatio, megapixels });
 
   const result = await comfyRequest(sshConfig, '/prompt', {
     method: 'POST',

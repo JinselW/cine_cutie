@@ -183,6 +183,14 @@ $$('.aspect-btn').forEach(btn => {
   });
 });
 
+$$('.res-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    $$('.res-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    state.resolution = btn.dataset.res;
+  });
+});
+
 $$('.mode-btn').forEach(btn => {
   btn.addEventListener('click', () => {
     $$('.mode-btn').forEach(b => b.classList.remove('active'));

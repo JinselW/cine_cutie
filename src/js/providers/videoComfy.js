@@ -1,4 +1,6 @@
 import { registerProvider } from './registry.js';
+import { state } from '../state.js';
+import { tierToMp } from '../utils/resolution.js';
 
 function getSshConfig() {
   try {
@@ -53,7 +55,8 @@ const comfyUIProvider = {
         comfyPort: sshConfig.comfyPort || 8188,
       },
       duration: 5,
-      aspectRatio: '16:9',
+      aspectRatio: state.aspectRatio || '16:9',
+      megapixels: tierToMp(state.resolution),
       enableLightning: sshConfig.enableLightning || false,
     };
 
