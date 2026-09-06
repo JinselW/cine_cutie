@@ -4,6 +4,7 @@ import net from 'net';
 let tunnelServer = null;
 let sshClient = null;
 let localPort = null;
+let tunnelReady = false;
 let activeConnections = new Set();
 let idleTimer = null;
 
@@ -25,7 +26,7 @@ function startIdleTimer() {
 }
 
 export async function ensureTunnel(config) {
-  if (tunnelServer && sshClient && sshClient._ready) {
+  if (tunnelServer && sshClient && tunnelReady) {
     clearIdleTimer();
     startIdleTimer();
     return { host: '127.0.0.1', port: localPort };
@@ -71,6 +72,7 @@ export async function ensureTunnel(config) {
       server.listen(0, '127.0.0.1', () => {
         localPort = server.address().port;
         tunnelServer = server;
+        tunnelReady = true;
         console.log(`[SSHTunnel] Tunnel established: localhost:${localPort} -> ${host}:${comfyPort || 8188}`);
         startIdleTimer();
         if (!resolved) {
@@ -99,6 +101,7 @@ export async function ensureTunnel(config) {
     client.on('close', () => {
       console.log('[SSHTunnel] SSH connection closed');
       sshClient = null;
+      tunnelReady = false;
     });
 
     client.connect({
@@ -134,11 +137,12 @@ export async function closeTunnel() {
   }
 
   localPort = null;
+  tunnelReady = false;
 }
 
 export function getTunnelStatus() {
   return {
-    connected: !!(tunnelServer && sshClient?.['_ready']),
+    connected: tunnelReady,
     localPort,
     activeConnections: activeConnections.size,
   };
