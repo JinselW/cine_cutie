@@ -19,6 +19,7 @@ import { CharacterAgent } from './agents/characterAgent.js';
 import { ReferenceAgent } from './agents/referenceAgent.js';
 import { VideoAgent } from './agents/videoAgent.js';
 import { EditorAgent } from './agents/editorAgent.js';
+import { getIPComplianceAgent } from './agents/ipComplianceAgent.js';
 import { ArtifactStore } from './artifacts/artifactStore.js';
 import { ArtifactStatus, createArtifact } from './artifacts/artifactTypes.js';
 import { extractEntities, mergeEntities, buildConsistencyConstraints, checkConsistency } from './providers/consistency.js';
@@ -231,6 +232,18 @@ class Orchestrator {
       addAgentMessage('⚠️', `Post-gate: ${stepId} consistency check failed — ${consistencyResult.issues.join('; ')}`);
     } else if (consistencyResult.verdict === QCVerdict.CONDITIONAL_PASS) {
       addAgentMessage('⚠️', `Post-gate: ${stepId} consistency warnings — ${consistencyResult.issues.join('; ')}`);
+    }
+
+    const ipResult = getIPComplianceAgent().checkStepOutput(stepId, data);
+    if (ipResult.verdict === QCVerdict.FAIL) {
+      addAgentMessage('🛑', `IP Compliance: ${ipResult.issues.join('; ')}`);
+      return ipResult;
+    }
+    if (ipResult.verdict === QCVerdict.CONDITIONAL_PASS) {
+      addAgentMessage('⚠️', `IP Compliance: ${ipResult.issues.join('; ')}`);
+      if (consistencyResult.verdict === QCVerdict.PASS) {
+        return ipResult;
+      }
     }
 
     return consistencyResult;
