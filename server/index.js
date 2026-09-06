@@ -409,7 +409,7 @@ app.post('/api/render/final', async (req, res) => {
 });
 
 app.post('/api/generate/video-comfy', async (req, res) => {
-  const { clips, sshConfig: clientSsh, duration, aspectRatio, enableLightning, uploads } = req.body;
+  const { clips, sshConfig: clientSsh, duration, aspectRatio, megapixels, enableLightning, uploads } = req.body;
 
   if (!clientSsh?.host || !clientSsh?.user) {
     return res.status(400).json({ error: 'Missing SSH config (host, user required)' });
@@ -468,6 +468,7 @@ app.post('/api/generate/video-comfy', async (req, res) => {
             refImageFiles,
             enableLightning: enableLightning || false,
             aspectRatio: aspectRatio || '16:9',
+            megapixels: Number.isFinite(megapixels) ? megapixels : undefined,
           });
 
           console.log(`[ComfyUI] task=${task.id} clip ${i + 1} submitted, prompt_id=${promptId}`);

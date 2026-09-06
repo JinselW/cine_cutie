@@ -1,5 +1,7 @@
 import { registerProvider } from './registry.js';
 import { getConfig as getImageConfig } from './image.js';
+import { state } from '../state.js';
+import { dsVideoResolution } from '../utils/resolution.js';
 
 const videoProvider = {
   id: 'video',
@@ -52,6 +54,7 @@ const videoProvider = {
 
     const hasRefImages = uploads?.referenceImages?.length > 0;
     const chosenModel = hasRefImages ? dsConfig.refVideoModel : dsConfig.videoModel;
+    const dsRes = dsVideoResolution(state.resolution || '720P', chosenModel);
 
     const bodyPayload = hasUploads
       ? {
@@ -63,17 +66,15 @@ const videoProvider = {
           },
           model: chosenModel,
           duration: 5,
-          resolution: '720P',
+          resolution: dsRes,
           seed: clips[0].seed,
-          aspectRatio: '16:9',
         }
       : {
           clips: clips.filter(c => c.imageUrl).map(c => ({ prompt: c.prompt, imageUrl: c.imageUrl })),
           model: chosenModel,
           duration: 5,
-          resolution: '720P',
+          resolution: dsRes,
           seed: clips[0].seed,
-          aspectRatio: '16:9',
         };
 
     const sentClips = hasUploads ? clips : clips.filter(c => c.imageUrl);
