@@ -6,10 +6,11 @@ import './providers/videoComfy.js';
 import './providers/render.js';
 import { $, $$ } from './utils.js';
 import { state } from './state.js';
-import { STEPS } from './config.js';
+import { STEPS, dataKeyOf } from './config.js';
 import { setFirstFrame, setLastFrame, addReferenceImages, removeReferenceImage, clearSlot, clearAllUploads, getUploads, hasUploads, uploadToServer } from './media.js';
-import { buildPipelineBar, showSection, setMascot, addAgentMessage } from './ui/render.js';
-import { startPipeline } from './engine.js';
+import { buildPipelineBar, showSection, setMascot, addAgentMessage, updatePipeline } from './ui/render.js';
+import { showStepReadOnly } from './navigation.js';
+import { startPipeline, restoreSession } from './engine.js';
 import { t, applyLang } from './i18n.js';
 import { initSettings } from './ui/settings.js';
 import { initMascotInteraction } from './mascot-interact.js';
@@ -42,6 +43,16 @@ $('#langToggle').addEventListener('click', () => {
 
 buildPipelineBar();
 initMascotInteraction();
+
+if (restoreSession() && Object.values(state.data).some(v => v != null)) {
+  showSection('pipelineSection');
+  updatePipeline(state.currentStep, 'active');
+  const viewIdx = state.data[dataKeyOf(STEPS[state.currentStep])] != null
+    ? state.currentStep
+    : state.currentStep - 1;
+  if (viewIdx >= 0) showStepReadOnly(viewIdx);
+  addAgentMessage('♻️', t('ui.sessionRestored'));
+}
 
 const slotConfig = {
   firstFrame: { slotEl: '#slotFirstFrame', inputEl: '#inputFirstFrame', previewEl: '#previewFirstFrame' },

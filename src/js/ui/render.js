@@ -7,6 +7,11 @@ import { onNodeClick } from '../navigation.js';
 let _genAnim = null;
 let _msgBuffer = [];
 let _allCurrentMsgs = [];
+let _controls = null;
+
+export function setPipelineControls(controls) {
+  _controls = controls;
+}
 
 export function setGenAnim(anim) {
   _genAnim = anim;
@@ -149,7 +154,7 @@ export function waitForResume() {
 }
 
 export function pauseGeneration() {
-  state.paused = true;
+  _controls?.pause();
   const anim = getGenAnim();
   if (anim) anim.stop();
   setGenAnim(null);
@@ -168,11 +173,11 @@ export function pauseGeneration() {
   setMascot(null);
 
   $('#resumeBtn').addEventListener('click', resumeGeneration);
-  $('#stopBtn').addEventListener('click', stopPipeline);
+  $('#stopBtn').addEventListener('click', stopGeneration);
 }
 
 export function resumeGeneration() {
-  state.paused = false;
+  _controls?.resume();
   if (_resumeResolve) {
     _resumeResolve();
     _resumeResolve = null;
@@ -182,8 +187,8 @@ export function resumeGeneration() {
   }
 }
 
-export function stopPipeline() {
-  state.stopped = true;
+export function stopGeneration() {
+  _controls?.stop();
   state.paused = false;
   if (_resumeResolve) {
     _resumeResolve();
