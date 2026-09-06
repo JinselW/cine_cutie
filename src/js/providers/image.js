@@ -1,11 +1,11 @@
 import { registerProvider } from './registry.js';
 import { state } from '../state.js';
-import { computeImageSize, DEFAULT_RESOLUTION } from '../utils/resolution.js';
+import { computeImageSize, computeImg2ImgSize, DEFAULT_RESOLUTION } from '../utils/resolution.js';
 
 const SETTINGS_KEY = 'cine-cutie-settings';
 const OLD_DS_KEY = 'cine-cutie-dashscope';
 
-let config = { apiKey: '', imageModel: 'wanx2.1-t2i-turbo', videoModel: 'wanx2.1-i2v-plus', refVideoModel: 'wan2.7-r2v' };
+let config = { apiKey: '', imageModel: 'wanx2.1-t2i-turbo', img2imgModel: '', videoModel: 'wanx2.1-i2v-plus', refVideoModel: 'wan2.7-r2v' };
 
 function loadConfig() {
   try {
@@ -14,6 +14,7 @@ function loadConfig() {
       const parsed = JSON.parse(saved);
       config.apiKey = parsed.apiProviders?.dashscope?.apiKey || '';
       config.imageModel = parsed.models?.image?.name || 'wanx2.1-t2i-turbo';
+      config.img2imgModel = parsed.models?.img2img?.name || '';
       config.videoModel = parsed.models?.video?.name || 'wanx2.1-i2v-plus';
       config.refVideoModel = parsed.models?.refVideo?.name || 'wan2.7-r2v';
     } else {
@@ -29,6 +30,7 @@ function loadConfig() {
 function saveConfig(cfg) {
   if (cfg.apiKey !== undefined) config.apiKey = cfg.apiKey;
   if (cfg.imageModel !== undefined) config.imageModel = cfg.imageModel;
+  if (cfg.img2imgModel !== undefined) config.img2imgModel = cfg.img2imgModel;
   if (cfg.videoModel !== undefined) config.videoModel = cfg.videoModel;
   if (cfg.refVideoModel !== undefined) config.refVideoModel = cfg.refVideoModel;
 
@@ -40,6 +42,7 @@ function saveConfig(cfg) {
     if (cfg.apiKey !== undefined) parsed.apiProviders.dashscope.apiKey = cfg.apiKey;
     if (!parsed.models) parsed.models = {};
     if (cfg.imageModel !== undefined) parsed.models.image = { name: cfg.imageModel };
+    if (cfg.img2imgModel !== undefined) parsed.models.img2img = { name: cfg.img2imgModel };
     if (cfg.videoModel !== undefined) parsed.models.video = { name: cfg.videoModel };
     if (cfg.refVideoModel !== undefined) parsed.models.refVideo = { name: cfg.refVideoModel };
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(parsed));
@@ -55,6 +58,14 @@ function getConfig() {
 }
 
 loadConfig();
+
+const MAX_REFERENCE_IMAGES = 4;
+
+function normalizeRefs(refs) {
+  if (!Array.isArray(refs)) return null;
+  const clean = refs.filter(r => typeof r === 'string' && r.startsWith('/api/media/')).slice(0, MAX_REFERENCE_IMAGES);
+  return clean.length ? clean : null;
+}
 
 const imageProvider = {
   id: 'image',
@@ -82,19 +93,23 @@ const imageProvider = {
       return overrideSeed ?? item.seed ?? 42;
     });
 
+    const refs = items.map(item => normalizeRefs(item.refs));
     const ids = items.map(item => item.id);
 
-    return await generateImages(prompts, ids, seeds, signal);
+    return await generateImages(prompts, ids, seeds, refs, signal);
   },
 };
 
-async function generateImages(prompts, ids, seeds, externalSignal) {
+async function generateImages(prompts, ids, seeds, refs, externalSignal) {
   try {
     if (externalSignal?.aborted) {
       return prompts.map((_, i) => ({
         id: ids[i], path: '', imageUrl: '', status: 'failed', error: 'Cancelled',
       }));
     }
+
+    const tier = state.resolution || DEFAULT_RESOLUTION;
+    const canEdit = !!config.img2imgModel && Array.isArray(refs) && refs.some(r => r && r.length);
 
     const res = await fetch('/api/generate/image', {
       method: 'POST',
@@ -106,8 +121,14 @@ async function generateImages(prompts, ids, seeds, externalSignal) {
       body: JSON.stringify({
         prompts,
         model: config.imageModel,
-        size: computeImageSize(state.aspectRatio, state.resolution || DEFAULT_RESOLUTION),
+        size: computeImageSize(state.aspectRatio, tier),
         seed: seeds[0] || 42,
+        seeds,
+        ...(canEdit && {
+          refs,
+          img2imgModel: config.img2imgModel,
+          img2imgSize: computeImg2ImgSize(state.aspectRatio, tier),
+        }),
       }),
     });
 

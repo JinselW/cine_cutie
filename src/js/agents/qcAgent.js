@@ -23,16 +23,16 @@ const CRITERIA = {
     'Shot durations create good pacing',
   ],
   characterDesign: [
-    'Each character/setting has a clear, visually distinctive generated image',
-    'Images match the described appearance and the chosen visual style',
+    'Each character sheet shows the SAME character in front, back and side views with identical outfit, hairstyle and proportions',
+    'Scene images are empty environment plates that match the written design spec and the chosen visual style',
     'Composition, lighting and detail are strong enough to anchor later shots',
-    'Character designs are distinguishable from one another (no homogenization)',
+    'Characters and scenes are clearly distinguishable from one another (no homogenization)',
   ],
   referenceImages: [
-    'Reference images faithfully reflect each shot prompt (subject, setting, action)',
-    'Character and setting appearance stays consistent with the character designs',
-    'Framing and cinematic quality are suitable as video first frames',
-    'The set covers the storyboard shots without gaps or near-duplicates',
+    'The frame set matches the chosen video mode (first frames only, first + last frames, or reference images) with no missing shot',
+    'Character and location identity carries over from the step-2 design images (face, hairstyle, outfit, colors, environment)',
+    'Each frame faithfully reflects its shot prompt (subject, action, framing) at video-input quality',
+    'Consecutive frames read as one continuous action without jumps or near-duplicates',
   ],
   videoGeneration: [
     'Motion is natural and coherent across sampled frames (no warping/morphing)',
@@ -104,22 +104,24 @@ function mediaDigest(stepId, data) {
   if (stepId === 'characterDesign') {
     const chars = data?.characters || [];
     const sets = data?.settings || [];
-    const lines = chars.map(c => `- character "${c.name}": ${truncate(c.appearance || c.desc, 120)} ${c.imagePath || c.imageUrl ? '[has image]' : '[NO image]'}`);
-    lines.push(...sets.map(s => `- setting "${s.name}": ${truncate(s.desc, 120)} ${s.imagePath || s.imageUrl ? '[has image]' : '[NO image]'}`));
+    const lines = chars.map(c => `- character "${c.name}": ${truncate(c.visualTag || c.appearance || c.desc, 120)} ${c.sheetPath || c.sheetUrl ? '[three-view sheet]' : '[NO sheet]'} ${c.imagePath || c.imageUrl ? '[front portrait]' : '[NO front portrait]'}`);
+    lines.push(...sets.map(s => `- setting "${s.name}": ${truncate(s.visualTag || s.desc, 120)} ${s.imagePath || s.imageUrl ? '[has image]' : '[NO image]'}`));
     return `CHARACTER/SETTING DESIGNS (${chars.length} characters, ${sets.length} settings):\n${lines.join('\n')}`;
   }
   if (stepId === 'referenceImages') {
     const shots = data?.shots || [];
+    const extras = data?.extraFrames || [];
     const complete = shots.filter(s => s.status === 'complete' || s.imagePath).length;
-    const lines = shots.map((s, i) => `- shot ${s.shot_id || i}: [${s.status}] ${truncate(s.prompt, 120)}`);
-    return `REFERENCE IMAGES (${complete}/${shots.length} generated):\n${lines.join('\n')}`;
+    const lines = shots.map((s, i) => `- shot ${s.shot_id || i}: [${s.status}] role=${s.role || 'first_frame'} lastFrame=${s.lastFrameFrom || '-'} ${truncate(s.prompt, 120)}`);
+    lines.push(...extras.map(f => `- extra frame ${f.shot_id || ''}: [${f.status}] role=${f.role || 'last_frame'} ${truncate(f.prompt, 120)}`));
+    return `FRAMES (mode=${data?.mode || 'firstFrame'}, ${complete}/${shots.length} shot frames, ${extras.length} extra closing frame(s)):\n${lines.join('\n')}`;
   }
   if (stepId === 'videoGeneration') {
     const clips = data?.clips || [];
     const complete = clips.filter(c => c.status === 'complete').length;
     const failed = clips.filter(c => c.status === 'failed').length;
     const skipped = clips.filter(c => c.status === 'skipped').length;
-    return `VIDEO CLIPS (${complete} complete, ${failed} failed, ${skipped} skipped of ${clips.length}); frames sampled from up to 3 completed clips are attached.`;
+    return `VIDEO CLIPS (mode=${data?.mode || 'firstFrame'}, ${complete} complete, ${failed} failed, ${skipped} skipped of ${clips.length}); frames sampled from up to 3 completed clips are attached.`;
   }
   if (stepId === 'postProduction') {
     return `FINAL VIDEO: ${data?.finalVideo ? 'produced' : 'MISSING'}; frames sampled from the final render are attached.`;
@@ -131,12 +133,20 @@ function mediaDigest(stepId, data) {
 // (so the caller falls back to the structural score instead of a fake visual critique).
 async function buildMediaCritiqueMessages(stepId, data, context) {
   const criteria = CRITERIA[stepId] || CRITERIA.characterDesign;
-  const parts = (stepId === 'videoGeneration' || stepId === 'postProduction')
+  const anchors = stepId === 'referenceImages' && context?.characterDesign
+    ? await imageParts(context.characterDesign, 'characterDesign', { maxImages: 2 })
+    : [];
+  const generated = (stepId === 'videoGeneration' || stepId === 'postProduction')
     ? await videoParts(data, stepId)
-    : await imageParts(data, stepId);
+    : await imageParts(data, stepId, { maxImages: 6 - anchors.length });
+  const parts = [...anchors, ...generated];
   if (!parts.length) return null;
 
-  const text = `Evaluate the following ${stepId} visual output for a short film production. The attached image${parts.length === 1 ? '' : 's'} (for video stages, frames sampled over time) are the ACTUAL generated output — judge their real visual quality, not just the text below.
+  const anchorNote = anchors.length
+    ? `\n\nThe FIRST ${anchors.length} attached image${anchors.length === 1 ? '' : 's'} are the approved character / scene designs — treat them as the identity anchor. Every image after them is this step's output.`
+    : '';
+
+  const text = `Evaluate the following ${stepId} visual output for a short film production. The attached image${parts.length === 1 ? '' : 's'} (for video stages, frames sampled over time) are the ACTUAL generated output — judge their real visual quality, not just the text below.${anchorNote}
 
 RATE ON THESE CRITERIA (1-10 each):
 ${criteria.map((c, i) => `${i + 1}. ${c}`).join('\n')}

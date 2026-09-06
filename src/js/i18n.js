@@ -88,22 +88,22 @@ const en = {
   'steps.script.gen.3': 'Polishing the script...',
   'steps.characterDesign.label': 'Character & Scene Design',
   'steps.characterDesign.agent': 'Character Designer',
-  'steps.characterDesign.gen.0': 'Designing characters...',
-  'steps.characterDesign.gen.1': 'Creating scene concepts...',
-  'steps.characterDesign.gen.2': 'Adding visual details...',
-  'steps.characterDesign.gen.3': 'Finalizing designs...',
+  'steps.characterDesign.gen.0': 'Writing design specs...',
+  'steps.characterDesign.gen.1': 'Creating three-view model sheets...',
+  'steps.characterDesign.gen.2': 'Generating scene images...',
+  'steps.characterDesign.gen.3': 'Checking visual consistency...',
   'steps.storyboard.label': 'Storyboard',
   'steps.storyboard.agent': 'Storyboard Artist',
   'steps.storyboard.gen.0': 'Breaking down scenes...',
   'steps.storyboard.gen.1': 'Planning shot sequences...',
   'steps.storyboard.gen.2': 'Defining camera angles...',
   'steps.storyboard.gen.3': 'Building the storyboard...',
-  'steps.referenceImages.label': 'Reference Images',
+  'steps.referenceImages.label': 'Image Generation',
   'steps.referenceImages.agent': 'Image Director',
-  'steps.referenceImages.gen.0': 'Preparing image prompts...',
-  'steps.referenceImages.gen.1': 'Generating reference frames...',
+  'steps.referenceImages.gen.0': 'Combining script, designs and storyboard...',
+  'steps.referenceImages.gen.1': 'Generating frames for the video mode...',
   'steps.referenceImages.gen.2': 'Evaluating compositions...',
-  'steps.referenceImages.gen.3': 'Finalizing references...',
+  'steps.referenceImages.gen.3': 'Finalizing frames...',
   'steps.videoGeneration.label': 'Video Generation',
   'steps.videoGeneration.agent': 'Video Director',
   'steps.videoGeneration.gen.0': 'Setting up shots...',
@@ -158,15 +158,21 @@ const en = {
   'settings.textModel': 'Text & Evaluation Model',
   'settings.textModelHint': '(for script, storyboard & media scoring — vision model recommended for images/video)',
   'settings.imageModelLabel': 'Text-to-Image Model',
-  'settings.videoModelLabel': 'Image-to-Video Model',
-  'settings.refVideoModelLabel': 'Reference-to-Video Model',
+  'settings.img2imgModelLabel': 'Image-to-Image Model',
+  'settings.videoModeLabel': 'Video Generation Mode',
+  'settings.videoMode.firstFrame': 'First Frame → Video',
+  'settings.videoMode.firstLastFrame': 'First & Last Frames → Video',
+  'settings.videoMode.referenceImage': 'Reference Image → Video',
+  'settings.videoModeModel.firstFrame': 'First-Frame Video Model',
+  'settings.videoModeModel.firstLastFrame': 'First & Last Frames Video Model',
+  'settings.videoModeModel.referenceImage': 'Reference-Image Video Model',
   'settings.customModel': 'Custom...',
   'settings.customModelPlaceholder': 'Model name...',
 
   'ui.approveScript': 'Approve Script',
   'ui.approveCharacterDesign': 'Approve Design',
   'ui.approveStoryboard': 'Approve Storyboard',
-  'ui.approveReferenceImages': 'Approve References',
+  'ui.approveReferenceImages': 'Approve Images',
   'ui.approveVideoGeneration': 'Approve Videos',
   'ui.approvePostProduction': 'Approve Final',
 
@@ -181,17 +187,28 @@ const en = {
   'ui.charDesignSettings': 'Scenes',
   'ui.charDesignNoImage': 'No image generated',
   'ui.charDesignConfigNeeded': 'Configure DashScope API Key to generate images',
+  'ui.charDesignWriting': 'Writing character & scene design specs...',
+  'ui.charDesignSheet': 'Three-view model sheet (front / back / side)',
+  'ui.charDesignFront': 'Front portrait (used as the video first frame)',
 
   'ui.storyboardTitle': 'Storyboard',
   'ui.storyboardEpisode': 'Episode {num}',
   'ui.storyboardShot': 'Shot {num}',
   'ui.storyboardDuration': '{seconds}s',
 
-  'ui.refImagesTitle': 'Reference Images',
-  'ui.refImagesConfigNeeded': 'Configure DashScope API Key to generate reference images',
+  'ui.refImagesTitle': 'Image Generation',
+  'ui.refImagesConfigNeeded': 'Configure DashScope API Key to generate images',
   'ui.refImagesGenerating': 'Generating image {current}/{total}...',
   'ui.refImagesPending': 'Pending',
   'ui.refImagesComplete': 'Complete',
+  'ui.refImagesModeLabel': 'Video mode:',
+  'ui.refImagesLastFrameFrom': 'Last frame:',
+  'ui.refImagesLastFrameReuse': 'reuses {shot} first frame',
+  'ui.refImagesLastFrameGenerated': 'generated separately',
+  'ui.refImagesExtraFrames': 'Extra closing frames',
+  'ui.frameFirst': 'First frame',
+  'ui.frameLast': 'Last frame',
+  'ui.frameReference': 'Reference image',
 
   'ui.videoGenTitle': 'Video Generation',
   'ui.videoGenConfigNeeded': 'Configure DashScope API Key to generate videos',
@@ -248,16 +265,11 @@ const en = {
   'style.custom': 'Custom',
   'ui.lblVisualStyle': 'Visual Style',
   'ui.customStylePlaceholder': 'Describe your style...',
-  'ui.slotFirstFrame': 'First Frame',
-  'ui.slotLastFrame': 'Last Frame',
-  'ui.slotRefImages': 'Reference Images',
-  'ui.slotDropHint': 'Drop or click to upload',
-  'ui.slotNeedFirstForLast': 'Please set first frame before setting last frame',
-  'ui.uploadModeI2v': 'Image-to-Video mode (wan2.7-i2v)',
-  'ui.uploadModeR2v': 'Reference-to-Video mode (wan2.7-r2v)',
-  'ui.uploading': 'Uploading files...',
-  'ui.uploadErrorSize': 'File too large (max 10MB)',
-  'ui.uploadErrorMaxRef': 'Maximum 5 reference images'
+  'ui.slotPromptFile': 'Prompt Document',
+  'ui.slotPromptFileHint': 'Click or drop .docx / .txt / .md (max 1 file)',
+  'ui.promptFileParsing': 'Reading file...',
+  'ui.promptFileMeta': '{count} chars',
+  'ui.promptFileTruncated': ' (truncated to 20000 chars)'
 };
 
 const zh = {
@@ -347,22 +359,22 @@ const zh = {
   'steps.script.gen.3': '打磨剧本...',
   'steps.characterDesign.label': '角色/场景设计',
   'steps.characterDesign.agent': '角色设计师',
-  'steps.characterDesign.gen.0': '设计角色形象...',
-  'steps.characterDesign.gen.1': '创建场景概念...',
-  'steps.characterDesign.gen.2': '添加视觉细节...',
-  'steps.characterDesign.gen.3': '完成设计...',
+  'steps.characterDesign.gen.0': '撰写角色与场景设计稿...',
+  'steps.characterDesign.gen.1': '生成三视图定妆图...',
+  'steps.characterDesign.gen.2': '生成场景图...',
+  'steps.characterDesign.gen.3': '校验视觉一致性...',
   'steps.storyboard.label': '分镜规划',
   'steps.storyboard.agent': '分镜师',
   'steps.storyboard.gen.0': '拆解场景...',
   'steps.storyboard.gen.1': '规划镜头序列...',
   'steps.storyboard.gen.2': '定义机位角度...',
   'steps.storyboard.gen.3': '构建分镜...',
-  'steps.referenceImages.label': '参考图生成',
+  'steps.referenceImages.label': '图片生成',
   'steps.referenceImages.agent': '图像导演',
-  'steps.referenceImages.gen.0': '准备图像提示词...',
-  'steps.referenceImages.gen.1': '生成参考帧...',
+  'steps.referenceImages.gen.0': '融合剧本、设定图与分镜...',
+  'steps.referenceImages.gen.1': '按视频生成方式产出帧图...',
   'steps.referenceImages.gen.2': '评估构图...',
-  'steps.referenceImages.gen.3': '完成参考图...',
+  'steps.referenceImages.gen.3': '完成帧图...',
   'steps.videoGeneration.label': '视频生成',
   'steps.videoGeneration.agent': '视频导演',
   'steps.videoGeneration.gen.0': '设置镜头...',
@@ -417,15 +429,21 @@ const zh = {
   'settings.textModel': '文本及评估模型',
   'settings.textModelHint': '（用于剧本、分镜与图片/视频评分；图片/视频建议选视觉模型，如 qwen-vl-max / gpt-4o）',
   'settings.imageModelLabel': '文生图模型',
-  'settings.videoModelLabel': '图生视频模型',
-  'settings.refVideoModelLabel': '参考生视频模型',
+  'settings.img2imgModelLabel': '图生图模型',
+  'settings.videoModeLabel': '视频生成方式',
+  'settings.videoMode.firstFrame': '首帧生视频',
+  'settings.videoMode.firstLastFrame': '首尾帧生视频',
+  'settings.videoMode.referenceImage': '参考图生视频',
+  'settings.videoModeModel.firstFrame': '首帧生视频模型',
+  'settings.videoModeModel.firstLastFrame': '首尾帧生视频模型',
+  'settings.videoModeModel.referenceImage': '参考图生视频模型',
   'settings.customModel': '自定义…',
   'settings.customModelPlaceholder': '输入模型名…',
 
   'ui.approveScript': '确认剧本',
   'ui.approveCharacterDesign': '确认设计',
   'ui.approveStoryboard': '确认分镜',
-  'ui.approveReferenceImages': '确认参考图',
+  'ui.approveReferenceImages': '确认图片',
   'ui.approveVideoGeneration': '确认视频',
   'ui.approvePostProduction': '确认成片',
 
@@ -440,17 +458,28 @@ const zh = {
   'ui.charDesignSettings': '场景',
   'ui.charDesignNoImage': '未生成图片',
   'ui.charDesignConfigNeeded': '请配置 DashScope API Key 以生成图片',
+  'ui.charDesignWriting': '正在撰写角色与场景设计稿...',
+  'ui.charDesignSheet': '三视图定妆图（正面 / 背面 / 侧面）',
+  'ui.charDesignFront': '正面定妆图（用作视频首帧）',
 
   'ui.storyboardTitle': '分镜规划',
   'ui.storyboardEpisode': '第 {num} 集',
   'ui.storyboardShot': '镜头 {num}',
   'ui.storyboardDuration': '{seconds}秒',
 
-  'ui.refImagesTitle': '参考图生成',
-  'ui.refImagesConfigNeeded': '请配置 DashScope API Key 以生成参考图',
+  'ui.refImagesTitle': '图片生成',
+  'ui.refImagesConfigNeeded': '请配置 DashScope API Key 以生成图片',
   'ui.refImagesGenerating': '正在生成图片 {current}/{total}...',
   'ui.refImagesPending': '等待中',
   'ui.refImagesComplete': '已完成',
+  'ui.refImagesModeLabel': '视频生成方式：',
+  'ui.refImagesLastFrameFrom': '尾帧：',
+  'ui.refImagesLastFrameReuse': '复用 {shot} 的首帧',
+  'ui.refImagesLastFrameGenerated': '独立生成',
+  'ui.refImagesExtraFrames': '额外收尾帧',
+  'ui.frameFirst': '首帧',
+  'ui.frameLast': '尾帧',
+  'ui.frameReference': '参考图',
 
   'ui.videoGenTitle': '视频生成',
   'ui.videoGenConfigNeeded': '请配置 DashScope API Key 以生成视频',
@@ -507,16 +536,11 @@ const zh = {
   'style.custom': '自定义',
   'ui.lblVisualStyle': '视觉风格',
   'ui.customStylePlaceholder': '描述你想要的风格...',
-  'ui.slotFirstFrame': '首帧图片',
-  'ui.slotLastFrame': '尾帧图片',
-  'ui.slotRefImages': '参考图',
-  'ui.slotDropHint': '拖拽或点击上传',
-  'ui.slotNeedFirstForLast': '请先设置首帧图片，再设置尾帧',
-  'ui.uploadModeI2v': '图生视频模式 (wan2.7-i2v)',
-  'ui.uploadModeR2v': '参考图生视频模式 (wan2.7-r2v)',
-  'ui.uploading': '正在上传文件...',
-  'ui.uploadErrorSize': '文件太大（最大 10MB）',
-  'ui.uploadErrorMaxRef': '最多 5 张参考图'
+  'ui.slotPromptFile': '提示词文件',
+  'ui.slotPromptFileHint': '点击或拖拽上传 .docx / .txt / .md（最多 1 个）',
+  'ui.promptFileParsing': '正在读取文件...',
+  'ui.promptFileMeta': '{count} 字',
+  'ui.promptFileTruncated': '（已截断至 20000 字）'
 };
 
 const dicts = { en, zh };
@@ -609,13 +633,24 @@ export function applyLang() {
   if (textModelHint) textModelHint.textContent = t('settings.textModelHint');
   const lblImageModelNew = $('#lblImageModel');
   if (lblImageModelNew) lblImageModelNew.textContent = t('settings.imageModelLabel');
-  const lblVideoModelNew = $('#lblVideoModel');
-  if (lblVideoModelNew) lblVideoModelNew.textContent = t('settings.videoModelLabel');
-  const lblRefVideoModel = $('#lblRefVideoModel');
-  if (lblRefVideoModel) lblRefVideoModel.textContent = t('settings.refVideoModelLabel');
+  const lblImg2ImgModel = $('#lblImg2ImgModel');
+  if (lblImg2ImgModel) lblImg2ImgModel.textContent = t('settings.img2imgModelLabel');
+
+  const lblVideoMode = $('#lblVideoMode');
+  if (lblVideoMode) lblVideoMode.textContent = t('settings.videoModeLabel');
+  const videoModeSelect = $('#cfgVideoMode');
+  if (videoModeSelect) {
+    for (const opt of videoModeSelect.options) {
+      opt.textContent = t('settings.videoMode.' + opt.value);
+    }
+  }
+  const lblVideoModeModel = $('#lblVideoModeModel');
+  if (lblVideoModeModel && videoModeSelect?.value) {
+    lblVideoModeModel.textContent = t('settings.videoModeModel.' + videoModeSelect.value);
+  }
 
   const customPlaceholder = t('settings.customModelPlaceholder');
-  ['#cfgTextModelCustom', '#cfgImageModelCustom', '#cfgVideoModelCustom', '#cfgRefVideoModelCustom'].forEach(sel => {
+  ['#cfgTextModelCustom', '#cfgImageModelCustom', '#cfgImg2ImgModelCustom', '#cfgVideoModeModelCustom'].forEach(sel => {
     const el = $(sel);
     if (el) el.placeholder = customPlaceholder;
   });

@@ -25,17 +25,33 @@ const MODEL_PRESETS = {
 };
 
 const IMAGE_PRESETS = ['wanx2.1-t2i-turbo', 'wanx2.1-t2i-plus'];
-const VIDEO_PRESETS = ['wanx2.1-i2v-plus', 'wan2.7-i2v'];
-const REF_VIDEO_PRESETS = ['wan2.7-r2v'];
+const IMG2IMG_PRESETS = ['wan2.6-image'];
+
+const VIDEO_MODES = [
+  { id: 'firstFrame', presets: ['wanx2.1-i2v-plus', 'wan2.7-i2v'], defaultModel: 'wanx2.1-i2v-plus', configKey: 'video' },
+  { id: 'firstLastFrame', presets: ['wan2.7-i2v', 'wanx2.1-i2v-plus'], defaultModel: 'wan2.7-i2v', configKey: 'video' },
+  { id: 'referenceImage', presets: ['wan2.7-r2v'], defaultModel: 'wan2.7-r2v', configKey: 'refVideo' },
+];
+
+function videoModeById(id) {
+  return VIDEO_MODES.find(m => m.id === id) || VIDEO_MODES[0];
+}
+
+function inferVideoMode(models) {
+  if (models?.video?.name === 'wan2.7-i2v') return 'firstLastFrame';
+  return VIDEO_MODES[0].id;
+}
 
 let config = {
   apiProviders: structuredClone(PROVIDER_DEFAULTS),
   models: {
     text: { provider: 'dashscope', name: 'qwen-plus' },
     image: { name: 'wanx2.1-t2i-turbo' },
+    img2img: { name: 'wan2.6-image' },
     video: { name: 'wanx2.1-i2v-plus' },
     refVideo: { name: 'wan2.7-r2v' },
   },
+  videoMode: VIDEO_MODES[0].id,
   jsonMode: true,
   useProxy: false,
 };
@@ -60,9 +76,11 @@ function migrateOldConfig() {
     models: {
       text: { provider: 'dashscope', name: '' },
       image: { name: 'wanx2.1-t2i-turbo' },
+      img2img: { name: 'wan2.6-image' },
       video: { name: 'wanx2.1-i2v-plus' },
       refVideo: { name: 'wan2.7-r2v' },
     },
+    videoMode: VIDEO_MODES[0].id,
     jsonMode: true,
     useProxy: false,
   };
@@ -101,9 +119,11 @@ function loadConfig() {
         models: {
           text: parsed.models?.text || { provider: 'dashscope', name: '' },
           image: parsed.models?.image || { name: 'wanx2.1-t2i-turbo' },
+          img2img: parsed.models?.img2img || { name: 'wan2.6-image' },
           video: parsed.models?.video || { name: 'wanx2.1-i2v-plus' },
           refVideo: parsed.models?.refVideo || { name: 'wan2.7-r2v' },
         },
+        videoMode: parsed.videoMode || inferVideoMode(parsed.models),
         jsonMode: parsed.jsonMode ?? true,
         useProxy: parsed.useProxy ?? false,
       };
@@ -133,6 +153,7 @@ function saveConfig(cfg) {
       config.models[k] = { ...config.models[k], ...cfg.models[k] };
     }
   }
+  if (cfg.videoMode !== undefined) config.videoMode = cfg.videoMode;
   if (cfg.jsonMode !== undefined) config.jsonMode = cfg.jsonMode;
   if (cfg.useProxy !== undefined) config.useProxy = cfg.useProxy;
 
@@ -140,6 +161,7 @@ function saveConfig(cfg) {
     localStorage.setItem(SETTINGS_KEY, JSON.stringify({
       apiProviders: config.apiProviders,
       models: config.models,
+      videoMode: config.videoMode,
       jsonMode: config.jsonMode,
       useProxy: config.useProxy,
     }));
@@ -161,6 +183,7 @@ function getConfig() {
   return {
     apiProviders: structuredClone(config.apiProviders),
     models: structuredClone(config.models),
+    videoMode: config.videoMode,
     jsonMode: config.jsonMode,
     useProxy: config.useProxy,
   };
@@ -339,6 +362,9 @@ function validate(stepId, data) {
         && data.episodes[0].segments
         && data.episodes[0].segments[0]?.shots
         && data.episodes[0].segments[0].shots.length >= 1;
+    case 'characterDesign':
+      return Array.isArray(data.characters) && data.characters.length >= 1
+        && data.characters.some(c => c.id && (c.design || c.visualTag));
     default:
       return true;
   }
@@ -472,7 +498,7 @@ async function chat(messages, { signal, retryWithoutJsonFormat } = {}) {
 
 export {
   saveConfig, getConfig, isConfigured, testConnection, loadConfig,
-  consumeStepMetrics, chat,
-  MODEL_PRESETS, IMAGE_PRESETS, VIDEO_PRESETS, REF_VIDEO_PRESETS,
+  consumeStepMetrics, chat, parseJson,
+  MODEL_PRESETS, IMAGE_PRESETS, IMG2IMG_PRESETS, VIDEO_MODES, videoModeById,
   PROVIDER_DEFAULTS, inferProvider,
 };

@@ -264,15 +264,25 @@ function assert(cond, msg) {
   assert(nullCheck.verdict === QCVerdict.FAIL, 'checkConsistency null data → FAIL');
   assert(nullCheck.severity === Severity.CRITICAL, 'checkConsistency null data → CRITICAL');
 
-  // characterDesign: all characters present with images → PASS
+  // characterDesign: all characters present with sheet + portrait → PASS
   const passCheck = checkConsistency('characterDesign', {
-    characters: [{ name: 'Alice', imagePath: '/a.png' }, { name: 'Bob', imagePath: '/b.png' }],
+    characters: [
+      { name: 'Alice', sheetPath: '/a_sheet.png', imagePath: '/a.png' },
+      { name: 'Bob', sheetPath: '/b_sheet.png', imagePath: '/b.png' },
+    ],
   }, { characterNames: ['Alice', 'Bob'] });
   assert(passCheck.verdict === QCVerdict.PASS, 'checkConsistency characterDesign PASS');
 
+  // characterDesign: portrait without three-view sheet → issue
+  const noSheetCheck = checkConsistency('characterDesign', {
+    characters: [{ name: 'Alice', imagePath: '/a.png' }],
+  }, { characterNames: ['Alice'] });
+  assert(noSheetCheck.issues.some(i => i.includes('three-view model sheet')),
+    'checkConsistency characterDesign flags missing model sheet');
+
   // characterDesign: missing character → CONDITIONAL_PASS or FAIL
   const missingCheck = checkConsistency('characterDesign', {
-    characters: [{ name: 'Alice', imagePath: '/a.png' }],
+    characters: [{ name: 'Alice', sheetPath: '/a_sheet.png', imagePath: '/a.png' }],
   }, { characterNames: ['Alice', 'Bob'] });
   assert(missingCheck.verdict === QCVerdict.CONDITIONAL_PASS || missingCheck.verdict === QCVerdict.FAIL,
     'checkConsistency characterDesign missing char → non-PASS');
@@ -497,7 +507,7 @@ function assert(cond, msg) {
 {
   const imageSrc = readFileSync('./src/js/providers/image.js', 'utf8');
   assert(imageSrc.includes('async generate({ items, overrides'), 'image provider accepts { items, overrides }');
-  assert(!imageSrc.includes('buildCharacterPrompt'), 'image provider does NOT contain buildCharacterPrompt (moved to agent)');
+  assert(!imageSrc.includes('buildSheetPrompt'), 'image provider does NOT contain buildSheetPrompt (moved to agent)');
   assert(!imageSrc.includes('buildShotPrompt'), 'image provider does NOT contain buildShotPrompt (moved to agent)');
   assert(!imageSrc.includes('addAgentMessage'), 'image provider does NOT contain addAgentMessage (moved to agent)');
 
@@ -517,12 +527,17 @@ function assert(cond, msg) {
   const charSrc = readFileSync('./src/js/agents/characterAgent.js', 'utf8');
   assert(charSrc.includes('recordItemAttempt'), 'CharacterAgent uses recordItemAttempt');
   assert(charSrc.includes('planItemRetry'), 'CharacterAgent uses planItemRetry');
-  assert(charSrc.includes('#buildCharacterPrompt'), 'CharacterAgent contains #buildCharacterPrompt');
+  assert(charSrc.includes('#buildSheetPrompt'), 'CharacterAgent contains #buildSheetPrompt (three-view model sheet)');
+  assert(charSrc.includes('#buildFrontPrompt'), 'CharacterAgent contains #buildFrontPrompt');
+  assert(charSrc.includes("buildMessages('characterDesign'"), 'CharacterAgent writes design specs via the characterDesign prompt');
 
   const refSrc = readFileSync('./src/js/agents/referenceAgent.js', 'utf8');
   assert(refSrc.includes('recordItemAttempt'), 'ReferenceAgent uses recordItemAttempt');
   assert(refSrc.includes('planItemRetry'), 'ReferenceAgent uses planItemRetry');
-  assert(refSrc.includes('#buildShotPrompt'), 'ReferenceAgent contains #buildShotPrompt');
+  assert(refSrc.includes('#buildFramePrompt'), 'ReferenceAgent contains #buildFramePrompt');
+  assert(refSrc.includes('#videoMode'), 'ReferenceAgent plans frames by the chosen video mode');
+  assert(refSrc.includes('#collectRefs'), 'ReferenceAgent collects step-2 design images as references');
+  assert(!refSrc.includes('wan2.6') && !refSrc.includes('wanx2.1'), 'ReferenceAgent does not hardcode model names');
 
   const vidSrc = readFileSync('./src/js/agents/videoAgent.js', 'utf8');
   assert(vidSrc.includes('recordItemAttempt'), 'VideoAgent uses recordItemAttempt');
@@ -952,6 +967,574 @@ function assert(cond, msg) {
 
   // Clean up
   obs.resetLog();
+}
+
+// 30. Step 2 design-spec prompt — carries script entities and asks for visualTag/palette
+{
+  const { buildMessages } = await import('./src/js/providers/prompts.js');
+
+  const msgs = buildMessages('characterDesign', {
+    genre: 'fantasy',
+    script: {
+      title: 'T',
+      characters: [{ id: 'char_1', name: '米宝', enName: 'Mibao', desc: '一只好奇的猫', appearance: '橘色短毛猫，蓝色围巾' }],
+      settings: [{ id: 'set_1', name: '旧书店', desc: '堆满书的昏暗小店' }],
+    },
+  });
+
+  assert(Array.isArray(msgs) && msgs.length === 2, 'characterDesign builds system + user messages');
+  assert(msgs[0].role === 'system', 'characterDesign system message comes first');
+  const user = msgs[1].content;
+  assert(user.includes('char_1') && user.includes('set_1'), 'design prompt carries the script entity ids');
+  assert(user.includes('米宝') && user.includes('Mibao'), 'design prompt carries both character names');
+  assert(user.includes('"design"') && user.includes('"visualTag"') && user.includes('"palette"'),
+    'design prompt asks for design/visualTag/palette');
+  assert(user.includes('magical atmosphere'), 'design prompt maps genre to its style hint');
+}
+
+// 31. 图生图链路契约 — 服务端与 provider 一起支撑步骤4的参考图输入
+{
+  const dsSrc = readFileSync('./server/dashscope.js', 'utf8');
+  assert(dsSrc.includes('/services/aigc/image-generation/generation'), 'dashscope image-edit endpoint');
+  assert(dsSrc.includes('X-DashScope-Async'), 'dashscope image-edit submits asynchronously');
+  assert(dsSrc.includes('{ text: prompt }'), 'dashscope image-edit sends one text part');
+  assert(dsSrc.includes("map(image => ({ image }))"), 'dashscope image-edit sends reference images as image parts');
+  assert(/n:\s*1,/.test(dsSrc), 'dashscope image-edit pins n: 1 (editing mode defaults to 4)');
+  assert(dsSrc.includes('prompt_extend: false'), 'dashscope image-edit disables prompt rewriting');
+  assert(dsSrc.includes("pollData?.output?.choices?.[0]?.message?.content"), 'parseImageResultUrl reads the editing response shape');
+  assert(dsSrc.includes("pollData?.output?.results?.[0]?.url"), 'parseImageResultUrl still reads the text2image response shape');
+
+  const serverSrc = readFileSync('./server/index.js', 'utf8');
+  assert(serverSrc.includes("const { prompts, model, size, seed, seeds, refs, img2imgModel, img2imgSize } = req.body"),
+    '/api/generate/image accepts per-item refs, seeds and the img2img model');
+  assert(serverSrc.includes('function resolveMediaRef'), 'server resolves reference images only from /api/media');
+  assert(serverSrc.includes('submitImageEditTask'), 'server routes items with references to the editing endpoint');
+
+  const imageSrc = readFileSync('./src/js/providers/image.js', 'utf8');
+  assert(imageSrc.includes('parsed.models?.img2img?.name'), 'image provider reads the img2img model from settings');
+  assert(imageSrc.includes('normalizeRefs(item.refs)') || imageSrc.includes('item.refs'),
+    'image provider forwards per-item references');
+  assert(imageSrc.includes('img2imgSize'), 'image provider sends the editing-mode size');
+}
+
+// 32. Step 4 frame planning — one run per video generation mode
+{
+  const store = new Map();
+  globalThis.localStorage = {
+    getItem: k => (store.has(k) ? store.get(k) : null),
+    setItem: (k, v) => store.set(k, String(v)),
+    removeItem: k => store.delete(k),
+  };
+  const SETTINGS = 'cine-cutie-settings';
+  const writeSettings = videoMode => store.set(SETTINGS, JSON.stringify({
+    apiProviders: { dashscope: { endpoint: 'https://x', apiKey: '' } },
+    models: { text: { provider: 'dashscope', name: '' }, img2img: { name: 'setting-chosen-model' } },
+    videoMode,
+  }));
+
+  const { loadConfig } = await import('./src/js/providers/llm.js');
+  const { registerProvider } = await import('./src/js/providers/registry.js');
+  const { ReferenceAgent } = await import('./src/js/agents/referenceAgent.js');
+  const { state } = await import('./src/js/state.js');
+
+  // 让 addAgentMessage 走缓冲分支，避免离线环境触碰 DOM
+  state.viewingStep = 3;
+  state.stepRunning = true;
+
+  let sent = [];
+  registerProvider({
+    id: 'image',
+    capabilities: ['image'],
+    async generate({ items }) {
+      sent = items;
+      return items.map(it => ({
+        id: it.id,
+        path: `/api/media/${it.id}.png`,
+        imageUrl: `https://dashscope.invalid/${it.id}.png`,
+        prompt: it.prompt,
+        status: 'complete',
+      }));
+    },
+  });
+
+  const shot = (id, prompt) => ({ shot_id: id, type: 'medium', description: prompt, prompt, camera: 'static' });
+  const ctx = {
+    genre: 'fantasy',
+    totalDuration: 15,
+    entities: {},
+    script: {
+      title: '旧书店之光', genre: 'Fantasy',
+      episodes: [{
+        episode: 1, title: '觉醒', summary: '米宝发现书页会发光',
+        segments: [{ title: '发现', description: '米宝在旧书店翻开书页' }, { title: '告别', description: '米宝合上书' }],
+      }],
+    },
+    storyboard: {
+      episodes: [{
+        episode: 1,
+        segments: [
+          { shots: [shot('ep1_s1_sh1', 'Mibao the orange cat opens a glowing page in the dusty bookshop'), shot('ep1_s1_sh2', 'close-up of Mibao widening her eyes')] },
+          { shots: [shot('ep1_s2_sh1', 'Mibao closes the book inside the old bookshop')] },
+        ],
+      }],
+    },
+    characterDesign: {
+      characters: [{ id: 'char_1', name: '米宝', enName: 'Mibao', visualTag: 'orange shorthair cat wearing a blue scarf', imagePath: '/api/media/mibao_front.png', sheetPath: '/api/media/mibao_sheet.png' }],
+      settings: [{ id: 'set_1', name: '旧书店', visualTag: 'dusty bookshop, warm lamp light', imagePath: '/api/media/bookshop.png' }],
+    },
+  };
+
+  const runFor = async videoMode => {
+    writeSettings(videoMode);
+    loadConfig();
+    sent = [];
+    const agent = new ReferenceAgent();
+    const out = await agent.process(ctx, null);
+    return { sent, data: out.artifacts[0].data, metadata: out.metadata };
+  };
+
+  const first = await runFor('firstFrame');
+  assert(first.sent.length === 3, 'firstFrame mode generates exactly one first frame per shot');
+  assert(first.data.shots.every(s => s.role === 'first_frame'), 'firstFrame mode frames are first frames');
+  assert(first.sent.every(it => it.refs?.includes('/api/media/mibao_front.png') && it.refs?.includes('/api/media/bookshop.png')),
+    'firstFrame items carry the matched character and scene designs as references');
+  assert(first.sent[0].prompt.includes('REFERENCE FIDELITY') && first.sent[0].prompt.includes('image 1 ='),
+    'reference frames get an identity-lock clause naming each reference image');
+  assert(first.sent[0].prompt.includes('orange shorthair cat'), 'frame prompt injects the character visualTag');
+  assert(first.sent[0].prompt.includes('magical atmosphere'), 'frame prompt reuses the genre style hint');
+  assert(first.data.shots.every(s => s.lastFramePath === undefined), 'firstFrame mode records no last frames');
+  assert(first.data.extraFrames.length === 0, 'firstFrame mode has no extra closing frame');
+
+  const chained = await runFor('firstLastFrame');
+  assert(chained.sent.length === 4, 'firstLastFrame mode generates N first frames plus one closing frame');
+  assert(chained.data.extraFrames[0].role === 'last_frame', 'the extra closing frame is recorded as a last frame');
+  assert(chained.sent[3].id === 'ep1_s2_sh1__last_frame', 'the extra frame belongs to the final shot');
+  assert(chained.sent[3].prompt.includes('closing frame of this shot'), 'closing frame prompt describes an ending composition');
+  assert(chained.data.mode === 'firstLastFrame', 'artifact records the video mode');
+  assert(chained.data.shots[0].lastFrameFrom === 'ep1_s1_sh2', 'shot 1 reuses the next shot first frame as its last frame');
+  assert(chained.data.shots[0].lastFramePath === '/api/media/ep1_s1_sh2.png', 'the reused last frame path is recorded');
+  assert(chained.data.shots[2].lastFrameFrom === 'generated', 'the final shot uses a separately generated last frame');
+  assert(chained.data.extraFrames.length === 1 && chained.data.extraFrames[0].imagePath === '/api/media/ep1_s2_sh1__last_frame.png',
+    'the dedicated closing frame is exposed to step 5');
+  assert(chained.metadata.videoMode === 'firstLastFrame' && chained.metadata.totalFrames === 4, 'metadata reports the planned frame count');
+
+  const ref = await runFor('referenceImage');
+  assert(ref.sent.length === 3, 'referenceImage mode generates one reference image per shot');
+  assert(ref.sent.every(it => it.prompt.includes('locks the identity')), 'referenceImage prompts ask for an identity-locking composition');
+  assert(ref.data.shots.every(s => s.role === 'reference_image'), 'referenceImage artifact labels the frame role');
+  assert(ref.data.extraFrames.length === 0, 'referenceImage mode needs no closing frame');
+
+  // 没有步骤2设定图时退回纯文生图，不发送参考图
+  writeSettings('firstFrame');
+  loadConfig();
+  sent = [];
+  const noDesign = await new ReferenceAgent().process({ ...ctx, characterDesign: undefined }, null);
+  assert(sent.every(it => !it.refs?.length), 'items fall back to text-to-image when no design images exist');
+  assert(noDesign.artifacts[0].data.shots.length === 3, 'the fallback still covers every storyboard shot');
+
+  state.viewingStep = null;
+  state.stepRunning = false;
+}
+
+// 33. 图生图请求构造 — 桩 fetch 直接校验服务端提交函数
+{
+  const { submitImageEditTask, parseImageResultUrl } = await import('./server/dashscope.js');
+  const realFetch = globalThis.fetch;
+  let captured = null;
+  globalThis.fetch = async (url, opts) => {
+    captured = { url, opts };
+    return { ok: true, status: 200, json: async () => ({ output: { task_id: 'edit-task-1' } }) };
+  };
+
+  const taskId = await submitImageEditTask('paint the scarf red', ['data:image/png;base64,AAA', 'https://cdn.invalid/scene.png'], {
+    model: 'setting-chosen-model', size: '1280*720', apiKey: 'k', seed: 7,
+  });
+  globalThis.fetch = realFetch;
+
+  assert(taskId === 'edit-task-1', 'image-edit returns the async task id');
+  assert(captured.url.endsWith('/api/v1/services/aigc/image-generation/generation'), 'image-edit posts to the generation endpoint');
+  assert(captured.opts.headers['X-DashScope-Async'] === 'enable', 'image-edit asks for async execution');
+
+  const body = JSON.parse(captured.opts.body);
+  assert(body.model === 'setting-chosen-model', 'image-edit uses the model from settings, never a hardcoded one');
+  const content = body.input.messages[0].content;
+  assert(content[0].text === 'paint the scarf red', 'image-edit puts the text instruction first');
+  assert(content.filter(p => p.image).length === 2, 'image-edit passes both reference images');
+  assert(body.parameters.n === 1, 'image-edit requests exactly one image');
+  assert(body.parameters.size === '1280*720' && body.parameters.seed === 7, 'image-edit forwards size and seed');
+  assert(body.parameters.prompt_extend === false, 'image-edit keeps the written prompt verbatim');
+
+  globalThis.fetch = async (url, opts) => { captured = { url, opts }; return { ok: true, status: 200, json: async () => ({ output: { task_id: 'x' } }) }; };
+  await submitImageEditTask('p', ['a', 'b', 'c', 'd', 'e', 'f'].map(i => `https://cdn.invalid/${i}.png`), { model: 'm', apiKey: 'k' });
+  globalThis.fetch = realFetch;
+  assert(JSON.parse(captured.opts.body).input.messages[0].content.filter(p => p.image).length === 4,
+    'image-edit caps reference images at the 4-image editing limit');
+
+  let threw = false;
+  try { await submitImageEditTask('p', [], { model: 'm', apiKey: 'k' }); } catch { threw = true; }
+  assert(threw, 'image-edit refuses to run without a reference image');
+
+  assert(parseImageResultUrl({ output: { choices: [{ message: { content: [{ type: 'image', image: 'edit-url' }] } }] } }) === 'edit-url',
+    'result parser reads the image-edit response shape');
+  assert(parseImageResultUrl({ output: { results: [{ url: 't2i-url' }] } }) === 't2i-url',
+    'result parser still reads the text-to-image response shape');
+  assert(parseImageResultUrl({ output: { task_status: 'RUNNING' } }) === null, 'result parser returns null while still running');
+}
+
+// 34. Step 5 video chain — source contracts
+{
+  const vidAgentSrc = readFileSync('./src/js/agents/videoAgent.js', 'utf8');
+  assert(vidAgentSrc.includes('#videoMode'), 'VideoAgent reads the configured video generation mode');
+  assert(vidAgentSrc.includes('getConfig().videoMode'), 'VideoAgent takes the mode from settings, not from a constant');
+  assert(vidAgentSrc.includes('#lastFrameFor'), 'VideoAgent supplies a last frame in first+last frame mode');
+  assert(vidAgentSrc.includes('#referenceListFor'), 'VideoAgent builds a reference list in reference-image mode');
+  assert(vidAgentSrc.includes('#firstFrameFor'), 'VideoAgent resolves the first frame per shot');
+  assert(vidAgentSrc.includes('MAX_REFERENCE_IMAGES'), 'VideoAgent caps the reference images per clip');
+  assert(!vidAgentSrc.includes('wan2.7') && !vidAgentSrc.includes('wanx2.1'), 'VideoAgent does not hardcode model names');
+
+  const vidProvSrc = readFileSync('./src/js/providers/video.js', 'utf8');
+  assert(vidProvSrc.includes("mode === 'referenceImage' ? dsConfig.refVideoModel : dsConfig.videoModel"),
+    'video provider picks the model per mode from settings');
+  assert(vidProvSrc.includes('lastFramePath') && vidProvSrc.includes('lastFrameUrl'), 'video provider forwards the last frame');
+  assert(vidProvSrc.includes('referenceImages'), 'video provider forwards per-clip reference images');
+  assert(vidProvSrc.includes('imagePath'), 'video provider forwards the local frame path');
+  assert(vidProvSrc.includes('MAX_REFERENCE_IMAGES'), 'video provider caps the reference count');
+  assert(vidProvSrc.includes('mode,'), 'video provider tells the server which mode the batch uses');
+
+  const serverSrc = readFileSync('./server/index.js', 'utf8');
+  assert(serverSrc.includes('function toDashScopeImage'), 'server converts local frames into data URIs for DashScope');
+  assert(serverSrc.includes("type: 'reference_image'"), 'server builds r2v reference_image media entries');
+  assert(serverSrc.includes("type: 'first_frame'") && serverSrc.includes("type: 'last_frame'"),
+    'server builds i2v first_frame/last_frame media entries');
+  assert(serverSrc.includes('MAX_VIDEO_REFS'), 'server caps reference images at the r2v limit');
+  assert(serverSrc.includes('clip.seed ?? seed'), 'server honours per-clip seeds');
+  assert(!serverSrc.includes("req.get('host')"), 'server no longer sends DashScope an unreachable localhost URL');
+}
+
+// 35. Step 5 clip planning — one offline run per video generation mode
+{
+  const store = globalThis.localStorage ? null : new Map();
+  if (store) {
+    globalThis.localStorage = {
+      getItem: k => (store.has(k) ? store.get(k) : null),
+      setItem: (k, v) => store.set(k, String(v)),
+      removeItem: k => store.delete(k),
+    };
+  }
+  const SETTINGS = 'cine-cutie-settings';
+  const writeSettings = videoMode => localStorage.setItem(SETTINGS, JSON.stringify({
+    apiProviders: { dashscope: { endpoint: 'https://x', apiKey: '' } },
+    models: { text: { provider: 'dashscope', name: '' }, video: { name: 'setting-video-model' }, refVideo: { name: 'setting-ref-model' } },
+    videoMode,
+  }));
+
+  const { loadConfig } = await import('./src/js/providers/llm.js');
+  const { registerProvider } = await import('./src/js/providers/registry.js');
+  const { VideoAgent } = await import('./src/js/agents/videoAgent.js');
+  const { state } = await import('./src/js/state.js');
+
+  // 让 addAgentMessage 走缓冲分支，避免离线环境触碰 DOM
+  state.viewingStep = 4;
+  state.stepRunning = true;
+
+  let sent = [];
+  registerProvider({
+    id: 'video',
+    capabilities: ['video'],
+    async generate({ items }) {
+      sent = items;
+      // videoPath 留空：抽帧helper是浏览器专用的，离线跑只需要校验送出去的入参
+      return items.map(it => ({ id: it.id, videoPath: '', status: 'complete' }));
+    },
+  });
+
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async () => { throw new Error('offline'); };
+
+  const frame = (id, extra = {}) => ({
+    shot_id: id,
+    role: 'first_frame',
+    imagePath: `/api/media/${id}.png`,
+    imageUrl: `https://cdn.invalid/${id}.png`,
+    prompt: `Mibao the orange cat in the bookshop (${id})`,
+    refs: ['/api/media/mibao_front.png', '/api/media/bookshop.png'],
+    status: 'complete',
+    ...extra,
+  });
+
+  const step4 = (mode, { chained = true, closing = true } = {}) => ({
+    mode,
+    shots: [
+      frame('ep1_s1_sh1', chained && mode === 'firstLastFrame'
+        ? { lastFramePath: '/api/media/ep1_s1_sh2.png', lastFrameUrl: 'https://cdn.invalid/ep1_s1_sh2.png', lastFrameFrom: 'ep1_s1_sh2' } : {}),
+      frame('ep1_s1_sh2', chained && mode === 'firstLastFrame'
+        ? { lastFramePath: '/api/media/ep1_s2_sh1.png', lastFrameUrl: 'https://cdn.invalid/ep1_s2_sh1.png', lastFrameFrom: 'ep1_s2_sh1' } : {}),
+      frame('ep1_s2_sh1', chained && mode === 'firstLastFrame' && closing
+        ? { lastFramePath: '/api/media/closing.png', lastFrameUrl: 'https://cdn.invalid/closing.png', lastFrameFrom: 'generated' } : {}),
+    ],
+    extraFrames: mode === 'firstLastFrame' && closing
+      ? [{ id: 'ep1_s2_sh1__last_frame', shot_id: 'ep1_s2_sh1', role: 'last_frame', imagePath: '/api/media/closing.png', imageUrl: 'https://cdn.invalid/closing.png', refs: ['/api/media/bookshop.png'], status: 'complete' }]
+      : [],
+  });
+
+  const ctx = {
+    genre: 'fantasy',
+    totalDuration: 15,
+    entities: {},
+    script: { title: '旧书店之光', genre: 'Fantasy', episodes: [] },
+    storyboard: {
+      episodes: [{
+        episode: 1,
+        segments: [
+          { shots: [
+            { shot_id: 'ep1_s1_sh1', camera: 'pan-left', duration: 8, prompt: 'wide' },
+            { shot_id: 'ep1_s1_sh2', camera: 'zoom-in', duration: 4.4, prompt: 'close-up' },
+          ] },
+          { shots: [{ shot_id: 'ep1_s2_sh1', camera: 'static', prompt: 'closing' }] },
+        ],
+      }],
+    },
+    characterDesign: {
+      characters: [{ id: 'char_1', name: '米宝', enName: 'Mibao', imagePath: '/api/media/mibao_front.png', imageUrl: 'https://cdn.invalid/mibao_front.png' }],
+      settings: [{ id: 'set_1', name: '旧书店', imagePath: '/api/media/bookshop.png' }],
+    },
+  };
+
+  const runFor = async (videoMode, referenceImages) => {
+    writeSettings(videoMode);
+    loadConfig();
+    sent = [];
+    const out = await new VideoAgent().process({ ...ctx, referenceImages }, null);
+    return { sent, data: out.artifacts[0].data, metadata: out.metadata };
+  };
+
+  const first = await runFor('firstFrame', step4('firstFrame'));
+  assert(first.sent.length === 3, 'firstFrame mode animates every step-4 shot');
+  assert(first.sent.every(it => it.imagePath === `/api/media/${it.id}.png`), 'firstFrame clips use the step-4 frame of their own shot');
+  assert(first.sent.every(it => !it.lastFramePath && !it.referenceImages?.length), 'firstFrame clips carry no last frame and no reference list');
+  assert(first.sent[0].prompt.includes('camera slowly pans left'), 'clip prompt fuses the storyboard camera move');
+  assert(first.sent[1].prompt.includes('camera slowly zooms in'), 'each clip picks up its own storyboard camera move');
+  assert(first.sent[0].duration === 8, 'a clip asks for the duration its storyboard shot planned');
+  assert(first.sent[1].duration === 4, 'a fractional storyboard duration is rounded to whole seconds');
+  assert(first.sent[2].duration === 5, 'a shot with no planned duration falls back to 5s');
+  assert(first.data.mode === 'firstFrame' && first.metadata.videoMode === 'firstFrame', 'the artifact and metadata record the video mode');
+  assert(first.data.clips.length === 3 && first.data.clips.every(c => c.status === 'complete'), 'clips are reported per shot');
+
+  const chained = await runFor('firstLastFrame', step4('firstLastFrame'));
+  assert(chained.sent[0].lastFramePath === '/api/media/ep1_s1_sh2.png', 'a clip ends on the next shot first frame');
+  assert(chained.sent[1].lastFramePath === '/api/media/ep1_s2_sh1.png', 'the chaining holds for every consecutive pair');
+  assert(chained.sent[2].lastFramePath === '/api/media/closing.png', 'the final clip ends on the dedicated closing frame');
+  assert(chained.sent.every(it => it.imagePath && it.lastFramePath), 'first+last frame clips always carry both frames');
+  assert(chained.data.mode === 'firstLastFrame', 'the artifact records first+last frame mode');
+
+  const ref = await runFor('referenceImage', step4('referenceImage'));
+  assert(ref.sent.length === 3, 'reference-image mode animates every shot');
+  assert(ref.sent.every(it => it.referenceImages[0] === `/api/media/${it.id}.png`), 'the shot reference frame leads the reference list');
+  assert(ref.sent[0].referenceImages.includes('/api/media/mibao_front.png') && ref.sent[0].referenceImages.includes('/api/media/bookshop.png'),
+    'the design images step 4 used are reused as identity references');
+  assert(ref.sent.every(it => new Set(it.referenceImages).size === it.referenceImages.length), 'reference lists hold no duplicates');
+  assert(ref.sent.every(it => it.referenceImages.length <= 5), 'reference lists stay within the r2v limit');
+  assert(ref.sent.every(it => !it.imagePath && !it.lastFramePath), 'reference-image clips send no first/last frame');
+  assert(ref.data.mode === 'referenceImage', 'the artifact records reference-image mode');
+
+  // 帧图缺失时退回角色正面图（保持旧行为）；既无帧图又匹配不到角色的镜头才跳过
+  const noFrame = step4('firstFrame');
+  noFrame.shots[1].imagePath = '';
+  noFrame.shots[1].imageUrl = '';
+  noFrame.shots.push({ shot_id: 'ep1_s2_sh2', role: 'first_frame', imagePath: '', imageUrl: '', prompt: 'an empty room, no one inside', refs: [], status: 'failed' });
+  const fallback = await runFor('firstFrame', noFrame);
+  assert(fallback.sent.length === 3, 'a shot with neither a frame nor a character match is not animated');
+  assert(fallback.sent[1].imagePath === '/api/media/mibao_front.png',
+    'a shot whose frame is missing falls back to the matched character portrait');
+  assert(fallback.sent.every(it => it.id !== 'ep1_s2_sh2'), 'the unmatched frameless shot stays out of the batch');
+
+  // 步骤4之后改了设置：尾帧按"复用下一镜首帧"现算，末镜退回独立收尾帧
+  const switched = await runFor('firstLastFrame', step4('firstFrame', { chained: false }));
+  assert(switched.sent[0].lastFramePath === '/api/media/ep1_s1_sh2.png', 'the last frame is recomputed from the next shot when step 4 planned another mode');
+  assert(switched.sent[2].lastFramePath === '', 'without a closing frame the last clip simply has none');
+  const withClosing = step4('firstFrame', { chained: false });
+  withClosing.extraFrames = [{ id: 'ep1_s2_sh1__last_frame', shot_id: 'ep1_s2_sh1', role: 'last_frame', imagePath: '/api/media/closing.png', status: 'complete' }];
+  const switched2 = await runFor('firstLastFrame', withClosing);
+  assert(switched2.sent[2].lastFramePath === '/api/media/closing.png', 'the final clip falls back to the dedicated closing frame');
+
+  globalThis.fetch = realFetch;
+  state.viewingStep = null;
+  state.stepRunning = false;
+}
+
+// 36. 视频提交请求构造 — 桩 fetch 校验 V1 / V2 两种模型格式
+{
+  const { submitVideoTask, submitVideoTaskV2 } = await import('./server/dashscope.js');
+  const realFetch = globalThis.fetch;
+  let captured = null;
+  globalThis.fetch = async (url, opts) => {
+    captured = { url, opts };
+    return { ok: true, status: 200, json: async () => ({ output: { task_id: 'vid-task-1' } }) };
+  };
+
+  const v1 = await submitVideoTask('a cat turns the page', 'data:image/png;base64,AAA', {
+    model: 'setting-video-model', duration: 5, resolution: '720P', apiKey: 'k', seed: 11,
+  });
+  const v1Body = JSON.parse(captured.opts.body);
+  assert(v1 === 'vid-task-1', 'V1 video submit returns the async task id');
+  assert(captured.url.endsWith('/services/aigc/video-generation/video-synthesis'), 'video submits to the video-synthesis endpoint');
+  assert(captured.opts.headers['X-DashScope-Async'] === 'enable', 'video submit asks for async execution');
+  assert(v1Body.model === 'setting-video-model', 'V1 uses the model from settings, never a hardcoded one');
+  assert(v1Body.input.img_url === 'data:image/png;base64,AAA', 'V1 passes the first frame as input.img_url');
+  assert(v1Body.input.media === undefined, 'V1 sends no media array');
+  assert(v1Body.parameters.seed === 11 && v1Body.parameters.duration === 5, 'V1 forwards seed and duration');
+
+  await submitVideoTaskV2('a cat turns the page', [
+    { type: 'first_frame', url: 'data:image/png;base64,AAA' },
+    { type: 'last_frame', url: 'data:image/png;base64,BBB' },
+  ], { model: 'setting-video-model', duration: 5, resolution: '720P', apiKey: 'k', seed: 12 });
+  const v2Body = JSON.parse(captured.opts.body);
+  assert(v2Body.input.img_url === undefined, 'V2 sends no img_url');
+  assert(v2Body.input.media.map(m => m.type).join(',') === 'first_frame,last_frame', 'V2 lists the first frame then the last frame');
+  assert(v2Body.input.media.every(m => m.url.startsWith('data:')), 'V2 media entries carry the resolved image data');
+  assert(v2Body.parameters.seed === 12, 'V2 forwards the per-clip seed');
+
+  await submitVideoTaskV2('identity lock', [
+    { type: 'reference_image', url: 'data:image/png;base64,AAA' },
+    { type: 'reference_image', url: 'data:image/png;base64,BBB' },
+  ], { model: 'setting-ref-model', apiKey: 'k' });
+  const r2vBody = JSON.parse(captured.opts.body);
+  assert(r2vBody.input.media.every(m => m.type === 'reference_image'), 'r2v media entries are reference images');
+  assert(r2vBody.input.media.length === 2, 'r2v forwards every reference image it was given');
+
+  globalThis.fetch = realFetch;
+}
+
+// 37. 步骤5 → 步骤6 交接 — 新的 { mode, clips } 输出仍驱动后期合成
+{
+  const { getActiveProvider, registerProvider } = await import('./src/js/providers/registry.js');
+  await import('./src/js/providers/render.js');
+  const realRender = getActiveProvider('render');
+  const { EditorAgent } = await import('./src/js/agents/editorAgent.js');
+  const { extractEntities, checkConsistency } = await import('./src/js/agents/qcConsistency.js');
+  const { state } = await import('./src/js/state.js');
+  const { QCVerdict } = await import('./src/js/agents/qcTypes.js');
+
+  state.viewingStep = 5;
+  state.stepRunning = true;
+
+  const videoClips = {
+    mode: 'firstLastFrame',
+    clips: [
+      { shot_id: 'ep1_s1_sh1', videoPath: '/api/media/vid_1.mp4', status: 'complete' },
+      { shot_id: 'ep1_s1_sh2', videoPath: '/api/media/vid_2.mp4', status: 'complete' },
+      { shot_id: 'ep1_s1_sh3', videoPath: '', status: 'skipped' },
+      { shot_id: 'ep1_s2_sh1', videoPath: '', status: 'failed' },
+    ],
+  };
+
+  let posted = null;
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, opts) => {
+    if (url === '/api/render/final') {
+      posted = JSON.parse(opts.body);
+      return { ok: true, json: async () => ({ taskId: 'render-1' }) };
+    }
+    return { ok: true, json: async () => ({ status: 'completed', result: { path: '/api/media/final_render-1.mp4' } }) };
+  };
+
+  const rendered = await realRender.generate({
+    items: videoClips.clips.map(c => ({ id: c.shot_id, videoPath: c.videoPath, status: c.status })),
+  });
+
+  assert(posted && posted.videoPaths.length === 2, 'step 6 concatenates only the clips step 5 completed');
+  assert(posted.videoPaths[0] === '/api/media/vid_1.mp4' && posted.videoPaths[1] === '/api/media/vid_2.mp4',
+    'step 6 keeps the storyboard order of the completed clips');
+  assert(rendered.finalVideo === '/api/media/final_render-1.mp4' && rendered.status === 'complete',
+    'step 6 returns the rendered file as finalVideo');
+
+  posted = null;
+  const none = await realRender.generate({ items: [{ id: 'x', videoPath: '', status: 'skipped' }] });
+  assert(posted === null && none.status === 'no-clips', 'step 6 reports no-clips without calling ffmpeg when nothing completed');
+
+  let captured = null;
+  registerProvider({
+    id: 'render-probe',
+    capabilities: ['render'],
+    async generate({ items }) { captured = items; return { finalVideo: '', status: 'no-clips' }; },
+  });
+  globalThis.fetch = realFetch;
+
+  const out = await new EditorAgent().run({
+    videoClips,
+    storyboard: { episodes: [{ episode: 1 }, { episode: 2 }] },
+    entities: extractEntities('videoGeneration', videoClips) || {},
+  });
+
+  assert(getActiveProvider('render').id === 'render-probe', 'the probe provider is the one EditorAgent talks to');
+  assert(captured.length === 4 && captured[0].id === 'ep1_s1_sh1' && captured[0].videoPath === '/api/media/vid_1.mp4',
+    'EditorAgent maps every clip to { id, videoPath, status } for the render provider');
+  assert(captured[2].status === 'skipped' && captured[3].status === 'failed',
+    'EditorAgent forwards clip statuses so the provider can filter them');
+  const data = out.artifacts[0].data;
+  assert('finalVideo' in data && Array.isArray(data.episodes) && data.episodes.length === 2,
+    'step 6 output still satisfies the postProduction validator shape');
+  assert(out.metadata.renderStatus === 'no-clips' && out.artifacts[0].status === 'failed',
+    'step 6 marks the artifact failed when no final video was produced');
+
+  const step5Entities = extractEntities('videoGeneration', videoClips);
+  assert(step5Entities.clipCompleteCount === 2 && step5Entities.clipVideoMode === 'firstLastFrame',
+    'step 5 entities carry the complete count and the mode for later QC');
+  const step6Crit = checkConsistency('postProduction', { finalVideo: '/api/media/f.mp4', status: 'complete' }, step5Entities);
+  assert(step6Crit.verdict === QCVerdict.PASS && step6Crit.issues.length === 0,
+    'step 6 consistency check passes on the new step-5 entities');
+  const missingCrit = checkConsistency('postProduction', { finalVideo: '', status: 'failed' }, step5Entities);
+  assert(missingCrit.issues.length === 2, 'step 6 still flags clips-without-final-video and a failed render');
+}
+
+// 38. 视频时长 — 分镜规划的秒数按各模型档位夹取后提交
+{
+  const { clampVideoDuration } = await import('./server/dashscope.js');
+
+  assert(clampVideoDuration('wan2.7-i2v', 8) === 8, 'wan2.7 keeps a duration inside its documented 2-15s range');
+  assert(clampVideoDuration('wan2.7-i2v-2026-04-25', 40) === 15, 'a dated wan2.7 variant is clamped to the 15s ceiling');
+  assert(clampVideoDuration('wan2.7-r2v', 1) === 2, 'wan2.7 is raised to the 2s floor');
+  assert(clampVideoDuration('wan2.7-i2v', 7.4) === 7, 'a fractional duration is rounded to whole seconds');
+  assert(clampVideoDuration('wanx2.1-i2v-plus', 9) === 5, 'a model documented as fixed-5s ignores the planned duration');
+  assert(clampVideoDuration('wan2.2-i2v-plus', 9) === 5, 'the other fixed-5s generation also ignores it');
+  assert(clampVideoDuration('wanx2.1-i2v-turbo', 9) === 5, 'turbo snaps to the closest of its 3/4/5 options');
+  assert(clampVideoDuration('wanx2.1-i2v-turbo', 3) === 3, 'turbo keeps an allowed value untouched');
+  assert(clampVideoDuration('wan2.5-i2v-preview', 8) === 10, 'wan2.5 snaps to the nearest of its 5/10 options');
+  assert(clampVideoDuration('wan2.6-i2v-us', 8) === 10, 'wan2.6-us snaps to the nearest of its 5/10/15 options');
+  assert(clampVideoDuration('wan2.6-i2v-flash', 12) === 12, 'wan2.6-i2v-flash accepts the whole 2-15s range');
+  assert(clampVideoDuration('some-future-model', 9) === 5, 'an undocumented model falls back to the universally accepted 5s');
+  assert(clampVideoDuration('wan2.7-i2v', undefined) === 5, 'a missing duration falls back to 5s');
+  assert(clampVideoDuration('wan2.7-i2v', 'not-a-number') === 5, 'a non-numeric duration falls back to 5s');
+
+  const agentSrc = readFileSync('./src/js/agents/videoAgent.js', 'utf8');
+  assert(agentSrc.includes('#clipDuration(sbShot)'), 'VideoAgent derives the clip duration from the storyboard shot');
+  assert(agentSrc.includes('duration: this.#clipDuration(sbShot)'), 'every clip item carries its planned duration');
+  assert(agentSrc.includes('duration: item.duration'), 'the retry batch keeps the per-clip duration');
+
+  const providerSrc = readFileSync('./src/js/providers/video.js', 'utf8');
+  assert(providerSrc.includes('duration: item.duration ?? DEFAULT_CLIP_DURATION'), 'the video provider forwards the per-clip duration');
+  assert(providerSrc.includes('duration: c.duration'), 'the request body carries a duration for every clip');
+  assert(!/duration: 5,/.test(providerSrc), 'the video provider has no hardcoded 5s duration left');
+
+  const serverSrc = readFileSync('./server/index.js', 'utf8');
+  assert(serverSrc.includes('const clipDuration = clip.duration ?? duration'), 'the route prefers the per-clip duration over the batch default');
+  assert((serverSrc.match(/duration: clipDuration/g) || []).length === 3, 'all three non-upload submit paths send the per-clip duration');
+  assert(serverSrc.includes('duration: clip.duration ?? duration'), 'the upload submit path also honours a per-clip duration');
+
+  const dsSrc = readFileSync('./server/dashscope.js', 'utf8');
+  assert((dsSrc.match(/clampVideoDuration\(model, duration\)/g) || []).length === 2, 'both submit functions clamp the duration for the chosen model');
+  assert((dsSrc.match(/duration: seconds/g) || []).length === 2, 'the clamped value is what actually gets submitted');
+}
+
+// 39. 分镜提示词 — 各镜头时长之和要贴合用户设定的总时长
+{
+  const { buildMessages } = await import('./src/js/providers/prompts.js');
+  const msgs = buildMessages('storyboard', { totalDuration: 45, script: null }) || [];
+  const text = msgs.map(m => (typeof m.content === 'string' ? m.content : JSON.stringify(m.content))).join('\n');
+
+  assert(text.includes('MUST add up to roughly 45s'), 'the storyboard prompt pins the shot durations to the requested total');
+  assert(text.includes('ACTUAL generated clip length'), 'the prompt says duration is the real clip length, not a hint');
+  assert(text.includes('suggested duration in seconds (3-10)'), 'the JSON schema still asks for a per-shot duration');
 }
 
 console.log(`\nSmoke test: ${passed} passed, ${failed} failed`);

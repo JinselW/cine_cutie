@@ -4,10 +4,9 @@ import './providers/image.js';
 import './providers/video.js';
 import './providers/videoComfy.js';
 import './providers/render.js';
-import { $, $$ } from './utils.js';
+import { $, $$, escapeHtml } from './utils.js';
 import { state } from './state.js';
 import { STEPS, dataKeyOf } from './config.js';
-import { setFirstFrame, setLastFrame, addReferenceImages, removeReferenceImage, clearSlot, clearAllUploads, getUploads, hasUploads, uploadToServer } from './media.js';
 import { buildPipelineBar, showSection, setMascot, addAgentMessage, updatePipeline } from './ui/render.js';
 import { showStepReadOnly } from './navigation.js';
 import { startPipeline, restoreSession } from './engine.js';
@@ -54,128 +53,76 @@ if (restoreSession() && Object.values(state.data).some(v => v != null)) {
   addAgentMessage('♻️', t('ui.sessionRestored'));
 }
 
-const slotConfig = {
-  firstFrame: { slotEl: '#slotFirstFrame', inputEl: '#inputFirstFrame', previewEl: '#previewFirstFrame' },
-  lastFrame: { slotEl: '#slotLastFrame', inputEl: '#inputLastFrame', previewEl: '#previewLastFrame' },
-  referenceImages: { slotEl: '#slotReferenceImages', inputEl: '#inputReferenceImages', previewEl: '#previewReferenceImages' },
-};
+const PROMPT_SLOT = { slotEl: '#slotPromptFile', inputEl: '#inputPromptFile', previewEl: '#previewPromptFile' };
 
-function initSlotHandlers(slotName) {
-  const cfg = slotConfig[slotName];
-  const slotEl = $(cfg.slotEl);
-  const inputEl = $(cfg.inputEl);
+function initPromptFileSlot() {
+  const slotEl = $(PROMPT_SLOT.slotEl);
+  const inputEl = $(PROMPT_SLOT.inputEl);
   if (!slotEl || !inputEl) return;
 
-  slotEl.addEventListener('click', () => inputEl.click());
+  slotEl.addEventListener('click', e => {
+    if (e.target.closest('.slot-remove') || e.target.closest('.remove')) return;
+    inputEl.click();
+  });
   slotEl.addEventListener('dragover', e => { e.preventDefault(); slotEl.classList.add('dragover'); });
   slotEl.addEventListener('dragleave', () => slotEl.classList.remove('dragover'));
   slotEl.addEventListener('drop', e => {
     e.preventDefault();
     slotEl.classList.remove('dragover');
-    handleSlotFiles(slotName, e.dataTransfer.files);
+    handlePromptFile(e.dataTransfer.files[0]);
   });
   inputEl.addEventListener('change', () => {
-    handleSlotFiles(slotName, inputEl.files);
+    handlePromptFile(inputEl.files[0]);
     inputEl.value = '';
   });
 }
 
-function handleSlotFiles(slotName, fileList) {
-  let err;
-  if (slotName === 'firstFrame') {
-    err = setFirstFrame(fileList[0]);
-  } else if (slotName === 'lastFrame') {
-    err = setLastFrame(fileList[0]);
-  } else if (slotName === 'referenceImages') {
-    err = addReferenceImages(fileList);
+async function handlePromptFile(file) {
+  if (!file) return;
+  const previewEl = $(PROMPT_SLOT.previewEl);
+  previewEl.classList.remove('hidden');
+  previewEl.innerHTML = `<div class="file-tag">📄 ${escapeHtml(file.name)} · ${t('ui.promptFileParsing')}</div>`;
+
+  const formData = new FormData();
+  formData.append('file', file);
+  try {
+    const res = await fetch('/api/upload/prompt', { method: 'POST', body: formData });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    state.promptDoc = data;
+  } catch (err) {
+    state.promptDoc = null;
+    alert(err.message);
   }
-  if (err) {
-    alert(err);
+  renderPromptSlot();
+}
+
+function renderPromptSlot() {
+  const slotEl = $(PROMPT_SLOT.slotEl);
+  const previewEl = $(PROMPT_SLOT.previewEl);
+  const doc = state.promptDoc;
+  if (!doc) {
+    slotEl.classList.remove('has-file');
+    previewEl.classList.add('hidden');
+    previewEl.innerHTML = '';
     return;
   }
-  renderUploadSlots();
+  slotEl.classList.add('has-file');
+  previewEl.classList.remove('hidden');
+  const meta = t('ui.promptFileMeta', { count: doc.chars }) + (doc.truncated ? t('ui.promptFileTruncated') : '');
+  previewEl.innerHTML = `
+    <div class="file-tag">📄 ${escapeHtml(doc.name)} · ${escapeHtml(meta)}
+      <span class="remove" id="promptFileRemove">&times;</span>
+    </div>`;
+  $('#promptFileRemove').addEventListener('click', e => {
+    e.stopPropagation();
+    state.promptDoc = null;
+    renderPromptSlot();
+  });
 }
 
-function renderUploadSlots() {
-  const uploads = getUploads();
-
-  renderSingleSlot('firstFrame', uploads.firstFrame);
-  renderSingleSlot('lastFrame', uploads.lastFrame);
-  renderRefSlot(uploads.referenceImages);
-  updateModeHint();
-}
-
-function renderSingleSlot(slotName, entry) {
-  const cfg = slotConfig[slotName];
-  const slotEl = $(cfg.slotEl);
-  const previewEl = $(cfg.previewEl);
-  if (!slotEl || !previewEl) return;
-
-  if (entry) {
-    slotEl.classList.add('has-file');
-    previewEl.classList.remove('hidden');
-    previewEl.innerHTML = `
-      <div style="position:relative;display:inline-block">
-        <img src="${entry.previewUrl}" alt="${entry.name}">
-        <button class="slot-remove" data-slot="${slotName}" data-index="-1">&times;</button>
-      </div>`;
-    previewEl.querySelector('.slot-remove').addEventListener('click', e => {
-      e.stopPropagation();
-      clearSlot(slotName);
-      renderUploadSlots();
-    });
-  } else {
-    slotEl.classList.remove('has-file');
-    previewEl.classList.add('hidden');
-    previewEl.innerHTML = '';
-  }
-}
-
-function renderRefSlot(refImages) {
-  const cfg = slotConfig.referenceImages;
-  const slotEl = $(cfg.slotEl);
-  const previewEl = $(cfg.previewEl);
-  if (!slotEl || !previewEl) return;
-
-  if (refImages.length > 0) {
-    slotEl.classList.add('has-file');
-    previewEl.classList.remove('hidden');
-    previewEl.innerHTML = refImages.map((entry, i) => `
-      <div style="position:relative;display:inline-block">
-        <img src="${entry.previewUrl}" alt="${entry.name}">
-        <button class="slot-remove" data-index="${i}">&times;</button>
-      </div>`).join('');
-    previewEl.querySelectorAll('.slot-remove').forEach(btn => {
-      btn.addEventListener('click', e => {
-        e.stopPropagation();
-        removeReferenceImage(+btn.dataset.index);
-        renderUploadSlots();
-      });
-    });
-  } else {
-    slotEl.classList.remove('has-file');
-    previewEl.classList.add('hidden');
-    previewEl.innerHTML = '';
-  }
-}
-
-function updateModeHint() {
-  const hint = $('#uploadModeHint');
-  if (!hint) return;
-  const uploads = getUploads();
-  if (uploads.referenceImages.length > 0) {
-    hint.textContent = t('ui.uploadModeR2v');
-    hint.classList.remove('hidden');
-  } else if (uploads.firstFrame || uploads.lastFrame) {
-    hint.textContent = t('ui.uploadModeI2v');
-    hint.classList.remove('hidden');
-  } else {
-    hint.classList.add('hidden');
-  }
-}
-
-for (const name of Object.keys(slotConfig)) initSlotHandlers(name);
-renderUploadSlots();
+initPromptFileSlot();
+renderPromptSlot();
 
 function updateDurationHint() {
   const val = Math.max(5, parseInt($('#totalDuration').value) || 30);
@@ -231,19 +178,11 @@ $('#customStyleInput').addEventListener('input', e => {
 
 $('#startBtn').addEventListener('click', async () => {
   const input = $('#userInput').value.trim();
-  if (!input && !hasUploads()) {
+  if (!input && !state.promptDoc) {
     $('#userInput').focus();
     $('#userInput').style.borderColor = 'var(--rose)';
     setTimeout(() => $('#userInput').style.borderColor = '', 2000);
     return;
-  }
-
-  if (hasUploads()) {
-    const uploads = getUploads();
-    if (uploads.lastFrame && !uploads.firstFrame) {
-      alert(t('ui.slotNeedFirstForLast'));
-      return;
-    }
   }
 
   state.userInput = input;
@@ -255,18 +194,6 @@ $('#startBtn').addEventListener('click', async () => {
   const btn = $('#startBtn');
   btn.disabled = true;
   btn.textContent = t('ui.starting');
-
-  try {
-    if (hasUploads()) {
-      btn.textContent = t('ui.uploading') || 'Uploading...';
-      await uploadToServer();
-    }
-  } catch (err) {
-    alert('Upload failed: ' + err.message);
-    btn.disabled = false;
-    btn.textContent = t('ui.startBtn') || '✨ Lights, Camera, Action!';
-    return;
-  }
 
   const genreLabel = state.visualStyle === 'custom'
     ? (state.customStyle || 'cinematic')

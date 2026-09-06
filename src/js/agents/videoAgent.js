@@ -2,12 +2,17 @@ import { BaseAgent } from './baseAgent.js';
 import { RetryAgent, ItemRetryStrategy } from './retryAgent.js';
 import { QCAgent, SCORE_THRESHOLD, reportScore, reportRetry } from './qcAgent.js';
 import { getActiveProvider } from '../providers/registry.js';
+import { getConfig } from '../providers/llm.js';
 import { createArtifact, ArtifactKind, ArtifactStatus, recordItemAttempt } from '../artifacts/artifactTypes.js';
 import { addAgentMessage } from '../ui/render.js';
 import { t } from '../i18n.js';
 
 const MAX_ITEM_ATTEMPTS = 3;
 const MAX_STAGE_RETRIES = 1;
+// 参考生视频模型最多接受 5 张参考图
+const MAX_REFERENCE_IMAGES = 5;
+// 分镜没给建议时长时的兜底：5 秒是所有视频模型都接受的档位
+const DEFAULT_CLIP_DURATION = 5;
 
 function applyVisualRetryFeedback(items, critique) {
   const note = (critique.suggestions || []).join('; ');
@@ -50,13 +55,14 @@ export class VideoAgent extends BaseAgent {
     const refImages = ctx.referenceImages;
     if (!refImages?.shots?.length) return this.#emptyResult(ctx);
 
-    const items = this.#buildItems(refImages, ctx);
+    const mode = this.#videoMode();
+    const items = this.#buildItems(refImages, ctx, mode);
     if (!items.length) return this.#emptyResult(ctx);
 
     const artifact = createArtifact({
       kind: ArtifactKind.VIDEO_CLIP,
       stepId: 'videoGeneration',
-      data: { clips: [] },
+      data: { mode, clips: [] },
       status: ArtifactStatus.GENERATING,
     });
 
@@ -66,7 +72,7 @@ export class VideoAgent extends BaseAgent {
       if (_token?.signal?.aborted) break;
 
       const results = await this.#generateItems(items, artifact, ctx, _token);
-      const data = this.#assembleResult(results, refImages);
+      const data = this.#assembleResult(results, refImages, mode);
 
       const crit = await this.#qcAgent.process({ data, entities: ctx.entities || {}, ...ctx });
       reportScore(crit.score, '🎥');
@@ -79,7 +85,7 @@ export class VideoAgent extends BaseAgent {
       applyVisualRetryFeedback(items, crit);
     }
 
-    const finalData = bestData || { clips: [] };
+    const finalData = bestData || { mode, clips: [] };
     const complete = finalData.clips.filter(c => c.status === 'complete').length;
 
     artifact.data = finalData;
@@ -88,6 +94,7 @@ export class VideoAgent extends BaseAgent {
     return {
       artifacts: [artifact],
       metadata: {
+        videoMode: mode,
         totalClips: finalData.clips.length,
         completeClips: complete,
         failedClips: finalData.clips.filter(c => c.status === 'failed').length,
@@ -100,17 +107,7 @@ export class VideoAgent extends BaseAgent {
 
   async #runWithUploads(ctx, _token) {
     const uploads = ctx.uploads;
-    const storyboard = ctx.storyboard;
-    const script = ctx.script;
-
-    const allStoryboardShots = [];
-    if (storyboard?.episodes) {
-      for (const ep of storyboard.episodes) {
-        for (const seg of (ep.segments || [])) {
-          for (const shot of (seg.shots || [])) allStoryboardShots.push(shot);
-        }
-      }
-    }
+    const allStoryboardShots = this.#storyboardShots(ctx);
 
     const shotCount = Math.max(1, allStoryboardShots.length || Math.ceil((ctx.totalDuration || 30) / 5));
     const items = [];
@@ -188,47 +185,116 @@ export class VideoAgent extends BaseAgent {
     };
   }
 
-  #buildItems(refImages, ctx) {
-    const characters = ctx.characterDesign?.characters || [];
-    const storyboard = ctx.storyboard;
-    const allStoryboardShots = [];
-    if (storyboard?.episodes) {
-      for (const ep of storyboard.episodes) {
-        for (const seg of (ep.segments || [])) {
-          for (const shot of (seg.shots || [])) allStoryboardShots.push(shot);
-        }
+  #videoMode() {
+    const mode = getConfig().videoMode;
+    return mode === 'firstLastFrame' || mode === 'referenceImage' ? mode : 'firstFrame';
+  }
+
+  #storyboardShots(ctx) {
+    const shots = [];
+    for (const ep of (ctx.storyboard?.episodes || [])) {
+      for (const seg of (ep.segments || [])) {
+        for (const shot of (seg.shots || [])) shots.push(shot);
       }
     }
+    return shots;
+  }
 
+  #buildItems(refImages, ctx, mode) {
+    const characters = ctx.characterDesign?.characters || [];
+    const sbShots = this.#storyboardShots(ctx);
+    const sbById = new Map(sbShots.map(s => [s.shot_id, s]));
+    const shots = refImages.shots || [];
     const items = [];
-    for (let i = 0; i < refImages.shots.length; i++) {
-      const shot = refImages.shots[i];
-      if (!shot.imagePath || !shot.imageUrl) continue;
 
-      const shotText = ((shot.prompt || '') + ' ' + (shot.description || '')).toLowerCase();
-      let matchedChar = null;
-      for (const c of characters) {
-        if (!c.imageUrl) continue;
-        const names = [c.name, c.enName].filter(Boolean).map(n => n.toLowerCase());
-        if (names.some(n => n && shotText.includes(n))) {
-          matchedChar = c;
-          break;
-        }
+    for (let i = 0; i < shots.length; i++) {
+      const shot = shots[i];
+      const matchedChar = this.#matchCharacter(shot, characters);
+      const sbShot = sbById.get(shot.shot_id) || sbShots[i];
+      const base = {
+        id: shot.shot_id,
+        prompt: this.#buildVideoPrompt(shot, sbShot),
+        duration: this.#clipDuration(sbShot),
+        seed: 42,
+      };
+
+      if (mode === 'referenceImage') {
+        const referenceImages = this.#referenceListFor(shot, matchedChar);
+        if (!referenceImages.length) continue;
+        items.push({ ...base, referenceImages, referenceId: referenceImages[0] });
+        continue;
       }
 
-      const imageUrl = matchedChar?.imageUrl || shot.imageUrl;
-      const sbShot = allStoryboardShots[i];
-      const videoPrompt = this.#buildVideoPrompt(shot, sbShot);
+      const first = this.#firstFrameFor(shot, matchedChar);
+      if (!first) continue;
+
+      if (mode === 'firstLastFrame') {
+        const last = this.#lastFrameFor(shot, shots, i, refImages.extraFrames);
+        items.push({
+          ...base,
+          imagePath: first.path,
+          imageUrl: first.url,
+          lastFramePath: last.path,
+          lastFrameUrl: last.url,
+          referenceId: first.path || first.url,
+        });
+        continue;
+      }
 
       items.push({
-        id: shot.shot_id,
-        prompt: videoPrompt,
-        imageUrl,
-        seed: 42,
-        referenceId: imageUrl,
+        ...base,
+        imagePath: first.path,
+        imageUrl: first.url,
+        referenceId: first.path || first.url,
       });
     }
     return items;
+  }
+
+  // 分镜给的是建议秒数；服务端还会按所选模型支持的档位再夹一次
+  #clipDuration(sbShot) {
+    const seconds = Math.round(Number(sbShot?.duration));
+    return Number.isFinite(seconds) && seconds > 0 ? seconds : DEFAULT_CLIP_DURATION;
+  }
+
+  #matchCharacter(shot, characters) {
+    const shotText = ((shot.prompt || '') + ' ' + (shot.description || '')).toLowerCase();
+    for (const c of characters) {
+      if (!c.imageUrl && !c.imagePath) continue;
+      const names = [c.name, c.enName].filter(Boolean).map(n => String(n).toLowerCase());
+      if (names.some(n => n.length > 1 && shotText.includes(n))) return c;
+    }
+    return null;
+  }
+
+  // 步骤4的帧图已按定妆图做过图生图，优先用它当首帧；帧图缺失时才退回角色正面图
+  #firstFrameFor(shot, matchedChar) {
+    if (shot.imagePath || shot.imageUrl) {
+      return { path: shot.imagePath || '', url: shot.imageUrl || '' };
+    }
+    if (matchedChar?.imagePath || matchedChar?.imageUrl) {
+      return { path: matchedChar.imagePath || '', url: matchedChar.imageUrl || '' };
+    }
+    return null;
+  }
+
+  // 设置可能在步骤4之后被改过：步骤4没记尾帧时按"复用下一镜首帧"现算，末镜退回独立收尾帧
+  #lastFrameFor(shot, shots, index, extraFrames) {
+    if (shot.lastFramePath || shot.lastFrameUrl) {
+      return { path: shot.lastFramePath || '', url: shot.lastFrameUrl || '' };
+    }
+    const next = shots[index + 1];
+    if (next?.imagePath || next?.imageUrl) {
+      return { path: next.imagePath || '', url: next.imageUrl || '' };
+    }
+    const closing = (extraFrames || []).find(f => f.shot_id === shot.shot_id && f.role === 'last_frame');
+    return { path: closing?.imagePath || '', url: closing?.imageUrl || '' };
+  }
+
+  #referenceListFor(shot, matchedChar) {
+    const candidates = [shot.imagePath, ...(shot.refs || []), matchedChar?.imagePath];
+    const refs = candidates.filter(r => typeof r === 'string' && r.startsWith('/api/media/'));
+    return [...new Set(refs)].slice(0, MAX_REFERENCE_IMAGES);
   }
 
   #buildVideoPrompt(shot, storyboardShot) {
@@ -262,8 +328,13 @@ export class VideoAgent extends BaseAgent {
       const batch = pending.map(item => ({
         id: item.id,
         prompt: item.prompt,
-        imageUrl: item.imageUrl,
+        duration: item.duration,
         seed: item.seed,
+        imagePath: item.imagePath,
+        imageUrl: item.imageUrl,
+        lastFramePath: item.lastFramePath,
+        lastFrameUrl: item.lastFrameUrl,
+        referenceImages: item.referenceImages,
       }));
 
       const providerResults = await provider.generate({ items: batch, overrides: {}, signal: token?.signal });
@@ -307,6 +378,7 @@ export class VideoAgent extends BaseAgent {
           }
           if (plan.overrides.referenceOverrides?.[plan.itemId]) {
             item.imageUrl = plan.overrides.referenceOverrides[plan.itemId];
+            item.imagePath = '';
             item.referenceId = plan.overrides.referenceOverrides[plan.itemId];
           }
         }
@@ -404,7 +476,7 @@ export class VideoAgent extends BaseAgent {
     return refs;
   }
 
-  #assembleResult(results, refImages) {
+  #assembleResult(results, refImages, mode) {
     const clips = refImages.shots.map(shot => {
       const result = results.find(r => r.id === shot.shot_id);
       if (result) {
@@ -420,10 +492,11 @@ export class VideoAgent extends BaseAgent {
       return { shot_id: shot.shot_id, videoPath: '', status: 'failed' };
     });
 
-    return { clips };
+    return { mode, clips };
   }
 
   #emptyResult(ctx) {
+    const mode = this.#videoMode();
     const clips = (ctx.referenceImages?.shots || []).map(sh => ({
       shot_id: sh.shot_id,
       videoPath: '',
@@ -433,10 +506,10 @@ export class VideoAgent extends BaseAgent {
       artifacts: [createArtifact({
         kind: ArtifactKind.VIDEO_CLIP,
         stepId: 'videoGeneration',
-        data: { clips },
+        data: { mode, clips },
         status: ArtifactStatus.FAILED,
       })],
-      metadata: { totalClips: clips.length, completeClips: 0, qualityScore: 0 },
+      metadata: { videoMode: mode, totalClips: clips.length, completeClips: 0, qualityScore: 0 },
     };
   }
 }

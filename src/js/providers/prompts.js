@@ -1,7 +1,7 @@
 const JSON_RULE = 'Reply ONLY with valid JSON. No markdown, no commentary, no code fences.';
 const LANG_RULE = 'Write all creative content (titles, descriptions, dialogue, etc.) in the SAME LANGUAGE as the user\'s story idea. Keep all JSON keys in English exactly as specified.';
 
-const STYLE_HINTS = {
+export const STYLE_HINTS = {
   cinematic: 'cinematic film look, natural lighting, realistic tones',
   fantasy: 'magical atmosphere, ethereal lighting, mythical elements',
   scifi: 'futuristic, neon-lit, high-tech, sleek metallic surfaces',
@@ -26,7 +26,10 @@ export const PROMPTS = {
 
 STORY IDEA:
 ${ctx.userInput || 'A creative story'}
-
+${ctx.promptDoc ? `
+REFERENCE DOCUMENT (user-provided source material — combine it with the story idea above):
+${ctx.promptDoc}
+` : ''}
 GENRE: ${ctx.genre}
 VISUAL STYLE: ${STYLE_HINTS[ctx.genre] || ctx.genre || 'cinematic film look'}
 
@@ -85,6 +88,60 @@ STORY COHERENCE — CRITICAL:
     }
   },
 
+  characterDesign: {
+    system: `You are Cine-Cutie's Production Designer. You turn a script into precise, stable visual design specs that drive image generation, so the same character and the same location look identical in every view and every shot. ${JSON_RULE} ${LANG_RULE}`,
+    buildUser(ctx) {
+      const script = ctx.script;
+      const style = STYLE_HINTS[ctx.genre] || ctx.genre || 'cinematic film look';
+
+      const characters = (script?.characters || []).map(c =>
+        `- id: ${c.id} | name: ${c.name}${c.enName ? ` (${c.enName})` : ''} | role: ${c.desc || ''} | script appearance: ${c.appearance || ''}`
+      ).join('\n') || '(none)';
+
+      const settings = (script?.settings || []).map(s =>
+        `- id: ${s.id} | name: ${s.name} | script description: ${s.desc || ''}`
+      ).join('\n') || '(none)';
+
+      return `Write the visual design specs for this film's characters and scenes.
+
+GENRE: ${ctx.genre}
+VISUAL STYLE: ${style}
+
+CHARACTERS FROM THE SCRIPT:
+${characters}
+
+SCENES FROM THE SCRIPT:
+${settings}
+
+OUTPUT JSON SCHEMA:
+{
+  "characters": [
+    {
+      "id": "string — MUST be exactly one of the character ids listed above",
+      "design": "string — detailed design write-up in the story's language: body type and face, hairstyle and hair color, outfit cut and fabric, main colors, props, bearing and recognizable traits",
+      "visualTag": "string — ONE English line (max 60 words) with only STABLE visual facts: full-body look, hairstyle and color, outfit and its colors, props, distinctive features",
+      "palette": ["string — 3 to 5 colors (names or hex) that define this character"]
+    }
+  ],
+  "settings": [
+    {
+      "id": "string — MUST be exactly one of the scene ids listed above",
+      "design": "string — detailed design write-up in the story's language: spatial layout, architecture or natural elements, materials, light direction and color temperature, time and weather, mood",
+      "visualTag": "string — ONE English line (max 60 words) with only STABLE visual facts: environment layout, key elements, materials, lighting, time of day, weather, mood",
+      "palette": ["string — 3 to 5 colors (names or hex) that define this scene"]
+    }
+  ]
+}
+
+Requirements:
+- Return EVERY id listed above, unchanged; do not invent new characters or scenes
+- visualTag goes straight into image prompts: English only, no pose, no camera, no shot type, no emotion, and always the same outfit and colors so the character reads identically in front, back and side views
+- Make characters visually distinct from one another: different silhouette, palette, hairstyle and props
+- Give each scene a fixed lighting and time of day so every shot in that scene matches
+- Respect the script's appearance and description; enrich them, never contradict them`;
+    }
+  },
+
   storyboard: {
     system: `You are Cine-Cutie's Storyboard Artist, expert in breaking scripts into shot sequences for AI video production. ${JSON_RULE} ${LANG_RULE}`,
     buildUser(ctx) {
@@ -137,7 +194,7 @@ Requirements:
 - Include character appearance details in prompts when characters are present
 - Include setting details in prompts
 - Specify lighting and mood in each prompt
-- Duration should be 3-10 seconds per shot
+- Duration is the ACTUAL generated clip length in seconds (3-10 per shot), and the durations of ALL shots across ALL episodes MUST add up to roughly ${totalDuration}s — the final film is exactly the sum of the clips
 
 SHOT-TO-SHOT CONTINUITY — CRITICAL:
 - Shots MUST form a coherent visual narrative — each shot should feel like the NEXT MOMENT after the previous one

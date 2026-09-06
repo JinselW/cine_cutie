@@ -121,15 +121,21 @@ export function renderCharacterDesign(data, onAdvance, readOnly = false) {
   const el = $('#stepContent');
   const { isConfigured: dsConfigured } = getDashScopeStatus();
 
-  const charCards = (data.characters || []).map(c => `
-    <div class="char-card" style="text-align:center">
-      ${c.imagePath
-        ? `<img src="${mediaUrl(c.imagePath)}" alt="${escapeHtml(c.name)}" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:var(--radius-xs);margin-bottom:8px">`
-        : `<div style="width:100%;aspect-ratio:1;background:var(--bg3);border-radius:var(--radius-xs);display:flex;align-items:center;justify-content:center;margin-bottom:8px;color:var(--cream3);font-size:0.75rem">${t('ui.charDesignNoImage')}</div>`}
+  const charCards = (data.characters || []).map(c => {
+    const hasSheet = !!c.sheetPath;
+    const sheet = c.sheetPath || c.imagePath;
+    const caption = hasSheet ? t('ui.charDesignSheet') : (sheet ? t('ui.charDesignFront') : '');
+    return `
+    <div class="char-card">
       <div class="char-name">${escapeHtml(c.name)}</div>
-      <div class="char-desc">${escapeHtml(c.desc)}</div>
+      ${sheet
+        ? `<img src="${mediaUrl(sheet)}" alt="${escapeHtml(c.name)}" style="width:100%;aspect-ratio:16/9;object-fit:contain;background:var(--bg2);border-radius:var(--radius-xs);margin:8px 0">`
+        : `<div style="width:100%;aspect-ratio:16/9;background:var(--bg3);border-radius:var(--radius-xs);display:flex;align-items:center;justify-content:center;margin:8px 0;color:var(--cream3);font-size:0.75rem">${t('ui.charDesignNoImage')}</div>`}
+      ${caption ? `<div style="font-size:0.7rem;color:var(--gold);margin-bottom:8px">${caption}</div>` : ''}
+      <div class="char-desc" style="max-height:6em;overflow:auto">${escapeHtml(c.design || c.desc)}</div>
     </div>
-  `).join('');
+  `;
+  }).join('');
 
   const settingCards = (data.settings || []).map(s => `
     <div style="text-align:center">
@@ -137,7 +143,7 @@ export function renderCharacterDesign(data, onAdvance, readOnly = false) {
         ? `<img src="${mediaUrl(s.imagePath)}" alt="${escapeHtml(s.name)}" style="width:100%;aspect-ratio:16/9;object-fit:cover;border-radius:var(--radius-xs);margin-bottom:8px">`
         : `<div style="width:100%;aspect-ratio:16/9;background:var(--bg3);border-radius:var(--radius-xs);display:flex;align-items:center;justify-content:center;color:var(--cream3);font-size:0.75rem">${t('ui.charDesignNoImage')}</div>`}
       <div style="font-size:0.85rem;color:var(--cream);font-weight:600">${escapeHtml(s.name)}</div>
-      <div style="font-size:0.75rem;color:var(--cream3)">${escapeHtml(s.desc)}</div>
+      <div class="char-desc" style="max-height:6em;overflow:auto;text-align:left">${escapeHtml(s.design || s.desc)}</div>
     </div>
   `).join('');
 
@@ -146,7 +152,7 @@ export function renderCharacterDesign(data, onAdvance, readOnly = false) {
       <h3>🎨 ${t('ui.charDesignTitle')}</h3>
       ${!dsConfigured ? `<div style="background:var(--bg3);border-radius:var(--radius-xs);padding:12px;margin-bottom:16px;color:var(--gold);font-size:0.85rem">${t('ui.charDesignConfigNeeded')}</div>` : ''}
       <div style="font-size:0.75rem;color:var(--gold);font-weight:700;margin-bottom:8px">${t('ui.charDesignCharacters')}</div>
-      <div class="char-grid">${charCards}</div>
+      <div class="char-grid" style="grid-template-columns:repeat(auto-fill,minmax(300px,1fr))">${charCards}</div>
     </div>
     <div class="result-card">
       <h3>${t('ui.charDesignSettings')}</h3>
@@ -205,24 +211,59 @@ export function renderStoryboard(data, onAdvance, readOnly = false) {
   setMascot('happy');
 }
 
+const FRAME_ROLE_KEYS = {
+  first_frame: 'ui.frameFirst',
+  last_frame: 'ui.frameLast',
+  reference_image: 'ui.frameReference',
+};
+
 export function renderReferenceImages(data, onAdvance, readOnly = false) {
   const el = $('#stepContent');
   const { isConfigured: dsConfigured } = getDashScopeStatus();
 
+  const roleLabel = role => t(FRAME_ROLE_KEYS[role] || 'ui.frameFirst');
+  const isChained = data?.mode === 'firstLastFrame';
+
+  const frameThumb = (imagePath, alt, status) => (imagePath
+    ? `<img src="${mediaUrl(imagePath)}" alt="${escapeHtml(alt)}" style="width:100%;aspect-ratio:16/9;object-fit:cover;border-radius:var(--radius-xs);margin-bottom:4px">`
+    : `<div style="width:100%;aspect-ratio:16/9;background:var(--bg3);border-radius:var(--radius-xs);display:flex;align-items:center;justify-content:center;color:var(--cream3);font-size:0.7rem;margin-bottom:4px">${status === 'pending' ? t('ui.refImagesPending') : '—'}</div>`);
+
   const shots = (data.shots || []).map(sh => `
     <div style="text-align:center">
-      ${sh.imagePath
-        ? `<img src="${mediaUrl(sh.imagePath)}" alt="${escapeHtml(sh.shot_id)}" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:var(--radius-xs);margin-bottom:4px">`
-        : `<div style="width:100%;aspect-ratio:1;background:var(--bg3);border-radius:var(--radius-xs);display:flex;align-items:center;justify-content:center;color:var(--cream3);font-size:0.7rem;margin-bottom:4px">${sh.status === 'pending' ? t('ui.refImagesPending') : '—'}</div>`}
-      <div style="font-size:0.7rem;color:var(--cream3)">${escapeHtml(sh.shot_id)}</div>
+      ${frameThumb(sh.imagePath, sh.shot_id, sh.status)}
+      <div style="display:flex;justify-content:space-between;gap:6px;font-size:0.7rem;color:var(--cream3)">
+        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(sh.shot_id)}</span>
+        <span style="color:var(--gold);white-space:nowrap">${roleLabel(sh.role)}</span>
+      </div>
+      ${isChained ? `<div style="font-size:0.68rem;color:var(--cream3);margin-top:2px;line-height:1.4">
+        ${t('ui.refImagesLastFrameFrom')} <span style="color:var(--gold)">${sh.lastFrameFrom === 'generated'
+          ? t('ui.refImagesLastFrameGenerated')
+          : escapeHtml(t('ui.refImagesLastFrameReuse', { shot: sh.lastFrameFrom || '—' }))}</span>
+      </div>` : ''}
     </div>
   `).join('');
+
+  const extras = (data.extraFrames || []).length ? `
+    <div style="margin-top:18px">
+      <div style="font-size:0.8rem;color:var(--gold);margin-bottom:8px">${t('ui.refImagesExtraFrames')}</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px">
+        ${data.extraFrames.map(fr => `
+          <div style="text-align:center">
+            ${frameThumb(fr.imagePath, fr.id, fr.status)}
+            <div style="font-size:0.7rem;color:var(--cream3)">${roleLabel(fr.role)}</div>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  ` : '';
 
   el.innerHTML = `
     <div class="result-card">
       <h3>🖼️ ${t('ui.refImagesTitle')}</h3>
+      ${data?.mode ? `<div style="font-size:0.8rem;color:var(--cream3);margin-bottom:12px">${t('ui.refImagesModeLabel')} <span style="color:var(--gold)">${escapeHtml(t('settings.videoMode.' + data.mode))}</span></div>` : ''}
       ${!dsConfigured ? `<div style="background:var(--bg3);border-radius:var(--radius-xs);padding:12px;margin-bottom:16px;color:var(--gold);font-size:0.85rem">${t('ui.refImagesConfigNeeded')}</div>` : ''}
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px">${shots}</div>
+      ${extras}
     </div>
     ${readOnly ? '' : '<div class="action-row" id="actionRow"></div>'}
   `;
@@ -254,6 +295,7 @@ export function renderVideoGeneration(data, onAdvance, readOnly = false) {
   el.innerHTML = `
     <div class="result-card">
       <h3>🎥 ${t('ui.videoGenTitle')}</h3>
+      ${data?.mode ? `<div style="font-size:0.8rem;color:var(--cream3);margin-bottom:12px">${t('settings.videoModeLabel')}: <span style="color:var(--gold)">${escapeHtml(t('settings.videoMode.' + data.mode))}</span></div>` : ''}
       ${!dsConfigured ? `<div style="background:var(--bg3);border-radius:var(--radius-xs);padding:12px;margin-bottom:16px;color:var(--gold);font-size:0.85rem">${t('ui.videoGenConfigNeeded')}</div>` : ''}
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px">${clips}</div>
     </div>
