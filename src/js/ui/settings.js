@@ -1,6 +1,6 @@
 import { $, $$ } from '../utils.js';
 import { t } from '../i18n.js';
-import { saveConfig, getConfig, isConfigured, testConnection, inferProvider, MODEL_PRESETS, IMAGE_PRESETS, VIDEO_PRESETS, REF_VIDEO_PRESETS, PROVIDER_DEFAULTS } from '../providers/llm.js';
+import { saveConfig, getConfig, isConfigured, testConnection, inferProvider, MODEL_PRESETS, IMAGE_PRESETS, IMG2IMG_PRESETS, VIDEO_MODES, videoModeById, PROVIDER_DEFAULTS } from '../providers/llm.js';
 import { saveConfig as saveDashScopeConfig } from '../providers/image.js';
 import { setActiveProvider } from '../providers/registry.js';
 
@@ -84,6 +84,32 @@ function getSelectValue(selectEl, customInputEl) {
   return selectEl.value;
 }
 
+function slotDefaultModel(configKey) {
+  return VIDEO_MODES.find(m => m.configKey === configKey)?.defaultModel || '';
+}
+
+function applyVideoMode(modeId, modelName) {
+  const mode = videoModeById(modeId);
+
+  const label = $('#lblVideoModeModel');
+  if (label) label.textContent = t('settings.videoModeModel.' + mode.id);
+
+  const select = $('#cfgVideoModeModel');
+  if (!select) return mode;
+
+  const wrap = $('#videoModeModelCustomWrap');
+  const input = $('#cfgVideoModeModelCustom');
+  const name = modelName || mode.defaultModel;
+  const isCustom = populateModelSelect(select, mode.presets, null, name, true);
+  if (isCustom) {
+    wrap?.classList.remove('hidden');
+    if (input) input.value = name;
+  } else {
+    wrap?.classList.add('hidden');
+  }
+  return mode;
+}
+
 function openModal() {
   const modal = $('#settingsModal');
   if (!modal) return;
@@ -119,43 +145,43 @@ function openModal() {
     imageCustomWrap?.classList.add('hidden');
   }
 
+  const img2imgSelect = $('#cfgImg2ImgModel');
+  const img2imgCustomWrap = $('#img2imgModelCustomWrap');
+  const img2imgCustomInput = $('#cfgImg2ImgModelCustom');
+  const img2imgName = cfg.models.img2img?.name || IMG2IMG_PRESETS[0];
+  const isImg2ImgCustom = populateModelSelect(img2imgSelect, IMG2IMG_PRESETS, null, img2imgName);
+  if (isImg2ImgCustom) {
+    img2imgCustomWrap?.classList.remove('hidden');
+    if (img2imgCustomInput) img2imgCustomInput.value = img2imgName;
+  } else {
+    img2imgCustomWrap?.classList.add('hidden');
+  }
+
   let comfyActive = false;
   try {
     const prefs = JSON.parse(localStorage.getItem('cine-cutie-providers') || '{}');
-    comfyActive = cfg.models.video.name === COMFY_MODEL
-      || cfg.models.refVideo.name === COMFY_MODEL
+    comfyActive = cfg.models.video?.name === COMFY_MODEL
+      || cfg.models.refVideo?.name === COMFY_MODEL
       || prefs.video === 'video-comfy';
   } catch {
-    comfyActive = cfg.models.video.name === COMFY_MODEL || cfg.models.refVideo.name === COMFY_MODEL;
+    comfyActive = cfg.models.video?.name === COMFY_MODEL || cfg.models.refVideo?.name === COMFY_MODEL;
   }
 
-  const videoSelect = $('#cfgVideoModel');
-  const videoCustomWrap = $('#videoModelCustomWrap');
-  const videoCustomInput = $('#cfgVideoModelCustom');
-  const isVideoCustom = populateModelSelect(
-    videoSelect, VIDEO_PRESETS, null,
-    comfyActive ? COMFY_MODEL : cfg.models.video.name, true,
-  );
-  if (isVideoCustom) {
-    videoCustomWrap?.classList.remove('hidden');
-    if (videoCustomInput) videoCustomInput.value = cfg.models.video.name;
-  } else {
-    videoCustomWrap?.classList.add('hidden');
+  const modeSelect = $('#cfgVideoMode');
+  if (modeSelect) {
+    modeSelect.innerHTML = '';
+    for (const m of VIDEO_MODES) {
+      const opt = document.createElement('option');
+      opt.value = m.id;
+      opt.textContent = t('settings.videoMode.' + m.id);
+      modeSelect.appendChild(opt);
+    }
+    modeSelect.value = videoModeById(cfg.videoMode).id;
   }
 
-  const refVideoSelect = $('#cfgRefVideoModel');
-  const refVideoCustomWrap = $('#refVideoModelCustomWrap');
-  const refVideoCustomInput = $('#cfgRefVideoModelCustom');
-  const isRefVideoCustom = populateModelSelect(
-    refVideoSelect, REF_VIDEO_PRESETS, null,
-    comfyActive ? COMFY_MODEL : cfg.models.refVideo.name, true,
-  );
-  if (isRefVideoCustom) {
-    refVideoCustomWrap?.classList.remove('hidden');
-    if (refVideoCustomInput) refVideoCustomInput.value = cfg.models.refVideo.name;
-  } else {
-    refVideoCustomWrap?.classList.add('hidden');
-  }
+  const mode = videoModeById(cfg.videoMode);
+  const savedModeModel = cfg.models[mode.configKey]?.name || mode.defaultModel;
+  applyVideoMode(mode.id, comfyActive ? COMFY_MODEL : savedModeModel);
 
   $('#cfgJsonMode').checked = cfg.jsonMode !== false;
   $('#cfgProxy').checked = cfg.useProxy === true;
@@ -206,13 +232,24 @@ function handleSave() {
   const imageCustomInput = $('#cfgImageModelCustom');
   const imageName = getSelectValue(imageSelect, imageCustomInput);
 
-  const videoSelect = $('#cfgVideoModel');
-  const videoCustomInput = $('#cfgVideoModelCustom');
-  const videoName = getSelectValue(videoSelect, videoCustomInput);
+  const img2imgSelect = $('#cfgImg2ImgModel');
+  const img2imgCustomInput = $('#cfgImg2ImgModelCustom');
+  const img2imgName = getSelectValue(img2imgSelect, img2imgCustomInput);
 
-  const refVideoSelect = $('#cfgRefVideoModel');
-  const refVideoCustomInput = $('#cfgRefVideoModelCustom');
-  const refVideoName = getSelectValue(refVideoSelect, refVideoCustomInput);
+  const mode = videoModeById($('#cfgVideoMode')?.value);
+  const modeModelName = getSelectValue($('#cfgVideoModeModel'), $('#cfgVideoModeModelCustom'));
+  const comfyChosen = modeModelName === COMFY_MODEL;
+  const chosenModel = (!modeModelName || comfyChosen) ? mode.defaultModel : modeModelName;
+
+  const otherKey = mode.configKey === 'video' ? 'refVideo' : 'video';
+  let otherModel = getConfig().models?.[otherKey]?.name || slotDefaultModel(otherKey);
+  if (!comfyChosen && otherModel === COMFY_MODEL) otherModel = slotDefaultModel(otherKey);
+
+  const slotModels = { [mode.configKey]: chosenModel, [otherKey]: otherModel };
+  if (comfyChosen) {
+    slotModels.video = COMFY_MODEL;
+    slotModels.refVideo = COMFY_MODEL;
+  }
 
   if (!textModel.name) {
     showStatus(t('settings.model') + ' required', false);
@@ -222,27 +259,26 @@ function handleSave() {
   const jsonMode = $('#cfgJsonMode').checked;
   const useProxy = $('#cfgProxy').checked;
 
-  const comfyChosen = videoName === COMFY_MODEL || refVideoName === COMFY_MODEL;
-  const realVideoModel = (!videoName || videoName === COMFY_MODEL) ? 'wanx2.1-i2v-plus' : videoName;
-  const realRefVideoModel = (!refVideoName || refVideoName === COMFY_MODEL) ? 'wan2.7-r2v' : refVideoName;
-
   saveConfig({
     apiProviders,
     models: {
       text: textModel,
-      image: { name: imageName || 'wanx2.1-t2i-turbo' },
-      video: { name: videoName || 'wanx2.1-i2v-plus' },
-      refVideo: { name: refVideoName || 'wan2.7-r2v' },
+      image: { name: imageName || IMAGE_PRESETS[0] },
+      img2img: { name: img2imgName || IMG2IMG_PRESETS[0] },
+      video: { name: slotModels.video },
+      refVideo: { name: slotModels.refVideo },
     },
+    videoMode: mode.id,
     jsonMode,
     useProxy,
   });
 
   saveDashScopeConfig({
     apiKey: apiProviders.dashscope?.apiKey || '',
-    imageModel: imageName || 'wanx2.1-t2i-turbo',
-    videoModel: realVideoModel,
-    refVideoModel: realRefVideoModel,
+    imageModel: imageName || IMAGE_PRESETS[0],
+    img2imgModel: img2imgName || IMG2IMG_PRESETS[0],
+    videoModel: comfyChosen ? slotDefaultModel('video') : slotModels.video,
+    refVideoModel: comfyChosen ? slotDefaultModel('refVideo') : slotModels.refVideo,
   });
 
   saveComfySshConfig();
@@ -301,9 +337,8 @@ async function handleTest() {
 
   const result = await testConnection();
 
-  const videoName = getSelectValue($('#cfgVideoModel'), $('#cfgVideoModelCustom'));
-  const refVideoName = getSelectValue($('#cfgRefVideoModel'), $('#cfgRefVideoModelCustom'));
-  const comfyChosen = videoName === COMFY_MODEL || refVideoName === COMFY_MODEL;
+  const modeModelName = getSelectValue($('#cfgVideoModeModel'), $('#cfgVideoModeModelCustom'));
+  const comfyChosen = modeModelName === COMFY_MODEL;
 
   let comfyLine = null;
   if (comfyChosen) {
@@ -374,33 +409,11 @@ function saveComfySshConfig() {
   return config;
 }
 
-function linkVideoSelects() {
-  const pairs = [
-    { select: $('#cfgVideoModel'), wrap: $('#videoModelCustomWrap'), presets: VIDEO_PRESETS },
-    { select: $('#cfgRefVideoModel'), wrap: $('#refVideoModelCustomWrap'), presets: REF_VIDEO_PRESETS },
-  ];
-
-  const resetToDefault = (entry) => {
-    entry.select.value = entry.presets[0];
-    entry.wrap?.classList.add('hidden');
-  };
-
-  const setToComfy = (entry) => {
-    entry.select.value = COMFY_MODEL;
-    entry.wrap?.classList.add('hidden');
-  };
-
-  pairs.forEach((entry, i) => {
-    const other = pairs[1 - i];
-    if (!entry.select) return;
-    entry.select.addEventListener('change', () => {
-      const val = entry.select.value;
-      if (val === COMFY_MODEL) {
-        setToComfy(other);
-      } else if (val !== CUSTOM_VALUE && other.select.value === COMFY_MODEL) {
-        resetToDefault(other);
-      }
-    });
+function setupVideoModeSelect() {
+  const select = $('#cfgVideoMode');
+  if (!select) return;
+  select.addEventListener('change', () => {
+    applyVideoMode(select.value);
   });
 }
 
@@ -429,8 +442,8 @@ export function initSettings() {
 
   setupModelSelectChange('#cfgTextModel', '#textModelCustomWrap', MODEL_PRESETS);
   setupModelSelectChange('#cfgImageModel', '#imageModelCustomWrap', IMAGE_PRESETS);
-  setupModelSelectChange('#cfgVideoModel', '#videoModelCustomWrap', VIDEO_PRESETS);
-  setupModelSelectChange('#cfgRefVideoModel', '#refVideoModelCustomWrap', REF_VIDEO_PRESETS);
+  setupModelSelectChange('#cfgImg2ImgModel', '#img2imgModelCustomWrap', IMG2IMG_PRESETS);
+  setupModelSelectChange('#cfgVideoModeModel', '#videoModeModelCustomWrap', []);
 
   const saveBtn = $('#saveSettingsBtn');
   if (saveBtn) saveBtn.addEventListener('click', handleSave);
@@ -438,7 +451,7 @@ export function initSettings() {
   const testBtn = $('#testConnBtn');
   if (testBtn) testBtn.addEventListener('click', handleTest);
 
-  linkVideoSelects();
+  setupVideoModeSelect();
 
   updateIndicator();
 }

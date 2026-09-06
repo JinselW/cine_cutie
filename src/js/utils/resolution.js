@@ -34,6 +34,18 @@ export function computeImageSize(aspectRatio, tierId) {
   return `${w}*${h}`;
 }
 
+// 图生图（万相2.6-image 编辑模式）要求总像素在 768²~2048² 之间，低于下限时按比例放大
+const IMG2IMG_MIN_PIXELS = 768 * 768;
+const IMG2IMG_MAX_EDGE = 2048;
+
+export function computeImg2ImgSize(aspectRatio, tierId) {
+  const [w, h] = computeImageSize(aspectRatio, tierId).split('*').map(Number);
+  if (w * h >= IMG2IMG_MIN_PIXELS) return `${w}*${h}`;
+  const scale = Math.sqrt(IMG2IMG_MIN_PIXELS / (w * h));
+  const upscale = v => Math.min(IMG2IMG_MAX_EDGE, Math.round((v * scale) / 16) * 16);
+  return `${upscale(w)}*${upscale(h)}`;
+}
+
 // DashScope 视频档位：2.7 系（r2v / general i2v）无 480P，回退 720P
 export function dsVideoResolution(tierId, model) {
   const tier = RESOLUTION_TIERS.some(t => t.id === tierId) ? tierId : DEFAULT_RESOLUTION;

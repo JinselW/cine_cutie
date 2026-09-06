@@ -1,13 +1,18 @@
 import { BaseAgent } from './baseAgent.js';
 import { RetryAgent, ItemRetryStrategy } from './retryAgent.js';
 import { QCAgent, SCORE_THRESHOLD, reportScore, reportRetry } from './qcAgent.js';
-import { getActiveProvider } from '../providers/registry.js';
+import { getActiveProvider, listAllProviders } from '../providers/registry.js';
+import { chat, isConfigured, parseJson, consumeStepMetrics } from '../providers/llm.js';
+import { buildMessages } from '../providers/prompts.js';
 import { createArtifact, ArtifactKind, ArtifactStatus, recordItemAttempt } from '../artifacts/artifactTypes.js';
 import { addAgentMessage } from '../ui/render.js';
 import { t } from '../i18n.js';
 
 const MAX_ITEM_ATTEMPTS = 3;
 const MAX_STAGE_RETRIES = 1;
+const SHEET_SUFFIX = '__sheet';
+const FRONT_SUFFIX = '__front';
+const JSON_REPAIR_PROMPT = 'Your last reply was not valid JSON. Please reply again with ONLY the JSON object. No markdown, no code fences, no commentary.';
 
 function applyVisualRetryFeedback(items, critique) {
   const note = (critique.suggestions || []).join('; ');
@@ -15,6 +20,13 @@ function applyVisualRetryFeedback(items, critique) {
     item.seed = (item.seed ?? 42) + 7;
     if (note) item.prompt = `${item.prompt}\n${note}`;
   }
+}
+
+function pickDesign(list, entity, index) {
+  return list.find(d => d?.id && d.id === entity.id)
+    || list.find(d => d?.name && entity.name && d.name === entity.name)
+    || list[index]
+    || {};
 }
 
 export class CharacterAgent extends BaseAgent {
@@ -27,11 +39,17 @@ export class CharacterAgent extends BaseAgent {
     this.#qcAgent = new QCAgent({ stepId: 'characterDesign' });
   }
 
-  async run(ctx, _token) {
+  async run(ctx, token) {
     const script = ctx.script;
     if (!script) return this.#emptyResult(ctx);
 
-    const items = this.#buildItems(script, ctx.genre);
+    const genre = ctx.genre || script.genre || 'cinematic';
+    const designs = await this.#writeDesignSpecs(ctx, token);
+    const tokens = consumeStepMetrics().tokens;
+    if (token?.signal?.aborted) return this.#emptyResult(ctx);
+
+    const entities = this.#mergeDesigns(script, designs);
+    const items = this.#buildItems(entities, genre);
     const artifact = createArtifact({
       kind: ArtifactKind.CHARACTER_DESIGN,
       stepId: 'characterDesign',
@@ -42,10 +60,10 @@ export class CharacterAgent extends BaseAgent {
     let bestData = null, bestCrit = null, bestScore = -Infinity;
 
     for (let attempt = 0; attempt <= MAX_STAGE_RETRIES; attempt++) {
-      if (_token?.signal?.aborted) break;
+      if (token?.signal?.aborted) break;
 
-      const results = await this.#generateItems(items, artifact, ctx, _token);
-      const data = this.#assembleResult(results, script);
+      const results = await this.#generateItems(items, artifact, ctx, token);
+      const data = this.#assembleResult(results, entities);
 
       const crit = await this.#qcAgent.process({ data, entities: ctx.entities || {}, ...ctx });
       reportScore(crit.score, '🎨');
@@ -59,7 +77,8 @@ export class CharacterAgent extends BaseAgent {
     }
 
     const finalData = bestData || { characters: [], settings: [] };
-    const hasContent = finalData.characters.some(c => c.imagePath) || finalData.settings.some(s => s.imagePath);
+    const hasContent = finalData.characters.some(c => c.imagePath || c.sheetPath)
+      || finalData.settings.some(s => s.imagePath);
 
     artifact.data = finalData;
     artifact.status = hasContent ? ArtifactStatus.COMPLETE : ArtifactStatus.FAILED;
@@ -67,6 +86,7 @@ export class CharacterAgent extends BaseAgent {
     return {
       artifacts: [artifact],
       metadata: {
+        tokens,
         qualityScore: bestCrit?.score ?? 0,
         consistencyIssues: bestCrit?.consistency?.issues || [],
         verdict: bestCrit?.verdict ?? null,
@@ -74,35 +94,119 @@ export class CharacterAgent extends BaseAgent {
     };
   }
 
-  #buildItems(script, genre) {
+  async #writeDesignSpecs(ctx, token) {
+    const signal = token?.signal;
+    addAgentMessage('🎨', t('ui.charDesignWriting'));
+
+    if (!isConfigured()) return this.#templateDesigns(ctx);
+
+    const messages = buildMessages('characterDesign', ctx);
+    if (!messages) return this.#templateDesigns(ctx);
+
+    let raw = null;
+    try {
+      raw = await chat(messages, { signal });
+    } catch {
+      if (signal?.aborted) return null;
+      addAgentMessage('⚠️', t('llm.fellBack', { reason: t('llm.errNetwork') }));
+      return this.#templateDesigns(ctx);
+    }
+
+    let parsed = parseJson(raw);
+    if (!parsed) {
+      try {
+        const repairMessages = [
+          ...messages,
+          { role: 'assistant', content: raw || '' },
+          { role: 'user', content: JSON_REPAIR_PROMPT },
+        ];
+        parsed = parseJson(await chat(repairMessages, { signal }));
+      } catch {
+        parsed = null;
+      }
+    }
+
+    if (!parsed) {
+      addAgentMessage('⚠️', t('llm.fellBack', { reason: t('llm.errParse') }));
+      return this.#templateDesigns(ctx);
+    }
+
+    return parsed;
+  }
+
+  #templateDesigns(ctx) {
+    const tpl = listAllProviders().find(p => p.id === 'template');
+    if (!tpl) return null;
+    return tpl.generate({ step: 'characterDesign', genre: ctx.genre, context: ctx });
+  }
+
+  #mergeDesigns(script, designs) {
+    const designChars = Array.isArray(designs?.characters) ? designs.characters : [];
+    const designSets = Array.isArray(designs?.settings) ? designs.settings : [];
+
+    const characters = (script.characters || []).map((c, i) => {
+      const d = pickDesign(designChars, c, i);
+      return {
+        ...c,
+        design: d.design || c.desc || '',
+        visualTag: d.visualTag || c.appearance || c.desc || '',
+        palette: Array.isArray(d.palette) ? d.palette : [],
+      };
+    });
+
+    const settings = (script.settings || []).map((s, i) => {
+      const d = pickDesign(designSets, s, i);
+      return {
+        ...s,
+        design: d.design || s.desc || '',
+        visualTag: d.visualTag || s.desc || '',
+        palette: Array.isArray(d.palette) ? d.palette : [],
+      };
+    });
+
+    return { characters, settings };
+  }
+
+  #buildItems(entities, genre) {
     const items = [];
-    for (const char of (script.characters || [])) {
+
+    for (const char of entities.characters) {
       items.push({
-        id: char.id,
-        type: 'character',
-        prompt: this.#buildCharacterPrompt(char, script, genre),
+        id: `${char.id}${SHEET_SUFFIX}`,
+        prompt: this.#buildSheetPrompt(char, genre),
+        seed: 42,
+      });
+      items.push({
+        id: `${char.id}${FRONT_SUFFIX}`,
+        prompt: this.#buildFrontPrompt(char, genre),
         seed: 42,
       });
     }
-    for (const setting of (script.settings || [])) {
+
+    for (const setting of entities.settings) {
       items.push({
         id: setting.id,
-        type: 'setting',
-        prompt: this.#buildSettingPrompt(setting, script, genre),
+        prompt: this.#buildSettingPrompt(setting, genre),
         seed: 42,
       });
     }
+
     return items;
   }
 
-  #buildCharacterPrompt(character, script, genre) {
-    const style = genre || script?.genre || 'cinematic';
-    return `Character portrait of ${character.name}, ${character.appearance || character.desc || ''}, ${style} style, detailed face and costume, studio lighting, high quality, 4k`;
+  #buildSheetPrompt(character, genre) {
+    const tag = character.visualTag || character.appearance || character.desc || '';
+    return `Character model sheet of ${character.name}: the SAME character shown three times side by side in one image — front view, back view, side profile view — identical outfit, identical hairstyle, identical body proportions in all three views, full body, neutral standing pose, plain light grey background, ${tag}, ${genre} style, character reference sheet, even studio lighting, high quality, 4k`;
   }
 
-  #buildSettingPrompt(setting, script, genre) {
-    const style = genre || script?.genre || 'cinematic';
-    return `Scene environment of ${setting.name}, ${setting.desc || ''}, ${style} style, wide angle establishing shot, atmospheric lighting, cinematic composition, high quality, 4k`;
+  #buildFrontPrompt(character, genre) {
+    const tag = character.visualTag || character.appearance || character.desc || '';
+    return `Character portrait of ${character.name}, front view, full body, neutral standing pose, plain background, ${tag}, ${genre} style, detailed face and costume, studio lighting, high quality, 4k`;
+  }
+
+  #buildSettingPrompt(setting, genre) {
+    const tag = setting.visualTag || setting.desc || '';
+    return `Scene environment of ${setting.name}, ${tag}, ${genre} style, wide angle establishing shot, atmospheric lighting, cinematic composition, empty environment without people, high quality, 4k`;
   }
 
   async #generateItems(items, artifact, ctx, token) {
@@ -180,26 +284,37 @@ export class CharacterAgent extends BaseAgent {
     return [...results.values()];
   }
 
-  #assembleResult(results, script) {
-    const characters = (script.characters || []).map(char => {
-      const result = results.find(r => r.id === char.id) || {};
+  #assembleResult(results, entities) {
+    const byId = new Map(results.map(r => [r.id, r]));
+
+    const characters = entities.characters.map(char => {
+      const sheet = byId.get(`${char.id}${SHEET_SUFFIX}`) || {};
+      const front = byId.get(`${char.id}${FRONT_SUFFIX}`) || {};
       return {
         id: char.id,
         name: char.name,
         enName: char.enName || '',
         desc: char.desc,
         appearance: char.appearance || '',
-        imagePath: result.path || '',
-        imageUrl: result.imageUrl || '',
+        design: char.design || '',
+        visualTag: char.visualTag || '',
+        palette: char.palette || [],
+        sheetPath: sheet.path || '',
+        sheetUrl: sheet.imageUrl || '',
+        imagePath: front.path || '',
+        imageUrl: front.imageUrl || '',
       };
     });
 
-    const settings = (script.settings || []).map(setting => {
-      const result = results.find(r => r.id === setting.id) || {};
+    const settings = entities.settings.map(setting => {
+      const result = byId.get(setting.id) || {};
       return {
         id: setting.id,
         name: setting.name,
         desc: setting.desc,
+        design: setting.design || '',
+        visualTag: setting.visualTag || '',
+        palette: setting.palette || [],
         imagePath: result.path || '',
         imageUrl: result.imageUrl || '',
       };
@@ -217,10 +332,12 @@ export class CharacterAgent extends BaseAgent {
         data: {
           characters: (script?.characters || []).map(c => ({
             id: c.id, name: c.name, enName: c.enName || '', desc: c.desc, appearance: c.appearance || '',
-            imagePath: '', imageUrl: '',
+            design: '', visualTag: c.appearance || '', palette: [],
+            sheetPath: '', sheetUrl: '', imagePath: '', imageUrl: '',
           })),
           settings: (script?.settings || []).map(s => ({
             id: s.id, name: s.name, desc: s.desc,
+            design: '', visualTag: s.desc || '', palette: [],
             imagePath: '', imageUrl: '',
           })),
         },

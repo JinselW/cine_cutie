@@ -209,8 +209,8 @@ class Orchestrator {
 
     const ctx = {
       userInput: state.userInput,
+      promptDoc: state.promptDoc?.text || '',
       genre: state.genre,
-      uploads: state.uploads,
       totalDuration: state.totalDuration,
       constraints,
       entities: state.entities || {},

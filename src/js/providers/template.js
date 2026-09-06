@@ -99,10 +99,12 @@ function buildCharacterDesign(context) {
   if (!script) return { characters: [], settings: [] };
 
   const characters = (script.characters || []).map(c => ({
-    id: c.id, name: c.name, desc: c.desc, imagePath: ''
+    id: c.id, name: c.name, desc: c.desc,
+    design: c.desc || '', visualTag: c.appearance || c.desc || ''
   }));
   const settings = (script.settings || []).map(s => ({
-    id: s.id, name: s.name, desc: s.desc, imagePath: ''
+    id: s.id, name: s.name, desc: s.desc,
+    design: s.desc || '', visualTag: s.desc || ''
   }));
   return { characters, settings };
 }
@@ -145,11 +147,11 @@ function buildReferenceImages(context) {
   for (const ep of (storyboard?.episodes || [])) {
     for (const seg of (ep.segments || [])) {
       for (const shot of (seg.shots || [])) {
-        shots.push({ shot_id: shot.shot_id, imagePath: '', prompt: shot.prompt || '', status: 'pending' });
+        shots.push({ shot_id: shot.shot_id, role: 'first_frame', imagePath: '', imageUrl: '', prompt: shot.prompt || '', status: 'pending' });
       }
     }
   }
-  return { shots };
+  return { mode: '', shots, extraFrames: [] };
 }
 
 function buildVideoClips(context) {
@@ -157,7 +159,7 @@ function buildVideoClips(context) {
   const clips = (refImages?.shots || []).map(sh => ({
     shot_id: sh.shot_id, videoPath: '', status: 'pending'
   }));
-  return { clips };
+  return { mode: refImages?.mode || '', clips };
 }
 
 function buildFinalVideo(context) {

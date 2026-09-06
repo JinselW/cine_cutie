@@ -105,30 +105,15 @@
         </div>
         <input type="text" id="customStyleInput" class="custom-style-input hidden" placeholder="描述你想要的风格...">
       </div>
-      <div class="upload-slots" id="uploadSlots">
-        <div class="upload-slot" id="slotFirstFrame" data-slot="firstFrame">
-          <div class="slot-icon">🖼️</div>
-          <div class="slot-label" data-i18n="ui.slotFirstFrame">首帧图片</div>
-          <div class="slot-hint" data-i18n="ui.slotDropHint">拖拽或点击上传</div>
-          <input type="file" class="slot-file-input" id="inputFirstFrame" accept="image/*">
-          <div class="slot-preview hidden" id="previewFirstFrame"></div>
-        </div>
-        <div class="upload-slot" id="slotLastFrame" data-slot="lastFrame">
-          <div class="slot-icon">🖼️</div>
-          <div class="slot-label" data-i18n="ui.slotLastFrame">尾帧图片</div>
-          <div class="slot-hint" data-i18n="ui.slotDropHint">拖拽或点击上传</div>
-          <input type="file" class="slot-file-input" id="inputLastFrame" accept="image/*">
-          <div class="slot-preview hidden" id="previewLastFrame"></div>
-        </div>
-        <div class="upload-slot" id="slotReferenceImages" data-slot="referenceImages">
-          <div class="slot-icon">🎞️</div>
-          <div class="slot-label" data-i18n="ui.slotRefImages">参考图</div>
-          <div class="slot-hint" data-i18n="ui.slotDropHint">拖拽或点击上传</div>
-          <input type="file" class="slot-file-input" id="inputReferenceImages" accept="image/*" multiple>
-          <div class="slot-preview hidden" id="previewReferenceImages"></div>
+      <div class="upload-slots upload-slots-single" id="uploadSlots">
+        <div class="upload-slot" id="slotPromptFile" data-slot="promptFile">
+          <div class="slot-icon">📄</div>
+          <div class="slot-label" data-i18n="ui.slotPromptFile">提示词文件</div>
+          <div class="slot-hint" data-i18n="ui.slotPromptFileHint">点击或拖拽上传 .docx / .txt / .md（最多 1 个）</div>
+          <input type="file" class="slot-file-input" id="inputPromptFile" accept=".docx,.txt,.md,.markdown">
+          <div class="slot-preview hidden" id="previewPromptFile"></div>
         </div>
       </div>
-      <div class="upload-mode-hint hidden" id="uploadModeHint"></div>
     </div>
     <div class="mode-toggle">
       <button class="mode-btn active" data-mode="auto" id="modeAuto">
@@ -270,18 +255,23 @@
       </div>
 
       <div class="model-select-group">
-        <label id="lblVideoModel">Image-to-Video Model</label>
-        <select id="cfgVideoModel" class="model-select"></select>
-        <div class="model-custom-wrap hidden" id="videoModelCustomWrap">
-          <input type="text" id="cfgVideoModelCustom" class="model-custom-input" placeholder="Model name...">
+        <label id="lblImg2ImgModel">Image-to-Image Model</label>
+        <select id="cfgImg2ImgModel" class="model-select"></select>
+        <div class="model-custom-wrap hidden" id="img2imgModelCustomWrap">
+          <input type="text" id="cfgImg2ImgModelCustom" class="model-custom-input" placeholder="Model name...">
         </div>
       </div>
 
       <div class="model-select-group">
-        <label id="lblRefVideoModel">Reference-to-Video Model</label>
-        <select id="cfgRefVideoModel" class="model-select"></select>
-        <div class="model-custom-wrap hidden" id="refVideoModelCustomWrap">
-          <input type="text" id="cfgRefVideoModelCustom" class="model-custom-input" placeholder="Model name...">
+        <label id="lblVideoMode">Video Generation Mode</label>
+        <select id="cfgVideoMode" class="model-select"></select>
+      </div>
+
+      <div class="model-select-group">
+        <label id="lblVideoModeModel">First-Frame Video Model</label>
+        <select id="cfgVideoModeModel" class="model-select"></select>
+        <div class="model-custom-wrap hidden" id="videoModeModelCustomWrap">
+          <input type="text" id="cfgVideoModeModelCustom" class="model-custom-input" placeholder="Model name...">
         </div>
       </div>
 

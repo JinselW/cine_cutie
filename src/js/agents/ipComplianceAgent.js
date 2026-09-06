@@ -54,7 +54,14 @@ function extractTextFromStep(stepId, data) {
       for (const ch of (data.characters || [])) {
         if (ch.name) texts.push(ch.name);
         if (ch.appearance) texts.push(ch.appearance);
+        if (ch.design) texts.push(ch.design);
+        if (ch.visualTag) texts.push(ch.visualTag);
         if (ch.prompt) texts.push(ch.prompt);
+      }
+      for (const st of (data.settings || [])) {
+        if (st.name) texts.push(st.name);
+        if (st.design) texts.push(st.design);
+        if (st.visualTag) texts.push(st.visualTag);
       }
       break;
     }
@@ -74,7 +81,7 @@ function extractTextFromStep(stepId, data) {
     }
 
     case 'referenceImages': {
-      for (const shot of (data.shots || [])) {
+      for (const shot of [...(data.shots || []), ...(data.extraFrames || [])]) {
         if (shot.prompt) texts.push(shot.prompt);
         if (shot.negativePrompt) texts.push(shot.negativePrompt);
       }

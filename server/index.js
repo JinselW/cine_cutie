@@ -1,8 +1,9 @@
 import 'dotenv/config';
 import express from 'express';
 import multer from 'multer';
+import mammoth from 'mammoth';
 import { LRUCache } from './cache.js';
-import { submitImageTask, submitVideoTask, submitVideoTaskV2, pollTask, downloadFile, detectVideoMode, fileToDataUri } from './dashscope.js';
+import { submitImageTask, submitImageEditTask, parseImageResultUrl, submitVideoTask, submitVideoTaskV2, pollTask, downloadFile, detectVideoMode, fileToDataUri } from './dashscope.js';
 import { createTask, getTask, updateTask } from './tasks.js';
 import { concatVideos, checkFfmpeg } from './render.js';
 import { submitWorkflow, pollUntilDone, downloadOutput, uploadImageToComfy, checkComfyUIStatus } from './comfyui.js';
@@ -53,6 +54,69 @@ const upload = multer({
 
 function isV2Model(name) {
   return typeof name === 'string' && name.startsWith('wan2.7');
+}
+
+// 图生图参考图：只接受同源 /api/media 路径，服务端读本地文件，避免任意文件读取
+function resolveMediaRef(ref) {
+  if (typeof ref !== 'string' || !ref) return null;
+  let filePath = null;
+  if (ref.startsWith('/api/media/uploads/')) {
+    filePath = path.join(UPLOADS_DIR, path.basename(ref));
+  } else if (ref.startsWith('/api/media/')) {
+    filePath = path.join(MEDIA_DIR, path.basename(ref));
+  }
+  return filePath && fs.existsSync(filePath) ? filePath : null;
+}
+
+const PROMPT_MAX_CHARS = 20000;
+
+// wan2.7-r2v 最多接受 5 张参考图
+const MAX_VIDEO_REFS = 5;
+
+// DashScope 云端取不到本机文件：本地 /api/media 一律转 data URI；远端 URL（24h 过期）仅作兜底
+async function toDashScopeImage(ref) {
+  if (typeof ref !== 'string' || !ref) return null;
+  const localPath = resolveMediaRef(ref);
+  if (localPath) return fileToDataUri(localPath);
+  return /^https?:\/\//.test(ref) ? ref : null;
+}
+
+const promptUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 20 * 1024 * 1024 },
+});
+
+function decodeTextBuffer(buf) {
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(buf);
+  } catch {
+    return new TextDecoder('gbk').decode(buf);
+  }
+}
+
+function normalizePromptText(raw) {
+  const bom = String.fromCharCode(0xfeff);
+  return raw
+    .split(bom).join('')
+    .replace(/\r\n?/g, '\n')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+async function extractPromptText(file) {
+  const ext = path.extname(file.originalname).toLowerCase();
+  if (ext === '.docx') {
+    const result = await mammoth.extractRawText({ buffer: file.buffer });
+    return normalizePromptText(result.value);
+  }
+  if (ext === '.txt' || ext === '.md' || ext === '.markdown') {
+    return normalizePromptText(decodeTextBuffer(file.buffer));
+  }
+  if (ext === '.doc') {
+    throw new Error('legacy .doc is not supported, please re-save it as .docx');
+  }
+  return null;
 }
 
 app.use(express.json({ limit: '10mb' }));
@@ -131,7 +195,7 @@ app.post('/api/chat/completions', async (req, res) => {
 });
 
 app.post('/api/generate/image', async (req, res) => {
-  const { prompts, model, size, seed } = req.body;
+  const { prompts, model, size, seed, seeds, refs, img2imgModel, img2imgSize } = req.body;
   const apiKey = req.headers['x-api-key'];
 
   if (!apiKey) {
@@ -148,6 +212,8 @@ app.post('/api/generate/image', async (req, res) => {
     const results = [];
     console.log(`[ImageBatch] task=${task.id} starting ${prompts.length} images`);
     for (let i = 0; i < prompts.length; i++) {
+      const itemSeed = Array.isArray(seeds) && seeds[i] != null ? seeds[i] : seed;
+      const itemRefs = Array.isArray(refs) ? refs[i] : null;
       let lastError = null;
       for (let retry = 0; retry <= 2; retry++) {
         if (retry > 0) {
@@ -158,7 +224,22 @@ app.post('/api/generate/image', async (req, res) => {
           console.log(`[ImageBatch] task=${task.id} image ${i + 1}/${prompts.length}`);
           updateTask(task.id, { status: 'running', current: i + 1, progress: Math.round((i / prompts.length) * 100) });
 
-          const taskId = await submitImageTask(prompts[i], { model, size, apiKey, seed });
+          let taskId;
+          if (itemRefs?.length && img2imgModel) {
+            const dataUris = [];
+            for (const ref of itemRefs) {
+              const localPath = resolveMediaRef(ref);
+              if (localPath) dataUris.push(await fileToDataUri(localPath));
+            }
+            if (dataUris.length === 0) {
+              throw new Error(`Reference images not found on server: ${itemRefs.join(', ')}`);
+            }
+            taskId = await submitImageEditTask(prompts[i], dataUris, {
+              model: img2imgModel, size: img2imgSize || size, apiKey, seed: itemSeed
+            });
+          } else {
+            taskId = await submitImageTask(prompts[i], { model, size, apiKey, seed: itemSeed });
+          }
 
           let pollResult;
           for (let attempt = 0; attempt < 120; attempt++) {
@@ -169,7 +250,7 @@ app.post('/api/generate/image', async (req, res) => {
           }
 
           if (pollResult?.output?.task_status === 'SUCCEEDED') {
-            const imageUrl = pollResult.output.results?.[0]?.url;
+            const imageUrl = parseImageResultUrl(pollResult);
             if (imageUrl) {
               const filename = `img_${task.id}_${i}.png`;
               const savePath = path.join(MEDIA_DIR, filename);
@@ -225,8 +306,28 @@ app.post('/api/upload', upload.array('files', 10), (req, res) => {
   res.json({ files });
 });
 
+app.post('/api/upload/prompt', promptUpload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+    const text = await extractPromptText(req.file);
+    if (text === null) {
+      return res.status(400).json({ error: 'Unsupported file type, use .docx / .txt / .md' });
+    }
+    if (!text) return res.status(400).json({ error: 'No readable text found in file' });
+    const truncated = text.length > PROMPT_MAX_CHARS;
+    res.json({
+      name: req.file.originalname,
+      text: truncated ? text.slice(0, PROMPT_MAX_CHARS) : text,
+      chars: text.length,
+      truncated,
+    });
+  } catch (err) {
+    res.status(400).json({ error: `Failed to read file: ${err.message}` });
+  }
+});
+
 app.post('/api/generate/video', async (req, res) => {
-  const { clips, model, duration, resolution, seed, aspectRatio, uploads } = req.body;
+  const { clips, model, duration, resolution, seed, aspectRatio, uploads, mode: clientMode } = req.body;
   const apiKey = req.headers['x-api-key'];
 
   if (!apiKey) {
@@ -249,7 +350,7 @@ app.post('/api/generate/video', async (req, res) => {
 
   (async () => {
     const results = [];
-    console.log(`[VideoBatch] task=${task.id} starting ${clips.length} clips, mode=${mode}, model=${effectiveModel}`);
+    console.log(`[VideoBatch] task=${task.id} starting ${clips.length} clips, mode=${mode}, videoMode=${clientMode || 'n/a'}, model=${effectiveModel}`);
     for (let i = 0; i < clips.length; i++) {
       const clip = clips[i];
 
@@ -285,25 +386,75 @@ app.post('/api/generate/video', async (req, res) => {
             }
 
             if (mediaArray.length === 0) {
+              lastError = null;
               results.push({ index: i, status: 'error', error: 'No valid upload media' });
               break;
             }
 
             console.log(`[VideoBatch V2] task=${task.id} clip ${i + 1} media=${mediaArray.length} items`);
             taskId = await submitVideoTaskV2(clip.prompt || 'Scene animation', mediaArray, {
-              model: effectiveModel, duration, resolution, apiKey, seed, aspectRatio
+              model: effectiveModel, duration: clip.duration ?? duration, resolution, apiKey, seed: clip.seed ?? seed, aspectRatio
             });
           } else {
-            if (!clip.imageUrl) {
-              results.push({ index: i, status: 'error', error: 'No imageUrl provided' });
-              console.log(`[VideoBatch] task=${task.id} clip ${i + 1} SKIPPED: no imageUrl`);
-              break;
+            const clipRefs = Array.isArray(clip.referenceImages) ? clip.referenceImages.slice(0, MAX_VIDEO_REFS) : [];
+            const clipSeed = clip.seed ?? seed;
+            const clipDuration = clip.duration ?? duration;
+            const firstRef = clip.imagePath || clip.imageUrl;
+            const lastRef = clip.lastFramePath || clip.lastFrameUrl;
+
+            if (clipRefs.length) {
+              if (!isV2Model(effectiveModel)) {
+                lastError = null;
+                results.push({ index: i, status: 'error', error: `${effectiveModel} accepts no reference images — pick a wan2.7 r2v model in Settings` });
+                console.log(`[VideoBatch] task=${task.id} clip ${i + 1} ERROR: ${effectiveModel} is not a reference-to-video model`);
+                break;
+              }
+
+              const media = [];
+              for (const ref of clipRefs) {
+                const url = await toDashScopeImage(ref);
+                if (url) media.push({ type: 'reference_image', url });
+              }
+              if (!media.length) {
+                lastError = null;
+                results.push({ index: i, status: 'error', error: `Reference images not found on server: ${clipRefs.join(', ')}` });
+                console.log(`[VideoBatch] task=${task.id} clip ${i + 1} SKIPPED: no usable reference image`);
+                break;
+              }
+
+              console.log(`[VideoBatch r2v] task=${task.id} clip ${i + 1} refs=${media.length}`);
+              taskId = await submitVideoTaskV2(clip.prompt || 'Scene animation', media, {
+                model: effectiveModel, duration: clipDuration, resolution, apiKey, seed: clipSeed, aspectRatio
+              });
+            } else {
+              const firstUrl = await toDashScopeImage(firstRef);
+              if (!firstUrl) {
+                lastError = null;
+                results.push({ index: i, status: 'error', error: firstRef ? `First frame not found on server: ${firstRef}` : 'No first frame provided' });
+                console.log(`[VideoBatch] task=${task.id} clip ${i + 1} SKIPPED: no usable first frame`);
+                break;
+              }
+
+              if (isV2Model(effectiveModel)) {
+                const media = [{ type: 'first_frame', url: firstUrl }];
+                const lastUrl = await toDashScopeImage(lastRef);
+                if (lastUrl) media.push({ type: 'last_frame', url: lastUrl });
+                else if (lastRef) console.warn(`[VideoBatch] task=${task.id} clip ${i + 1} last frame unavailable (${lastRef}), using the first frame only`);
+
+                console.log(`[VideoBatch V2] task=${task.id} clip ${i + 1} media=${media.length} items`);
+                taskId = await submitVideoTaskV2(clip.prompt || 'Scene animation', media, {
+                  model: effectiveModel, duration: clipDuration, resolution, apiKey, seed: clipSeed, aspectRatio
+                });
+              } else {
+                if (lastRef) {
+                  console.warn(`[VideoBatch] task=${task.id} clip ${i + 1}: ${effectiveModel} only takes a first frame (input.img_url) — the last frame was ignored; choose a wan2.7 model in Settings for first+last frame video`);
+                }
+                console.log(`[VideoBatch] task=${task.id} clip ${i + 1} img_url=${firstUrl.slice(0, 60)}…`);
+                taskId = await submitVideoTask(clip.prompt, firstUrl, {
+                  model: effectiveModel, duration: clipDuration, resolution, apiKey, seed: clipSeed, aspectRatio
+                });
+              }
             }
-            const imageUrl = clip.imageUrl.startsWith('http')
-              ? clip.imageUrl
-              : `${req.protocol}://${req.get('host')}${clip.imageUrl}`;
-            console.log(`[VideoBatch] task=${task.id} clip ${i + 1} imageUrl=${imageUrl}`);
-            taskId = await submitVideoTask(clip.prompt, imageUrl, { model: effectiveModel, duration, resolution, apiKey, seed, aspectRatio });
           }
 
           let pollResult;

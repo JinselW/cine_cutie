@@ -22,9 +22,9 @@ export function extractEntities(stepId, data) {
       if (!data) break;
       entities.characterImages = (data.characters || []).map(c => ({
         name: c.name,
-        appearance: c.appearance?.substring(0, 200),
+        appearance: (c.visualTag || c.appearance)?.substring(0, 200),
         desc: c.desc?.substring(0, 80),
-        hasImage: !!c.imagePath
+        hasImage: !!(c.sheetPath || c.imagePath)
       }));
       break;
     }
@@ -43,6 +43,8 @@ export function extractEntities(stepId, data) {
       const shots = data.shots || [];
       entities.refShotCount = shots.length;
       entities.refCompleteCount = shots.filter(s => s.status === 'complete' || s.imagePath).length;
+      entities.refVideoMode = data.mode || null;
+      entities.refFrameCount = shots.length + (data.extraFrames || []).length;
       break;
     }
 
@@ -51,6 +53,7 @@ export function extractEntities(stepId, data) {
       const clips = data.clips || [];
       entities.clipCount = clips.length;
       entities.clipCompleteCount = clips.filter(c => c.status === 'complete').length;
+      entities.clipVideoMode = data.mode || null;
       break;
     }
 
@@ -128,9 +131,14 @@ export function checkConsistency(stepId, data, entities) {
       if (missing.length > 0) {
         issues.push(`Missing character designs for: ${missing.join(', ')}`);
       }
-      const noImage = (data.characters || []).filter(c => !c.imagePath && !c.imageUrl);
-      if (noImage.length > 0 && data.characters?.length > 0) {
+      const chars = data.characters || [];
+      const noImage = chars.filter(c => !c.imagePath && !c.imageUrl && !c.sheetPath && !c.sheetUrl);
+      if (noImage.length > 0 && chars.length > 0) {
         issues.push(`${noImage.length} character(s) have no image`);
+      }
+      const noSheet = chars.filter(c => !c.sheetPath && !c.sheetUrl && (c.imagePath || c.imageUrl));
+      if (noSheet.length > 0) {
+        issues.push(`${noSheet.length} character(s) missing the three-view model sheet`);
       }
       break;
     }
@@ -145,6 +153,17 @@ export function checkConsistency(stepId, data, entities) {
       if (pending.length > actualShots * 0.5 && actualShots > 0) {
         issues.push(`${pending.length}/${actualShots} reference images not generated`);
       }
+      if (data.mode === 'firstLastFrame') {
+        const extras = data.extraFrames || [];
+        const closing = extras.find(f => f.imagePath || f.imageUrl);
+        if (!closing) {
+          issues.push('No dedicated closing frame for the last shot');
+        }
+        const noLast = (data.shots || []).filter(s => !s.lastFramePath && !s.lastFrameUrl);
+        if (noLast.length > 0) {
+          issues.push(`${noLast.length}/${actualShots} shots have no last frame for first-last-frame video`);
+        }
+      }
       break;
     }
 
@@ -157,6 +176,10 @@ export function checkConsistency(stepId, data, entities) {
       const failed = (data.clips || []).filter(c => c.status === 'failed');
       if (failed.length > actualClips * 0.5 && actualClips > 0) {
         issues.push(`${failed.length}/${actualClips} video clips failed to generate`);
+      }
+      const plannedMode = entities?.refVideoMode;
+      if (plannedMode && data.mode && plannedMode !== data.mode) {
+        issues.push(`Step 4 frames were planned for ${plannedMode} but the clips were generated in ${data.mode} mode — rerun step 4 or restore the Settings choice`);
       }
       break;
     }

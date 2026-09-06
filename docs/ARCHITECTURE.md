@@ -72,10 +72,10 @@ const RENDERERS = {
 | Agent | 步骤 | 职责 |
 |-------|------|------|
 | `ScriptAgent` | script | 剧本生成 + JSON 修复重试 + 结构验证 |
-| `CharacterAgent` | characterDesign | 角色/场景规范图 + per-item 重试 |
+| `CharacterAgent` | characterDesign | 两阶段：LLM 先写角色/场景设计稿（design/visualTag/palette），再据此生成三视图定妆图 + 正面图 + 场景空镜图，per-item 重试 |
 | `StoryboardAgent` | storyboard | 分镜（集/段/镜头）+ 镜头数按总时长封顶 |
-| `ReferenceAgent` | referenceImages | 每镜头参考图 + 角色外貌注入 |
-| `VideoAgent` | videoGeneration | i2v/r2v 视频片段 + 运镜 motion prompt + per-item 重试 |
+| `ReferenceAgent` | referenceImages | 按设置的视频生成方式规划帧图（首帧 N / 首尾帧 N+1，尾帧复用下镜首帧 / 参考图 N）；提示词融合剧本 beat + 命中角色/场景 visualTag + 分镜 prompt，并把定妆图作图生图参考 |
+| `VideoAgent` | videoGeneration | 读设置的 `videoMode` 后从步骤4结果取素材（首帧 / 首帧+尾帧，尾帧缺失时按"复用下镜首帧"现算 / 参考图列表 ≤5 张），拼运镜 motion prompt，片段时长取分镜为该镜头规划的 `duration`，per-item 重试 |
 | `EditorAgent` | postProduction | ffmpeg 拼接成片（确定性，不重生成） |
 
 ### 3. 恢复、回滚与控制 (`orchestrator/`)
@@ -101,8 +101,8 @@ setActiveProvider(cap, id)     // 切换（localStorage `cine-cutie-providers`�
 | Provider | capability | 后端 |
 |----------|-----------|------|
 | `llm` | text | 任意 OpenAI 兼容 `/chat/completions`（直连或经 server 代理） |
-| `image` | image | DashScope 文生图（server `/api/generate/image`） |
-| `video` | video | DashScope i2v / r2v（server `/api/generate/video`） |
+| `image` | image | DashScope 文生图；条目带 `refs` 且设置中选了图生图模型时逐条走图生图编辑（server `/api/generate/image`） |
+| `video` | video | DashScope i2v / r2v（server `/api/generate/video`）；按生成方式选模型——参考图方式读 `models.refVideo`，另两种读 `models.video`，并逐条转发 `imagePath`/`lastFramePath`/`referenceImages` |
 | `video-comfy` | video | 远程 ComfyUI（server `/api/generate/video-comfy`，SSH 隧道） |
 | `render` | render | server ffmpeg 拼接（`/api/render/final`） |
 | `template` | 全部 | 离线降级模板（未配置 API Key 或 LLM 失败时） |
@@ -114,11 +114,26 @@ setActiveProvider(cap, id)     // 切换（localStorage `cine-cutie-providers`�
 ```js
 {
   apiProviders: { openai|deepseek|dashscope|ark|kling|gemini: { endpoint, apiKey } },
-  models: { text: {provider, name}, image: {name}, video: {name}, refVideo: {name} },
+  models: { text: {provider, name}, image: {name}, img2img: {name}, video: {name}, refVideo: {name} },
+  videoMode: 'firstFrame' | 'firstLastFrame' | 'referenceImage',
   jsonMode: bool,
   useProxy: bool   // true 时 LLM 走 server 代理（带 LRU 缓存 + 规避 CORS）
 }
 ```
+
+`videoMode` 决定设置面板里那个"具体生成方式模型"下拉写入哪个槽位：
+`firstFrame`（默认 wanx2.1-i2v-plus）与 `firstLastFrame`（默认 wan2.7-i2v）写 `models.video`，
+`referenceImage`（默认 wan2.7-r2v）写 `models.refVideo`；另一个槽位保留原值。
+`img2img` 默认 `wan2.6-image`，由 `ReferenceAgent` 在带参考图的条目上走图生图编辑路径。
+`videoMode` 同时被 `ReferenceAgent`（决定步骤 4 产出首帧 / 首尾帧 / 参考图）
+和 `video` provider（决定步骤 5 读哪个模型槽位、每条片段带哪些素材）读取，图片走 `models.image`。
+后端再按片段内容与模型代次决定入参形态：带参考图 → `media` 数组 `reference_image`（仅 `wan2.7` 系列，否则明确报错）；
+首/尾帧 → `media` 数组 `first_frame` + `last_frame`（V1 模型只吃 `input.img_url`，尾帧会被忽略并打日志提示换模型）。
+
+片段时长：分镜为每个镜头规划 `duration`（3–10 秒），`VideoAgent` 逐条带给 provider，服务端 `clampVideoDuration(model, seconds)`
+按百炼文档的档位表收敛（`wan2.7-*`/`wan2.6-i2v*` 为 2–15 的整数，`wanx2.1-i2v-turbo` 为 3/4/5，`wan2.5-i2v` 为 5/10，
+`wan2.6-i2v-us` 为 5/10/15，`wanx2.1-i2v-plus`/`wan2.2-i2v-*` 固定 5 秒）。这张表是按模型名维护的外部约束元数据，
+表外模型一律退回 5 秒（所有已知档位都接受的值）并打 warning——换了新模型发现时长不生效时先看这里。
 
 `useProxy` 时请求带 `X-Target-Endpoint` / `X-Api-Key` 头；API Key 不落服务端。
 
@@ -127,7 +142,7 @@ setActiveProvider(cap, id)     // 切换（localStorage `cine-cutie-providers`�
 - **QCAgent** (`qcAgent.js`): 每步输出 LLM 自评 1-10（阈值 7）。媒体步骤附加真实图片/视频帧做多模态评审。
   `combineVerdict()` 让确定性一致性检查成为硬门禁：最终分 = min(LLM 分, 结构分)
 - **一致性** (`qcConsistency.js`): `extractEntities` / `mergeEntities` 跨步追踪实体；
-  `buildConsistencyConstraints` 注入 "CONSISTENCY CONSTRAINTS" 到 prompt；`checkConsistency` 检查缺角色图、镜头缺参考图、片段失败率过高等
+  `buildConsistencyConstraints` 注入 "CONSISTENCY CONSTRAINTS" 到 prompt；`checkConsistency` 检查缺角色图、镜头缺参考图、帧数与视频生成方式不匹配（缺收尾帧/尾帧，非致命 → CONDITIONAL_PASS）、片段失败率过高、步骤4规划的 mode 与实际片段 mode 不一致（设置在两步之间被改过，非致命提示重跑步骤4）等
 - **重试** (`retryAgent.js`): 文本步追加 critique 反馈重跑；媒体项按错误选策略
   `SWAP_REFERENCE / REWRITE_PROMPT / CHANGE_SEED / RETRY_SAME / GIVE_UP`（最多 3 次）
 - **类型** (`qcTypes.js`): `QCVerdict`(PASS/FAIL/CONDITIONAL_PASS)、`Severity`、`maxRetriesFor`
@@ -152,22 +167,23 @@ BLOCK→该步 FAIL，WARN/REVIEW→CONDITIONAL_PASS 并在 UI 提示。
 ## 数据流（6 步）
 
 ```
-用户输入(灵感 + 时长 + 比例 + 分辨率 + 风格 + 上传图)
+用户输入(灵感 + 提示词文件 + 时长 + 比例 + 分辨率 + 风格)
         │  contextKeys: []
         ▼
    script ────────── { title, logline, characters, settings, episodes }
         │  contextKeys: ['script']
         ▼
-   characterDesign ─ { characters[]/settings[] + imageUrl/imagePath }
+   characterDesign ─ { characters[]: design/visualTag/palette + sheetPath(三视图定妆图) + imagePath/imageUrl(正面图)
+                       settings[]: design/visualTag/palette + imagePath/imageUrl(场景空镜) }
         │  contextKeys: ['script']
         ▼
    storyboard ────── { episodes → segments → shots(shot_id, camera, prompt) }
         │  contextKeys: ['script','storyboard','characterDesign']
         ▼
-   referenceImages ─ { shots[] + 首帧参考图 URL }
+   referenceImages ─ { mode, shots[]: role/主帧 imagePath+imageUrl/refs(该帧用到的定妆图,供步骤5参考图模式复用)/(首尾帧时 lastFramePath 复用上镜首帧) + extraFrames[]: 收尾帧 }
         │  contextKeys: ['script','storyboard','referenceImages','characterDesign']
         ▼
-   videoGeneration ─ videoClips: { clips[] }   (角色规范图作 i2v 首帧保持一致性)
+   videoGeneration ─ videoClips: { mode, clips[] }   (按 mode 用步骤4的首帧/首尾帧/参考图保持一致性)
         │  contextKeys: ['script','storyboard','videoClips']
         ▼
    postProduction ── finalVideo: { finalVideo }  (ffmpeg 拼接)
@@ -184,7 +200,7 @@ BLOCK→该步 FAIL，WARN/REVIEW→CONDITIONAL_PASS 并在 UI 提示。
   currentStep: -1, viewingStep: null,
   genre / visualStyle / customStyle, userInput,
   totalDuration: 30, aspectRatio: '16:9', imageSize, resolution: '720P',
-  uploads: { firstFrame, lastFrame, referenceImages[] },
+  promptDoc: { name, text, chars, truncated } | null,   // 用户上传的提示词文件（≤1 个）
   theme, lang, entities: {},
   stepRunning / paused / stopped,
   data: { script, characterDesign, storyboard, referenceImages, videoClips, finalVideo }
@@ -200,9 +216,10 @@ BLOCK→该步 FAIL，WARN/REVIEW→CONDITIONAL_PASS 并在 UI 提示。
 | 端点 | 方法 | 说明 |
 |------|------|------|
 | `/api/chat/completions` | POST | LLM 代理（LRU 缓存，`X-Cache` 头） |
-| `/api/generate/image` | POST | DashScope 批量文生图 |
-| `/api/upload` | POST | 上传图片（≤10MB） |
-| `/api/generate/video` | POST | DashScope i2v / V2 media-array(r2v) |
+| `/api/generate/image` | POST | DashScope 批量生图（文生图 + 逐条图生图编辑，参考图为同源 `/api/media` 路径） |
+| `/api/upload/prompt` | POST | 解析提示词文件（.docx/.txt/.md，≤20MB，提取纯文本，UTF-8→GBK 回退，>20000 字截断） |
+| `/api/upload` | POST | 图片上传（当前 UI 未使用，保留给视频生成的 uploads 入参） |
+| `/api/generate/video` | POST | DashScope 批量图生视频：模型由请求体传入；本地 `/api/media` 帧图转 Base64 data URI；V1 走 `input.img_url`，`wan2.7` 走 `media` 数组（first_frame/last_frame/reference_image）；每条片段的 `duration` 经 `clampVideoDuration` 按模型档位夹取 |
 | `/api/render/final` | POST | ffmpeg 拼接（copy 失败回退重编码） |
 | `/api/generate/video-comfy` | POST | 远程 ComfyUI 生成 |
 | `/api/upload/comfy` | POST | 上传到 ComfyUI input |

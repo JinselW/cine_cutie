@@ -26,14 +26,17 @@ export async function videoParts(data, stepId, { maxClips = 3, framesPerClip = 6
 
 function collectImageSources(data, stepId) {
   const out = [];
-  const push = it => {
-    if (it && (it.imageUrl || it.imagePath)) out.push({ imageUrl: it.imageUrl, imagePath: it.imagePath });
+  const push = (imageUrl, imagePath) => {
+    if (imageUrl || imagePath) out.push({ imageUrl, imagePath });
   };
+  const pushItem = it => it && push(it.imageUrl, it.imagePath);
   if (stepId === 'characterDesign') {
-    (data?.characters || []).forEach(push);
-    (data?.settings || []).forEach(push);
+    (data?.characters || []).forEach(c => push(c?.sheetUrl, c?.sheetPath));
+    (data?.settings || []).forEach(pushItem);
+    (data?.characters || []).forEach(pushItem);
   } else if (stepId === 'referenceImages') {
-    (data?.shots || []).forEach(push);
+    (data?.shots || []).forEach(pushItem);
+    (data?.extraFrames || []).forEach(pushItem);
   }
   return out;
 }

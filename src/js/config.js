@@ -15,7 +15,7 @@ export const STEPS = [
     capability: 'image', accepts: [],
     agent: 'Character Designer',
     contextKeys: ['script'],
-    genMessages: ['Designing characters...', 'Creating scene concepts...', 'Adding visual details...', 'Finalizing designs...']
+    genMessages: ['Writing design specs...', 'Creating three-view model sheets...', 'Generating scene images...', 'Checking visual consistency...']
   },
   {
     id: 'storyboard', label: 'Storyboard', icon: '📋',
@@ -27,13 +27,13 @@ export const STEPS = [
     genMessages: ['Breaking down scenes...', 'Planning shot sequences...', 'Defining camera angles...', 'Building the storyboard...']
   },
   {
-    id: 'referenceImages', label: 'Reference Images', icon: '🖼️',
+    id: 'referenceImages', label: 'Image Generation', icon: '🖼️',
     labelKey: 'steps.referenceImages.label', agentKey: 'steps.referenceImages.agent',
     genKeys: ['steps.referenceImages.gen.0', 'steps.referenceImages.gen.1', 'steps.referenceImages.gen.2', 'steps.referenceImages.gen.3'],
     capability: 'image', accepts: [],
     agent: 'Image Director',
     contextKeys: ['script', 'storyboard', 'characterDesign'],
-    genMessages: ['Preparing image prompts...', 'Generating reference frames...', 'Evaluating compositions...', 'Finalizing references...']
+    genMessages: ['Combining script, designs and storyboard...', 'Generating frames for the video mode...', 'Evaluating compositions...', 'Finalizing frames...']
   },
   {
     id: 'videoGeneration', label: 'Video Generation', icon: '🎥',

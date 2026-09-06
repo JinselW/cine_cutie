@@ -130,6 +130,9 @@
 .upload-slots{
   display:flex;gap:12px;margin-top:12px;flex-wrap:wrap;
 }
+.upload-slots-single .upload-slot{
+  max-width:none;
+}
 .upload-slot{
   flex:1;min-width:140px;max-width:220px;
   border:2px dashed var(--glass-border);border-radius:var(--radius-sm);
@@ -146,23 +149,11 @@
 .slot-preview{
   margin-top:8px;display:flex;flex-wrap:wrap;gap:4px;justify-content:center;
 }
-.slot-preview img{
-  width:60px;height:60px;object-fit:cover;border-radius:var(--radius-xs);
-  border:1px solid var(--glass-border);
-}
 .slot-preview .slot-remove{
   position:absolute;top:2px;right:2px;width:18px;height:18px;
   background:var(--rose);color:#fff;border:none;border-radius:50%;
   font-size:0.7rem;cursor:pointer;display:flex;align-items:center;justify-content:center;
   line-height:1;padding:0;
-}
-.slot-preview-grid{
-  display:grid;grid-template-columns:repeat(auto-fill,60px);gap:4px;justify-content:center;
-}
-.upload-mode-hint{
-  margin-top:8px;padding:6px 12px;border-radius:var(--radius-xs);
-  background:rgba(240,192,64,0.08);border:1px solid rgba(240,192,64,0.2);
-  font-size:0.78rem;color:var(--gold);text-align:center;
 }
 
 .duration-row{
