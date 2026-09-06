@@ -19,7 +19,7 @@ const PROVIDER_DEFAULTS = {
 const MODEL_PRESETS = {
   openai:    ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo'],
   deepseek:  ['deepseek-chat', 'deepseek-reasoner'],
-  dashscope: ['qwen-plus', 'qwen-turbo', 'qwen-max'],
+  dashscope: ['qwen-plus', 'qwen-turbo', 'qwen-max', 'qwen-vl-max'],
   ark:       ['doubao-pro-32k', 'doubao-lite-32k'],
   gemini:    ['gemini-2.0-flash', 'gemini-1.5-pro'],
 };

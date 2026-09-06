@@ -1,20 +1,30 @@
 import { BaseAgent } from './baseAgent.js';
 import { RetryAgent, ItemRetryStrategy } from './retryAgent.js';
-import { checkConsistency } from '../providers/consistency.js';
+import { QCAgent, SCORE_THRESHOLD, reportScore, reportRetry } from './qcAgent.js';
 import { getActiveProvider } from '../providers/registry.js';
 import { createArtifact, ArtifactKind, ArtifactStatus, recordItemAttempt } from '../artifacts/artifactTypes.js';
-import { QCVerdict, Severity } from './qcTypes.js';
 import { addAgentMessage } from '../ui/render.js';
 import { t } from '../i18n.js';
 
 const MAX_ITEM_ATTEMPTS = 3;
+const MAX_STAGE_RETRIES = 1;
+
+function applyVisualRetryFeedback(items, critique) {
+  const note = (critique.suggestions || []).join('; ');
+  for (const item of items) {
+    item.seed = (item.seed ?? 42) + 7;
+    if (note) item.prompt = `${item.prompt}\n${note}`;
+  }
+}
 
 export class CharacterAgent extends BaseAgent {
   #retryAgent;
+  #qcAgent;
 
   constructor() {
     super({ name: 'Character Designer', stepId: 'characterDesign' });
     this.#retryAgent = new RetryAgent();
+    this.#qcAgent = new QCAgent({ stepId: 'characterDesign' });
   }
 
   async run(ctx, _token) {
@@ -29,20 +39,37 @@ export class CharacterAgent extends BaseAgent {
       status: ArtifactStatus.GENERATING,
     });
 
-    const results = await this.#generateItems(items, artifact, ctx, _token);
-    const data = this.#assembleResult(results, script);
+    let bestData = null, bestCrit = null, bestScore = -Infinity;
 
-    const l2Check = checkConsistency('characterDesign', data, ctx.entities || {});
-    const hasContent = data.characters.some(c => c.imagePath) || data.settings.some(s => s.imagePath);
+    for (let attempt = 0; attempt <= MAX_STAGE_RETRIES; attempt++) {
+      if (_token?.signal?.aborted) break;
 
-    artifact.data = data;
+      const results = await this.#generateItems(items, artifact, ctx, _token);
+      const data = this.#assembleResult(results, script);
+
+      const crit = await this.#qcAgent.process({ data, entities: ctx.entities || {}, ...ctx });
+      reportScore(crit.score, '🎨');
+      if (crit.score > bestScore) { bestScore = crit.score; bestData = data; bestCrit = crit; }
+
+      if (crit.score >= SCORE_THRESHOLD || attempt === MAX_STAGE_RETRIES) break;
+      if (crit.source === 'structural') break;
+
+      reportRetry(crit.score, attempt + 1, MAX_STAGE_RETRIES, '🎨');
+      applyVisualRetryFeedback(items, crit);
+    }
+
+    const finalData = bestData || { characters: [], settings: [] };
+    const hasContent = finalData.characters.some(c => c.imagePath) || finalData.settings.some(s => s.imagePath);
+
+    artifact.data = finalData;
     artifact.status = hasContent ? ArtifactStatus.COMPLETE : ArtifactStatus.FAILED;
 
     return {
       artifacts: [artifact],
       metadata: {
-        qualityScore: l2Check.verdict === QCVerdict.PASS ? 10 : l2Check.verdict === QCVerdict.CONDITIONAL_PASS ? 7 : 5,
-        consistencyIssues: l2Check.issues || [],
+        qualityScore: bestCrit?.score ?? 0,
+        consistencyIssues: bestCrit?.consistency?.issues || [],
+        verdict: bestCrit?.verdict ?? null,
       },
     };
   }

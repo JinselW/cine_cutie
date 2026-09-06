@@ -203,7 +203,7 @@ function assert(cond, msg) {
 
 // Consistency — entity extraction for media steps
 {
-  const { extractEntities } = await import('./src/js/providers/consistency.js');
+  const { extractEntities } = await import('./src/js/agents/qcConsistency.js');
 
   const refResult = extractEntities('referenceImages', {
     shots: [
@@ -257,7 +257,7 @@ function assert(cond, msg) {
 
 // 1. checkConsistency — verdict correctness
 {
-  const { checkConsistency } = await import('./src/js/providers/consistency.js');
+  const { checkConsistency } = await import('./src/js/agents/qcConsistency.js');
 
   // null data → FAIL / CRITICAL
   const nullCheck = checkConsistency('characterDesign', null, {});
@@ -300,7 +300,7 @@ function assert(cond, msg) {
   assert(scriptCheck.verdict === QCVerdict.PASS, 'checkConsistency script → PASS (no rules)');
 }
 
-// 2. Media agents source: must import RetryAgent and checkConsistency
+// 2. Media agents source: unified QC via QCAgent (no direct checkConsistency import)
 {
   const agentFiles = [
     './src/js/agents/characterAgent.js',
@@ -310,9 +310,18 @@ function assert(cond, msg) {
   ];
   for (const file of agentFiles) {
     const src = readFileSync(file, 'utf8');
-    assert(src.includes('RetryAgent'), `${file} imports RetryAgent`);
-    assert(src.includes('checkConsistency'), `${file} imports checkConsistency`);
-    assert(src.includes('QCVerdict'), `${file} imports QCVerdict`);
+    assert(src.includes('QCAgent'), `${file} imports QCAgent`);
+    assert(/#qcAgent\.process\(/.test(src), `${file} calls #qcAgent.process()`);
+    assert(!src.includes('checkConsistency'), `${file} does NOT call checkConsistency directly (unified in QCAgent)`);
+    assert(!/providers\/consistency/.test(src), `${file} has no legacy providers/consistency import`);
+  }
+  // Item-level retry stays in the generative media agents; the deterministic editor does not retry.
+  for (const file of [
+    './src/js/agents/characterAgent.js',
+    './src/js/agents/referenceAgent.js',
+    './src/js/agents/videoAgent.js',
+  ]) {
+    const src = readFileSync(file, 'utf8');
     assert(src.includes('new RetryAgent'), `${file} instantiates RetryAgent`);
   }
 }
@@ -355,9 +364,10 @@ function assert(cond, msg) {
     // Each agent's run() returns { artifacts: [createArtifact(...)] } — exactly one element
     const artifactsMatch = src.match(/artifacts:\s*\[\s*createArtifact\(/);
     assert(artifactsMatch !== null, `${name} returns artifacts: [createArtifact(...)]`);
-    // Phase 3: agents may have 2 createArtifact calls (main path + emptyResult fallback)
+    // Agents may have up to 3 createArtifact call sites (main path + uploads path + emptyResult fallback);
+    // each run() path still returns exactly one artifact.
     const createCount = (src.match(/createArtifact\(/g) || []).length;
-    assert(createCount >= 1 && createCount <= 2, `${name} has 1-2 createArtifact calls (got ${createCount})`);
+    assert(createCount >= 1 && createCount <= 3, `${name} has 1-3 createArtifact calls (got ${createCount})`);
   }
 }
 
@@ -492,7 +502,7 @@ function assert(cond, msg) {
   assert(!imageSrc.includes('addAgentMessage'), 'image provider does NOT contain addAgentMessage (moved to agent)');
 
   const videoSrc = readFileSync('./src/js/providers/video.js', 'utf8');
-  assert(videoSrc.includes('async generate({ items, overrides'), 'video provider accepts { items, overrides }');
+  assert(videoSrc.includes('async generate({ items, uploads, overrides'), 'video provider accepts { items, uploads, overrides }');
   assert(!videoSrc.includes('buildVideoPrompt'), 'video provider does NOT contain buildVideoPrompt (moved to agent)');
   assert(!videoSrc.includes('cameraToMotion'), 'video provider does NOT contain cameraToMotion (moved to agent)');
   assert(!videoSrc.includes('addAgentMessage'), 'video provider does NOT contain addAgentMessage (moved to agent)');

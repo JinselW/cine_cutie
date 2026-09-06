@@ -154,8 +154,8 @@ const en = {
 
   'settings.apiSettings': 'API Settings',
   'settings.modelSelection': 'Model Selection',
-  'settings.textModel': 'Text Model',
-  'settings.textModelHint': '(for script & storyboard)',
+  'settings.textModel': 'Text & Evaluation Model',
+  'settings.textModelHint': '(for script, storyboard & media scoring — vision model recommended for images/video)',
   'settings.imageModelLabel': 'Text-to-Image Model',
   'settings.videoModelLabel': 'Image-to-Video Model',
   'settings.refVideoModelLabel': 'Reference-to-Video Model',
@@ -412,8 +412,8 @@ const zh = {
 
   'settings.apiSettings': 'API 设置',
   'settings.modelSelection': '模型选择',
-  'settings.textModel': '文本模型',
-  'settings.textModelHint': '（用于剧本与分镜）',
+  'settings.textModel': '文本及评估模型',
+  'settings.textModelHint': '（用于剧本、分镜与图片/视频评分；图片/视频建议选视觉模型，如 qwen-vl-max / gpt-4o）',
   'settings.imageModelLabel': '文生图模型',
   'settings.videoModelLabel': '图生视频模型',
   'settings.refVideoModelLabel': '参考生视频模型',

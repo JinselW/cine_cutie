@@ -22,7 +22,7 @@ import { EditorAgent } from './agents/editorAgent.js';
 import { getIPComplianceAgent } from './agents/ipComplianceAgent.js';
 import { ArtifactStore } from './artifacts/artifactStore.js';
 import { ArtifactStatus, createArtifact } from './artifacts/artifactTypes.js';
-import { extractEntities, mergeEntities, buildConsistencyConstraints, checkConsistency } from './providers/consistency.js';
+import { extractEntities, mergeEntities, buildConsistencyConstraints, checkConsistency } from './agents/qcConsistency.js';
 import { QCVerdict, Severity } from './agents/qcTypes.js';
 import { validateScript } from './agents/scriptAgent.js';
 import { validateStoryboard } from './agents/storyboardAgent.js';
