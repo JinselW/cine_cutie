@@ -4,6 +4,7 @@ import { STEPS } from '../config.js';
 import { setMascot } from './render.js';
 import { t } from '../i18n.js';
 import { getExecutionLog, getTotalTokens, getAverageQuality } from '../observability.js';
+import { getConfig as getDashScopeConfig } from '../providers/image.js';
 
 let currentViewRerender = null;
 
@@ -392,14 +393,8 @@ export function renderPostProduction(data, onAdvance, readOnly = false) {
 }
 
 function getDashScopeStatus() {
-  try {
-    const saved = localStorage.getItem('cine-cutie-dashscope');
-    if (saved) {
-      const cfg = JSON.parse(saved);
-      return { isConfigured: !!cfg.apiKey };
-    }
-  } catch {}
-  return { isConfigured: false };
+  const cfg = getDashScopeConfig();
+  return { isConfigured: !!cfg.apiKey };
 }
 
 export function renderExecutionLog() {
