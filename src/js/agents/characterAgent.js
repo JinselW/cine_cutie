@@ -50,11 +50,13 @@ export class CharacterAgent extends BaseAgent {
 
     const entities = this.#mergeDesigns(script, designs);
     const items = this.#buildItems(entities, genre);
+    const sourceArtifactIds = ctx.sourceArtifactIds?.script ? [ctx.sourceArtifactIds.script] : [];
     const artifact = createArtifact({
       kind: ArtifactKind.CHARACTER_DESIGN,
       stepId: 'characterDesign',
       data: { characters: [], settings: [] },
       status: ArtifactStatus.GENERATING,
+      sourceArtifactIds,
     });
 
     let bestData = null, bestCrit = null, bestScore = -Infinity;
@@ -326,6 +328,7 @@ export class CharacterAgent extends BaseAgent {
 
   #emptyResult(ctx) {
     const script = ctx.script;
+    const sourceArtifactIds = ctx.sourceArtifactIds?.script ? [ctx.sourceArtifactIds.script] : [];
     return {
       artifacts: [createArtifact({
         kind: ArtifactKind.CHARACTER_DESIGN,
@@ -343,6 +346,7 @@ export class CharacterAgent extends BaseAgent {
           })),
         },
         status: ArtifactStatus.FAILED,
+        sourceArtifactIds,
       })],
       metadata: { qualityScore: 0 },
     };

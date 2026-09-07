@@ -26,12 +26,15 @@ export class EditorAgent extends BaseAgent {
     const crit = await this.#qcAgent.process({ data: finalData, entities: ctx.entities || {}, ...ctx });
     reportScore(crit.score, '🎬');
 
+    const sourceArtifactIds = ctx.sourceArtifactIds?.videoGeneration ? [ctx.sourceArtifactIds.videoGeneration] : [];
+
     return {
       artifacts: [createArtifact({
         kind: ArtifactKind.FINAL_VIDEO,
         stepId: 'postProduction',
         data: finalData,
         status: hasFinal ? ArtifactStatus.COMPLETE : ArtifactStatus.FAILED,
+        sourceArtifactIds,
       })],
       metadata: {
         retries: 0,

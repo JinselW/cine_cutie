@@ -218,9 +218,15 @@ class Orchestrator {
           retries: metadata.retries ?? 0,
           fallbackUsed: metadata.fallbackUsed ?? false,
         };
+        
+        const oldArtifact = this.#store.getLatestValidByStep(step.id);
         this.#store.commit(artifact, {
           provenance: { agent: agentName },
         });
+        
+        if (oldArtifact && oldArtifact.id !== artifact.id) {
+          this.#store.markDownstreamStale(oldArtifact.id);
+        }
       }
 
       if (gateResult.verdict === QCVerdict.FAIL) throw new StageGateError(gateResult);
@@ -251,9 +257,12 @@ class Orchestrator {
       totalDuration: state.totalDuration,
       constraints,
       entities: state.entities || {},
+      sourceArtifactIds: {},
     };
     for (const key of keys) {
       if (d[key] != null) ctx[key] = d[key];
+      const artifact = this.#store.getLatestValidByStep(key);
+      if (artifact) ctx.sourceArtifactIds[key] = artifact.id;
     }
     return ctx;
   }

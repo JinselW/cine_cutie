@@ -59,11 +59,19 @@ export class VideoAgent extends BaseAgent {
     const items = this.#buildItems(refImages, ctx, mode);
     if (!items.length) return this.#emptyResult(ctx);
 
+    const sourceArtifactIds = [
+      ctx.sourceArtifactIds?.script,
+      ctx.sourceArtifactIds?.storyboard,
+      ctx.sourceArtifactIds?.referenceImages,
+      ctx.sourceArtifactIds?.characterDesign,
+    ].filter(Boolean);
+
     const artifact = createArtifact({
       kind: ArtifactKind.VIDEO_CLIP,
       stepId: 'videoGeneration',
       data: { mode, clips: [] },
       status: ArtifactStatus.GENERATING,
+      sourceArtifactIds,
     });
 
     let bestData = null, bestCrit = null, bestScore = -Infinity;
@@ -128,11 +136,19 @@ export class VideoAgent extends BaseAgent {
       });
     }
 
+    const sourceArtifactIds = [
+      ctx.sourceArtifactIds?.script,
+      ctx.sourceArtifactIds?.storyboard,
+      ctx.sourceArtifactIds?.referenceImages,
+      ctx.sourceArtifactIds?.characterDesign,
+    ].filter(Boolean);
+
     const artifact = createArtifact({
       kind: ArtifactKind.VIDEO_CLIP,
       stepId: 'videoGeneration',
       data: { clips: [] },
       status: ArtifactStatus.GENERATING,
+      sourceArtifactIds,
     });
 
     const assemble = (results) => {
@@ -502,12 +518,19 @@ export class VideoAgent extends BaseAgent {
       videoPath: '',
       status: 'pending',
     }));
+    const sourceArtifactIds = [
+      ctx.sourceArtifactIds?.script,
+      ctx.sourceArtifactIds?.storyboard,
+      ctx.sourceArtifactIds?.referenceImages,
+      ctx.sourceArtifactIds?.characterDesign,
+    ].filter(Boolean);
     return {
       artifacts: [createArtifact({
         kind: ArtifactKind.VIDEO_CLIP,
         stepId: 'videoGeneration',
         data: { mode, clips },
         status: ArtifactStatus.FAILED,
+        sourceArtifactIds,
       })],
       metadata: { videoMode: mode, totalClips: clips.length, completeClips: 0, qualityScore: 0 },
     };

@@ -43,11 +43,17 @@ export class ReferenceAgent extends BaseAgent {
     if (!pairs.length) return this.#emptyResult(ctx, mode);
 
     const items = this.#buildItems(pairs, ctx, mode);
+    const sourceArtifactIds = [
+      ctx.sourceArtifactIds?.script,
+      ctx.sourceArtifactIds?.storyboard,
+      ctx.sourceArtifactIds?.characterDesign,
+    ].filter(Boolean);
     const artifact = createArtifact({
       kind: ArtifactKind.REFERENCE_IMAGE,
       stepId: 'referenceImages',
       data: { mode, shots: [], extraFrames: [] },
       status: ArtifactStatus.GENERATING,
+      sourceArtifactIds,
     });
 
     let bestData = null, bestCrit = null, bestScore = -Infinity;
@@ -354,6 +360,11 @@ export class ReferenceAgent extends BaseAgent {
   #emptyResult(ctx, mode) {
     const pairs = this.#extractShots(ctx);
     const role = mode === 'referenceImage' ? FrameRole.REFERENCE : FrameRole.FIRST;
+    const sourceArtifactIds = [
+      ctx.sourceArtifactIds?.script,
+      ctx.sourceArtifactIds?.storyboard,
+      ctx.sourceArtifactIds?.characterDesign,
+    ].filter(Boolean);
     return {
       artifacts: [createArtifact({
         kind: ArtifactKind.REFERENCE_IMAGE,
@@ -371,6 +382,7 @@ export class ReferenceAgent extends BaseAgent {
           extraFrames: [],
         },
         status: ArtifactStatus.FAILED,
+        sourceArtifactIds,
       })],
       metadata: { videoMode: mode, totalShots: pairs.length, completeShots: 0, totalFrames: pairs.length, qualityScore: 0 },
     };

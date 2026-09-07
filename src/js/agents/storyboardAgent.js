@@ -179,12 +179,15 @@ export class StoryboardAgent extends BaseAgent {
       finalResult = capShotsByDuration({ ...finalResult }, ctx.totalDuration);
     }
 
+    const sourceArtifactIds = ctx.sourceArtifactIds?.script ? [ctx.sourceArtifactIds.script] : [];
+
     return {
       artifacts: [createArtifact({
         kind: ArtifactKind.STORYBOARD,
         stepId: 'storyboard',
         data: finalResult,
         status: ArtifactStatus.COMPLETE,
+        sourceArtifactIds,
       })],
       metadata: {
         tokens: totalTokens,
@@ -203,12 +206,14 @@ export class StoryboardAgent extends BaseAgent {
         const reason = error?.i18nKey || 'llm.errNetwork';
         addAgentMessage('⚠️', t('llm.fellBack', { reason: t(reason) }));
       }
+      const sourceArtifactIds = ctx.sourceArtifactIds?.script ? [ctx.sourceArtifactIds.script] : [];
       return {
         artifacts: [createArtifact({
           kind: ArtifactKind.STORYBOARD,
           stepId: 'storyboard',
           data: result,
           status: ArtifactStatus.COMPLETE,
+          sourceArtifactIds,
         })],
         metadata: { fallbackUsed: true, tokens: { prompt: 0, completion: 0 }, retries: 0, qualityScore: null },
       };
