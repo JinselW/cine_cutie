@@ -8,7 +8,8 @@ import {
 } from './ui/render.js';
 import {
   renderScript, renderCharacterDesign, renderStoryboard,
-  renderReferenceImages, renderVideoGeneration, renderPostProduction, cancelAutoAdvance,
+  renderReferenceImages, renderVideoGeneration, renderPostProduction,
+  cancelAutoAdvance, scheduleAutoAdvance, setPendingAdvance, clearPendingAdvance,
 } from './ui/views.js';
 import { showCompletion } from './navigation.js';
 import { sleep } from './utils.js';
@@ -31,6 +32,7 @@ import { ExecutionCheckpoint } from './orchestrator/executionCheckpoint.js';
 import { RunState } from './orchestrator/runState.js';
 import { CancellationToken } from './orchestrator/cancellationToken.js';
 import { registerAgent, resolveAgent } from './orchestrator/agentRegistry.js';
+import { cancelAllBackendTasks } from './providers/activeTasks.js';
 
 const RENDERERS = {
   script: (r, cb) => renderScript(r, cb),
@@ -109,6 +111,8 @@ class Orchestrator {
   }
 
   async #advanceStep() {
+    cancelAutoAdvance();
+    clearPendingAdvance();
     if (state.stopped) return;
     state.currentStep++;
     if (state.currentStep >= STEPS.length) {
@@ -176,14 +180,16 @@ class Orchestrator {
 
     await saveMemory('running');
 
+    const onAdvance = () => this.#advanceStep();
+    setPendingAdvance(onAdvance);
+
     if (state.viewingStep !== null) {
       if (state.mode === 'auto') {
-        setTimeout(() => this.#advanceStep(), 2000);
+        scheduleAutoAdvance(2000, onAdvance);
       }
       return;
     }
 
-    const onAdvance = () => this.#advanceStep();
     this.#renderStep(step.id, result, onAdvance);
   }
 
@@ -481,6 +487,26 @@ class Orchestrator {
     return this.#runState.isInterrupted;
   }
 
+  async continuePipeline() {
+    if (state.currentStep < 0 || state.currentStep >= STEPS.length) return;
+    state.stopped = false;
+    state.paused = false;
+    state.stepRunning = false;
+    this.#token = new CancellationToken();
+    this.#runState.markRunning();
+    this.#runState.persist();
+    await this.#executeStage(STEPS[state.currentStep]);
+  }
+
+  clearSession() {
+    this.#checkpoint.clear();
+    this.#checkpoint.clearPersisted();
+    this.#runState.reset();
+    this.#runState.clearPersisted();
+    this.#token = null;
+    resetState();
+  }
+
   pausePipeline() {
     this.#token?.pause();
     state.paused = true;
@@ -493,8 +519,11 @@ class Orchestrator {
     saveMemory('running');
   }
 
-  stopPipeline(status = 'stopped') {
+  async stopPipeline(status = 'stopped') {
+    cancelAutoAdvance();
+    clearPendingAdvance();
     this.#token?.cancel();
+    await cancelAllBackendTasks();
     state.stopped = true;
     this.#runState.markInterrupted();
     this.#runState.persist();
@@ -528,6 +557,14 @@ export function restoreSession() {
   return getOrchestrator().restoreSession();
 }
 
+export async function continuePipeline() {
+  return getOrchestrator().continuePipeline();
+}
+
+export function clearSession() {
+  return getOrchestrator().clearSession();
+}
+
 export function pausePipeline() {
   getOrchestrator().pausePipeline();
 }
@@ -536,8 +573,8 @@ export function resumePipeline() {
   getOrchestrator().resumePipeline();
 }
 
-export function stopPipeline() {
-  getOrchestrator().stopPipeline();
+export async function stopPipeline() {
+  return getOrchestrator().stopPipeline();
 }
 
 setPipelineControls({ pause: pausePipeline, resume: resumePipeline, stop: stopPipeline });

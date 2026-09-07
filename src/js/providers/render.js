@@ -1,4 +1,5 @@
 import { registerProvider } from './registry.js';
+import { registerBackendTask, unregisterBackendTask } from './activeTasks.js';
 
 const renderProvider = {
   id: 'render',
@@ -18,6 +19,7 @@ const renderProvider = {
       return { finalVideo: '', status: 'failed', error: 'Cancelled' };
     }
 
+    let taskId = null;
     try {
       const res = await fetch('/api/render/final', {
         method: 'POST',
@@ -31,7 +33,8 @@ const renderProvider = {
         return { finalVideo: '', status: 'failed', error: `HTTP ${res.status}: ${errText.substring(0, 100)}` };
       }
 
-      const { taskId } = await res.json();
+      ({ taskId } = await res.json());
+      registerBackendTask(taskId);
       const startTime = Date.now();
       const MAX_WAIT = 6 * 60 * 1000;
 
@@ -65,14 +68,16 @@ const renderProvider = {
           const finalPath = taskData.result?.path || '';
           return { finalVideo: finalPath, status: finalPath ? 'complete' : 'failed', error: finalPath ? null : 'No output' };
         }
-        if (taskData.status === 'failed') {
-          return { finalVideo: '', status: 'failed', error: taskData.error || 'Render failed' };
+        if (taskData.status === 'failed' || taskData.status === 'cancelled') {
+          return { finalVideo: '', status: 'failed', error: taskData.status === 'cancelled' ? 'Cancelled' : (taskData.error || 'Render failed') };
         }
       }
 
       return { finalVideo: '', status: 'failed', error: 'Timeout' };
     } catch (err) {
       return { finalVideo: '', status: 'failed', error: err.message };
+    } finally {
+      unregisterBackendTask(taskId);
     }
   },
 };

@@ -8,7 +8,7 @@ import {
 import {
   renderScript, renderCharacterDesign, renderStoryboard,
   renderReferenceImages, renderVideoGeneration, renderPostProduction,
-  showCompletion, cancelAutoAdvance
+  showCompletion, cancelAutoAdvance, getPendingAdvance
 } from './ui/views.js';
 
 export function onNodeClick(index) {
@@ -62,7 +62,23 @@ function restoreCurrentView() {
   if (genAnim) {
     showGenerating(state.currentStep);
   } else {
-    showStepReadOnly(state.currentStep);
+    const step = STEPS[state.currentStep];
+    const result = state.data[dataKeyOf(step)];
+    const onAdvance = getPendingAdvance();
+    const renderFn = {
+      script: renderScript,
+      characterDesign: renderCharacterDesign,
+      storyboard: renderStoryboard,
+      referenceImages: renderReferenceImages,
+      videoGeneration: renderVideoGeneration,
+      postProduction: renderPostProduction,
+    }[step.id];
+    if (onAdvance && result && renderFn) {
+      cancelAutoAdvance();
+      renderFn(result, onAdvance);
+    } else {
+      showStepReadOnly(state.currentStep);
+    }
   }
   renderCurrentMessages();
   flushBufferedMessages();

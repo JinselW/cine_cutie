@@ -1,6 +1,7 @@
 import { registerProvider } from './registry.js';
 import { state } from '../state.js';
 import { computeImageSize, computeImg2ImgSize, DEFAULT_RESOLUTION } from '../utils/resolution.js';
+import { registerBackendTask, unregisterBackendTask } from './activeTasks.js';
 
 const SETTINGS_KEY = 'cine-cutie-settings';
 const OLD_DS_KEY = 'cine-cutie-dashscope';
@@ -101,6 +102,7 @@ const imageProvider = {
 };
 
 async function generateImages(prompts, ids, seeds, refs, externalSignal) {
+  let taskId = null;
   try {
     if (externalSignal?.aborted) {
       return prompts.map((_, i) => ({
@@ -143,7 +145,8 @@ async function generateImages(prompts, ids, seeds, refs, externalSignal) {
       }));
     }
 
-    const { taskId } = await res.json();
+    ({ taskId } = await res.json());
+    registerBackendTask(taskId);
     const results = [];
     const startTime = Date.now();
     const MAX_WAIT = 10 * 60 * 1000;
@@ -196,13 +199,13 @@ async function generateImages(prompts, ids, seeds, refs, externalSignal) {
         }
         break;
       }
-      if (taskData.status === 'failed') {
+      if (taskData.status === 'failed' || taskData.status === 'cancelled') {
         return prompts.map((_, i) => ({
           id: ids[i],
           path: '',
           imageUrl: '',
           status: 'failed',
-          error: taskData.error || 'Generation failed',
+          error: taskData.status === 'cancelled' ? 'Cancelled' : (taskData.error || 'Generation failed'),
         }));
       }
     }
@@ -225,6 +228,8 @@ async function generateImages(prompts, ids, seeds, refs, externalSignal) {
       status: 'failed',
       error: err.message,
     }));
+  } finally {
+    unregisterBackendTask(taskId);
   }
 }
 

@@ -106,9 +106,10 @@ export class CharacterAgent extends BaseAgent {
     let raw = null;
     try {
       raw = await chat(messages, { signal });
-    } catch {
+    } catch (err) {
       if (signal?.aborted) return null;
-      addAgentMessage('⚠️', t('llm.fellBack', { reason: t('llm.errNetwork') }));
+      const reason = err?.i18nKey || 'llm.errNetwork';
+      addAgentMessage('⚠️', t('llm.fellBack', { reason: t(reason) }));
       return this.#templateDesigns(ctx);
     }
 

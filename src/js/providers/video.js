@@ -3,6 +3,7 @@ import { getConfig as getImageConfig } from './image.js';
 import { getConfig } from './llm.js';
 import { state } from '../state.js';
 import { dsVideoResolution } from '../utils/resolution.js';
+import { registerBackendTask, unregisterBackendTask } from './activeTasks.js';
 
 // wan2.7-r2v 最多接受 5 张参考图
 const MAX_REFERENCE_IMAGES = 5;
@@ -108,6 +109,7 @@ const videoProvider = {
           seed: sentClips[0]?.seed ?? 42,
         };
 
+    let taskId = null;
     try {
       const res = await fetch('/api/generate/video', {
         method: 'POST',
@@ -129,7 +131,8 @@ const videoProvider = {
         }));
       }
 
-      const { taskId } = await res.json();
+      ({ taskId } = await res.json());
+      registerBackendTask(taskId);
       const startTime = Date.now();
       const MAX_WAIT = 20 * 60 * 1000;
 
@@ -195,12 +198,12 @@ const videoProvider = {
             return { id: item.id, videoPath: '', status: 'failed', error: 'Incomplete results' };
           });
         }
-        if (taskData.status === 'failed') {
+        if (taskData.status === 'failed' || taskData.status === 'cancelled') {
           return items.map(item => ({
             id: item.id,
             videoPath: '',
             status: 'failed',
-            error: taskData.error || 'Generation failed',
+            error: taskData.status === 'cancelled' ? 'Cancelled' : (taskData.error || 'Generation failed'),
           }));
         }
       }
@@ -218,6 +221,8 @@ const videoProvider = {
         status: 'failed',
         error: err.message,
       }));
+    } finally {
+      unregisterBackendTask(taskId);
     }
   },
 };

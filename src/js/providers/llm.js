@@ -315,7 +315,13 @@ async function callChat(messages, { retryWithoutJsonFormat = false, signal: exte
     if (err.name === 'AbortError') {
       throw new LLMError('llm.errTimeout', '90s');
     }
-    throw new LLMError('llm.errNetwork', err.message);
+    // Detect CORS or network errors
+    const errMsg = err.message || '';
+    const isCors = /failed to fetch|networkerror|cors/i.test(errMsg);
+    if (isCors && !config.useProxy) {
+      throw new LLMError('llm.errCors', errMsg);
+    }
+    throw new LLMError('llm.errNetwork', errMsg);
   }
 }
 

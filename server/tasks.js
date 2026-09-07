@@ -31,6 +31,23 @@ export function updateTask(id, patch) {
   return task;
 }
 
+export function cancelTask(id) {
+  const task = tasks.get(id);
+  if (!task) return null;
+  if (task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled') {
+    return task;
+  }
+  task.cancelled = true;
+  task.status = 'cancelled';
+  task.updatedAt = Date.now();
+  return task;
+}
+
+export function isTaskCancelled(id) {
+  const task = tasks.get(id);
+  return !!task?.cancelled;
+}
+
 export function listTasks() {
   return [...tasks.values()].sort((a, b) => b.createdAt - a.createdAt);
 }
@@ -38,7 +55,7 @@ export function listTasks() {
 export function cleanupTasks(maxAge = 3600000) {
   const now = Date.now();
   for (const [id, task] of tasks) {
-    if (now - task.updatedAt > maxAge && (task.status === 'completed' || task.status === 'failed')) {
+    if (now - task.updatedAt > maxAge && (task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled')) {
       tasks.delete(id);
     }
   }

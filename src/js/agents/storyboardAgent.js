@@ -94,8 +94,8 @@ export class StoryboardAgent extends BaseAgent {
     let raw;
     try {
       raw = await chat(messages, { signal });
-    } catch {
-      return null;
+    } catch (err) {
+      return { result: null, error: err };
     }
     let parsed = await tryParseJson(raw);
     if (!parsed) {
@@ -107,21 +107,21 @@ export class StoryboardAgent extends BaseAgent {
         ];
         const repairRaw = await chat(repairMessages, { signal });
         parsed = await tryParseJson(repairRaw);
-      } catch {
-        return null;
+      } catch (err) {
+        return { result: null, error: err };
       }
     }
-    return parsed;
+    return { result: parsed, error: null };
   }
 
   async run(ctx, token) {
     if (!isConfigured()) {
-      return this.#fallback(ctx);
+      return this.#fallback(ctx, false);
     }
 
     const messages = buildMessages('storyboard', ctx);
     if (!messages) {
-      return this.#fallback(ctx);
+      return this.#fallback(ctx, false);
     }
 
     let currentMessages = messages;
@@ -131,10 +131,12 @@ export class StoryboardAgent extends BaseAgent {
     let totalTokens = { prompt: 0, completion: 0 };
     let retries = 0;
     let fallbackUsed = false;
+    let lastError = null;
     const signal = token?.signal;
 
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-      const generated = await this.#generate(currentMessages, signal);
+      const { result: generated, error } = await this.#generate(currentMessages, signal);
+      if (error) lastError = error;
       const metrics = consumeStepMetrics();
       totalTokens.prompt += metrics.tokens.prompt;
       totalTokens.completion += metrics.tokens.completion;
@@ -168,7 +170,7 @@ export class StoryboardAgent extends BaseAgent {
     let finalResult = bestResult || currentResult;
 
     if (!finalResult) {
-      const fb = this.#fallback(ctx);
+      const fb = this.#fallback(ctx, true, lastError);
       fallbackUsed = true;
       return fb;
     }
@@ -193,11 +195,14 @@ export class StoryboardAgent extends BaseAgent {
     };
   }
 
-  async #fallback(ctx) {
+  async #fallback(ctx, showMessage = true, error = null) {
     const tpl = getTemplateProvider();
     if (tpl) {
       const result = await tpl.generate({ step: 'storyboard', genre: ctx.genre, context: ctx });
-      addAgentMessage('⚠️', t('llm.fellBack', { reason: t('llm.errNetwork') }));
+      if (showMessage) {
+        const reason = error?.i18nKey || 'llm.errNetwork';
+        addAgentMessage('⚠️', t('llm.fellBack', { reason: t(reason) }));
+      }
       return {
         artifacts: [createArtifact({
           kind: ArtifactKind.STORYBOARD,

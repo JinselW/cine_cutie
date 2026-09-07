@@ -24,15 +24,24 @@ function feedbackPanel(stepId, approveKey = 'ui.approve') {
 }
 
 let _autoAdvanceTimer = null;
+let _pendingAdvance = null;
 
 function autoAdvance(delay, callback) {
+  cancelAutoAdvance();
   const actions = $('#actionRow');
   if (actions) {
     actions.innerHTML = `<button class="action-btn primary" id="autoNextBtn">${t('ui.nextStep')}</button>`;
     const btn = $('#autoNextBtn');
     if (btn) btn.style.display = 'none';
   }
-  _autoAdvanceTimer = setTimeout(callback, delay);
+  _autoAdvanceTimer = setTimeout(() => {
+    _autoAdvanceTimer = null;
+    callback();
+  }, delay);
+}
+
+export function scheduleAutoAdvance(delay, callback) {
+  autoAdvance(delay, callback);
 }
 
 export function cancelAutoAdvance() {
@@ -40,6 +49,18 @@ export function cancelAutoAdvance() {
     clearTimeout(_autoAdvanceTimer);
     _autoAdvanceTimer = null;
   }
+}
+
+export function setPendingAdvance(fn) {
+  _pendingAdvance = fn;
+}
+
+export function getPendingAdvance() {
+  return _pendingAdvance;
+}
+
+export function clearPendingAdvance() {
+  _pendingAdvance = null;
 }
 
 function bindFeedback(stepId, approveCallback) {
@@ -107,6 +128,7 @@ export function renderScript(data, onAdvance, readOnly = false) {
   `;
 
   if (!readOnly) {
+    setPendingAdvance(onAdvance);
     if (state.mode === 'interactive') {
       $('#actionRow').innerHTML = feedbackPanel('script', 'ui.approveScript');
       bindFeedback('script', onAdvance);
@@ -162,6 +184,7 @@ export function renderCharacterDesign(data, onAdvance, readOnly = false) {
   `;
 
   if (!readOnly) {
+    setPendingAdvance(onAdvance);
     if (state.mode === 'interactive') {
       $('#actionRow').innerHTML = feedbackPanel('characterDesign', 'ui.approveCharacterDesign');
       bindFeedback('characterDesign', onAdvance);
@@ -201,6 +224,7 @@ export function renderStoryboard(data, onAdvance, readOnly = false) {
   `;
 
   if (!readOnly) {
+    setPendingAdvance(onAdvance);
     if (state.mode === 'interactive') {
       $('#actionRow').innerHTML = feedbackPanel('storyboard', 'ui.approveStoryboard');
       bindFeedback('storyboard', onAdvance);
@@ -269,6 +293,7 @@ export function renderReferenceImages(data, onAdvance, readOnly = false) {
   `;
 
   if (!readOnly) {
+    setPendingAdvance(onAdvance);
     if (state.mode === 'interactive') {
       $('#actionRow').innerHTML = feedbackPanel('referenceImages', 'ui.approveReferenceImages');
       bindFeedback('referenceImages', onAdvance);
@@ -303,6 +328,7 @@ export function renderVideoGeneration(data, onAdvance, readOnly = false) {
   `;
 
   if (!readOnly) {
+    setPendingAdvance(onAdvance);
     if (state.mode === 'interactive') {
       $('#actionRow').innerHTML = feedbackPanel('videoGeneration', 'ui.approveVideoGeneration');
       bindFeedback('videoGeneration', onAdvance);
@@ -336,6 +362,7 @@ export function renderPostProduction(data, onAdvance, readOnly = false) {
   `;
 
   if (!readOnly) {
+    setPendingAdvance(onAdvance);
     if (state.mode === 'interactive') {
       $('#actionRow').innerHTML = feedbackPanel('postProduction', 'ui.approvePostProduction');
       bindFeedback('postProduction', onAdvance);

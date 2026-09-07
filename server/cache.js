@@ -8,13 +8,19 @@ class LRUCache {
     this.misses = 0;
   }
 
-  _key(model, messages) {
-    const payload = JSON.stringify({ model, messages });
+  _key(model, messages, endpoint, temperature, responseFormat) {
+    const payload = JSON.stringify({
+      model,
+      messages,
+      endpoint: endpoint || '',
+      temperature: temperature ?? 0.8,
+      responseFormat: responseFormat || null,
+    });
     return crypto.createHash('sha256').update(payload).digest('hex');
   }
 
-  get(model, messages) {
-    const key = this._key(model, messages);
+  get(model, messages, endpoint, temperature, responseFormat) {
+    const key = this._key(model, messages, endpoint, temperature, responseFormat);
     if (this.cache.has(key)) {
       const value = this.cache.get(key);
       this.cache.delete(key);
@@ -26,8 +32,8 @@ class LRUCache {
     return null;
   }
 
-  set(model, messages, response) {
-    const key = this._key(model, messages);
+  set(model, messages, response, endpoint, temperature, responseFormat) {
+    const key = this._key(model, messages, endpoint, temperature, responseFormat);
     if (this.cache.has(key)) {
       this.cache.delete(key);
     } else if (this.cache.size >= this.maxSize) {

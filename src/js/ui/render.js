@@ -202,8 +202,8 @@ export function resumeGeneration() {
   }
 }
 
-export function stopGeneration() {
-  _controls?.stop();
+export async function stopGeneration() {
+  await _controls?.stop();
   state.paused = false;
   if (_resumeResolve) {
     _resumeResolve();

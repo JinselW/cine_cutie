@@ -10,7 +10,7 @@ import { state } from './state.js';
 import { STEPS, dataKeyOf } from './config.js';
 import { buildPipelineBar, showSection, setMascot, addAgentMessage, updatePipeline } from './ui/render.js';
 import { showStepReadOnly } from './navigation.js';
-import { startPipeline, restoreSession } from './engine.js';
+import { startPipeline, restoreSession, continuePipeline, clearSession, stopPipeline } from './engine.js';
 import { t, applyLang } from './i18n.js';
 import { initSettings } from './ui/settings.js';
 import { initMascotInteraction } from './mascot-interact.js';
@@ -45,7 +45,9 @@ $('#langToggle').addEventListener('click', () => {
 buildPipelineBar();
 initMascotInteraction();
 
-if (restoreSession() && Object.values(state.data).some(v => v != null)) {
+const restored = restoreSession();
+const hasData = Object.values(state.data).some(v => v != null);
+if (restored && hasData) {
   showSection('pipelineSection');
   updatePipeline(state.currentStep, 'active');
   const viewIdx = state.data[dataKeyOf(STEPS[state.currentStep])] != null
@@ -53,6 +55,79 @@ if (restoreSession() && Object.values(state.data).some(v => v != null)) {
     : state.currentStep - 1;
   if (viewIdx >= 0) showStepReadOnly(viewIdx);
   addAgentMessage('♻️', t('ui.sessionRestored'));
+
+  const continueBtn = $('#continueMakingBtn');
+  const startOverBtn = $('#startOverBtn');
+  const actions = $('#restoreActions');
+  if (continueBtn) continueBtn.textContent = t('ui.continueMaking');
+  if (startOverBtn) startOverBtn.textContent = t('ui.startOver');
+  if (actions) actions.classList.remove('hidden');
+
+  continueBtn?.addEventListener('click', async () => {
+    if (actions) actions.classList.add('hidden');
+    await continuePipeline();
+  });
+
+  startOverBtn?.addEventListener('click', async () => {
+    console.log('[startOver] clicked');
+    try {
+      await stopPipeline();
+      console.log('[startOver] pipeline stopped');
+    } catch (e) {
+      console.error('[startOver] stopPipeline error', e);
+    }
+    try {
+      clearSession();
+      console.log('[startOver] cleared, switching to input view');
+    } catch (e) {
+      console.error('[startOver] clearSession error', e);
+    }
+
+    // 重置表单字段到默认值
+    const userInput = $('#userInput');
+    if (userInput) userInput.value = '';
+
+    const totalDuration = $('#totalDuration');
+    if (totalDuration) {
+      totalDuration.value = '30';
+      updateDurationHint();
+    }
+
+    // 重置比例按钮到 16:9
+    $$('.aspect-btn').forEach(b => b.classList.remove('active'));
+    const defaultAspect = $('.aspect-btn[data-ratio="16:9"]');
+    if (defaultAspect) defaultAspect.classList.add('active');
+
+    // 重置分辨率按钮到 720P
+    $$('.res-btn').forEach(b => b.classList.remove('active'));
+    const defaultRes = $('.res-btn[data-res="720P"]');
+    if (defaultRes) defaultRes.classList.add('active');
+
+    // 重置视觉风格按钮到 cinematic
+    $$('.style-btn').forEach(b => b.classList.remove('active'));
+    const defaultStyle = $('.style-btn[data-style="cinematic"]');
+    if (defaultStyle) defaultStyle.classList.add('active');
+
+    const customStyleInput = $('#customStyleInput');
+    if (customStyleInput) {
+      customStyleInput.value = '';
+      customStyleInput.classList.add('hidden');
+    }
+
+    // 重置模式按钮到 auto
+    $$('.mode-btn').forEach(b => b.classList.remove('active'));
+    const defaultMode = $('.mode-btn[data-mode="auto"]');
+    if (defaultMode) defaultMode.classList.add('active');
+
+    // 清空提示词文件槽
+    state.promptDoc = null;
+    renderPromptSlot();
+
+    // 隐藏恢复横幅并切换到输入页
+    const actions = $('#restoreActions');
+    if (actions) actions.classList.add('hidden');
+    showSection('inputSection');
+  });
 }
 
 const PROMPT_SLOT = { slotEl: '#slotPromptFile', inputEl: '#inputPromptFile', previewEl: '#previewPromptFile' };

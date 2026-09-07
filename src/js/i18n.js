@@ -74,6 +74,8 @@ const en = {
   'ui.stageOutputFailed': 'Generation or quality validation failed.',
   'ui.backToInput': 'Back to input',
   'ui.sessionRestored': 'Restored your previous unfinished session — review it or start a new one',
+  'ui.continueMaking': 'Continue Making',
+  'ui.startOver': 'Start Over',
 
   'ui.planningTitle': 'Creative Direction',
   'ui.planningTheme': 'Theme',
@@ -228,10 +230,11 @@ const en = {
   'ui.charDesignGenerating': 'Generating {total} character/scene images...',
 
   'llm.notConfiguredFallback': 'LLM not configured, using templates...',
-  'llm.fellBack': 'LLM error, fell back to templates: {reason}',
+  'llm.fellBack': 'LLM unavailable ({reason}), using templates instead — process continues normally',
   'llm.errAuth': 'Authentication failed',
   'llm.errRateLimit': 'Rate limit exceeded',
   'llm.errNetwork': 'Network error (check CORS/endpoint)',
+  'llm.errCors': 'CORS error — enable "Use Proxy Server" in Settings',
   'llm.errTimeout': 'Request timed out',
   'llm.errParse': 'Failed to parse JSON response',
   'llm.errHttp': 'HTTP error',
@@ -348,6 +351,8 @@ const zh = {
   'ui.stageOutputFailed': '生成结果或质量检查失败。',
   'ui.backToInput': '返回创作输入',
   'ui.sessionRestored': '已恢复上次未完成的会话，可查看进度或重新开拍',
+  'ui.continueMaking': '继续制作',
+  'ui.startOver': '重新开拍',
 
   'ui.planningTitle': '创意方向',
   'ui.planningTheme': '主题',
@@ -502,10 +507,11 @@ const zh = {
   'ui.charDesignGenerating': '正在生成 {total} 张角色/场景图片...',
 
   'llm.notConfiguredFallback': 'LLM 未配置，使用模板...',
-  'llm.fellBack': 'LLM 错误，回退到模板：{reason}',
+  'llm.fellBack': 'LLM 不可用（{reason}），改用模板继续生成',
   'llm.errAuth': '认证失败',
   'llm.errRateLimit': '请求频率超限',
   'llm.errNetwork': '网络错误（检查 CORS/端点）',
+  'llm.errCors': 'CORS 跨域错误 — 请在设置中启用"使用代理服务器"',
   'llm.errTimeout': '请求超时',
   'llm.errParse': 'JSON 解析失败',
   'llm.errHttp': 'HTTP 错误',

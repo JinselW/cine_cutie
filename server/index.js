@@ -5,7 +5,7 @@ import mammoth from 'mammoth';
 import { createMemoryRouter } from './memory.js';
 import { LRUCache } from './cache.js';
 import { submitImageTask, submitImageEditTask, parseImageResultUrl, submitVideoTask, submitVideoTaskV2, pollTask, downloadFile, detectVideoMode, fileToDataUri } from './dashscope.js';
-import { createTask, getTask, updateTask } from './tasks.js';
+import { createTask, getTask, updateTask, cancelTask, isTaskCancelled } from './tasks.js';
 import { concatVideos, checkFfmpeg } from './render.js';
 import { submitWorkflow, pollUntilDone, downloadOutput, uploadImageToComfy, checkComfyUIStatus } from './comfyui.js';
 import { ensureTunnel, closeTunnel, getTunnelStatus } from './ssh-tunnel.js';
@@ -23,6 +23,27 @@ fs.mkdirSync(MEDIA_DIR, { recursive: true });
 
 const UPLOADS_DIR = path.join(MEDIA_DIR, 'uploads');
 fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+
+function isPathWithinDir(filePath, allowedDir) {
+  if (typeof filePath !== 'string' || !filePath) return false;
+  const resolved = path.resolve(filePath);
+  const allowed = path.resolve(allowedDir);
+  return resolved.startsWith(allowed + path.sep) || resolved === allowed;
+}
+
+function safeResolveMediaPath(ref) {
+  if (typeof ref !== 'string' || !ref) return null;
+  let filePath = null;
+  if (ref.startsWith('/api/media/uploads/')) {
+    filePath = path.join(UPLOADS_DIR, path.basename(ref));
+  } else if (ref.startsWith('/api/media/')) {
+    filePath = path.join(MEDIA_DIR, path.basename(ref));
+  }
+  if (!filePath) return null;
+  const resolved = path.resolve(filePath);
+  if (!isPathWithinDir(resolved, MEDIA_DIR)) return null;
+  return fs.existsSync(resolved) ? resolved : null;
+}
 
 function buildSshConfig(partial) {
   const password = process.env.COMFY_SSH_PASSWORD;
@@ -59,14 +80,7 @@ function isV2Model(name) {
 
 // 图生图参考图：只接受同源 /api/media 路径，服务端读本地文件，避免任意文件读取
 function resolveMediaRef(ref) {
-  if (typeof ref !== 'string' || !ref) return null;
-  let filePath = null;
-  if (ref.startsWith('/api/media/uploads/')) {
-    filePath = path.join(UPLOADS_DIR, path.basename(ref));
-  } else if (ref.startsWith('/api/media/')) {
-    filePath = path.join(MEDIA_DIR, path.basename(ref));
-  }
-  return filePath && fs.existsSync(filePath) ? filePath : null;
+  return safeResolveMediaPath(ref);
 }
 
 const PROMPT_MAX_CHARS = 20000;
@@ -141,17 +155,17 @@ app.post('/api/chat/completions', async (req, res) => {
     return res.status(400).json({ error: 'Missing required fields: model, messages' });
   }
 
-  const cached = cache.get(model, messages);
-  if (cached) {
-    res.set('X-Cache', 'HIT');
-    return res.json(cached);
-  }
-
   const endpoint = req.headers['x-target-endpoint'] || 'https://api.openai.com/v1';
   const apiKey = req.headers['x-api-key'];
 
   if (!apiKey) {
     return res.status(401).json({ error: 'Missing API key. Send via X-Api-Key header.' });
+  }
+
+  const cached = cache.get(model, messages, endpoint, temperature, response_format);
+  if (cached) {
+    res.set('X-Cache', 'HIT');
+    return res.json(cached);
   }
 
   const url = `${endpoint.replace(/\/+$/, '')}/chat/completions`;
@@ -184,7 +198,7 @@ app.post('/api/chat/completions', async (req, res) => {
     }
 
     const data = await upstream.json();
-    cache.set(model, messages, data);
+    cache.set(model, messages, data, endpoint, temperature, response_format);
 
     res.set('X-Cache', 'MISS');
     res.json(data);
@@ -214,10 +228,12 @@ app.post('/api/generate/image', async (req, res) => {
     const results = [];
     console.log(`[ImageBatch] task=${task.id} starting ${prompts.length} images`);
     for (let i = 0; i < prompts.length; i++) {
+      if (isTaskCancelled(task.id)) break;
       const itemSeed = Array.isArray(seeds) && seeds[i] != null ? seeds[i] : seed;
       const itemRefs = Array.isArray(refs) ? refs[i] : null;
       let lastError = null;
       for (let retry = 0; retry <= 2; retry++) {
+        if (isTaskCancelled(task.id)) { lastError = 'Cancelled'; break; }
         if (retry > 0) {
           console.log(`[ImageBatch] task=${task.id} image ${i + 1} retry ${retry}/2 after 3s`);
           await new Promise(r => setTimeout(r, 3000));
@@ -245,11 +261,14 @@ app.post('/api/generate/image', async (req, res) => {
 
           let pollResult;
           for (let attempt = 0; attempt < 120; attempt++) {
+            if (isTaskCancelled(task.id)) { lastError = 'Cancelled'; break; }
             await new Promise(r => setTimeout(r, 3000));
             pollResult = await pollTask(taskId, apiKey);
             const status = pollResult.output?.task_status;
             if (status === 'SUCCEEDED' || status === 'FAILED') break;
           }
+
+          if (lastError === 'Cancelled') break;
 
           if (pollResult?.output?.task_status === 'SUCCEEDED') {
             const imageUrl = parseImageResultUrl(pollResult);
@@ -275,16 +294,17 @@ app.post('/api/generate/image', async (req, res) => {
           console.log(`[ImageBatch] task=${task.id} image ${i + 1} ERROR: ${err.message}`);
         }
       }
-      if (lastError) {
+      if (lastError && lastError !== 'Cancelled') {
         results.push({ index: i, status: 'error', error: lastError });
       }
     }
 
     const successCount = results.filter(r => r.status === 'ok').length;
-    console.log(`[ImageBatch] task=${task.id} completed: ${successCount}/${prompts.length} succeeded`);
+    const finalStatus = isTaskCancelled(task.id) ? 'cancelled' : 'completed';
+    console.log(`[ImageBatch] task=${task.id} ${finalStatus}: ${successCount}/${prompts.length} succeeded`);
     updateTask(task.id, {
-      status: 'completed',
-      progress: 100,
+      status: finalStatus,
+      progress: finalStatus === 'completed' ? 100 : 0,
       result: { images: results, total: prompts.length, success: successCount }
     });
   })().catch(err => {
@@ -340,6 +360,21 @@ app.post('/api/generate/video', async (req, res) => {
     return res.status(400).json({ error: 'Missing clips array' });
   }
 
+  // Validate upload paths to prevent path traversal
+  if (uploads) {
+    const pathsToCheck = [
+      uploads.firstFrame?.localPath,
+      uploads.lastFrame?.localPath,
+      ...(uploads.referenceImages || []).map(r => r.localPath),
+    ].filter(Boolean);
+
+    for (const p of pathsToCheck) {
+      if (!isPathWithinDir(p, UPLOADS_DIR)) {
+        return res.status(400).json({ error: 'Invalid upload path: must be within uploads directory' });
+      }
+    }
+  }
+
   const hasUploads = uploads && (uploads.firstFrame?.localPath || uploads.referenceImages?.length > 0);
   const mode = hasUploads ? detectVideoMode(uploads) : 'legacy';
   const effectiveModel = model;
@@ -354,10 +389,12 @@ app.post('/api/generate/video', async (req, res) => {
     const results = [];
     console.log(`[VideoBatch] task=${task.id} starting ${clips.length} clips, mode=${mode}, videoMode=${clientMode || 'n/a'}, model=${effectiveModel}`);
     for (let i = 0; i < clips.length; i++) {
+      if (isTaskCancelled(task.id)) break;
       const clip = clips[i];
 
       let lastError = null;
       for (let retry = 0; retry <= 2; retry++) {
+        if (isTaskCancelled(task.id)) { lastError = 'Cancelled'; break; }
         if (retry > 0) {
           console.log(`[VideoBatch] task=${task.id} clip ${i + 1} retry ${retry}/2 after 5s`);
           await new Promise(r => setTimeout(r, 5000));
@@ -461,11 +498,14 @@ app.post('/api/generate/video', async (req, res) => {
 
           let pollResult;
           for (let attempt = 0; attempt < 240; attempt++) {
+            if (isTaskCancelled(task.id)) { lastError = 'Cancelled'; break; }
             await new Promise(r => setTimeout(r, 5000));
             pollResult = await pollTask(taskId, apiKey);
             const status = pollResult.output?.task_status;
             if (status === 'SUCCEEDED' || status === 'FAILED') break;
           }
+
+          if (lastError === 'Cancelled') break;
 
           if (pollResult?.output?.task_status === 'SUCCEEDED') {
             const videoUrl = pollResult.output.video_url;
@@ -491,16 +531,17 @@ app.post('/api/generate/video', async (req, res) => {
           console.log(`[VideoBatch] task=${task.id} clip ${i + 1} ERROR: ${err.message}`);
         }
       }
-      if (lastError) {
+      if (lastError && lastError !== 'Cancelled') {
         results.push({ index: i, status: 'error', error: lastError });
       }
     }
 
     const successCount = results.filter(r => r.status === 'ok').length;
-    console.log(`[VideoBatch] task=${task.id} completed: ${successCount}/${clips.length} succeeded`);
+    const finalStatus = isTaskCancelled(task.id) ? 'cancelled' : 'completed';
+    console.log(`[VideoBatch] task=${task.id} ${finalStatus}: ${successCount}/${clips.length} succeeded`);
     updateTask(task.id, {
-      status: 'completed',
-      progress: 100,
+      status: finalStatus,
+      progress: finalStatus === 'completed' ? 100 : 0,
       result: { clips: results, total: clips.length, success: successCount }
     });
   })().catch(err => {
@@ -528,12 +569,23 @@ app.post('/api/render/final', async (req, res) => {
   (async () => {
     updateTask(task.id, { status: 'running', progress: 10 });
 
+    if (isTaskCancelled(task.id)) {
+      updateTask(task.id, { status: 'cancelled', progress: 0 });
+      return;
+    }
+
     const localPaths = videoPaths.map(p => {
-      if (p.startsWith('/api/media/')) {
-        return path.join(MEDIA_DIR, p.replace('/api/media/', ''));
-      }
-      return path.join(MEDIA_DIR, path.basename(p));
-    });
+      if (typeof p !== 'string' || !p) return null;
+      // Only accept /api/media/ paths and resolve safely
+      const resolved = safeResolveMediaPath(p);
+      if (!resolved) return null;
+      return resolved;
+    }).filter(Boolean);
+
+    if (localPaths.length !== videoPaths.length) {
+      updateTask(task.id, { status: 'failed', error: 'Invalid video path: must be within media directory' });
+      return;
+    }
 
     for (const lp of localPaths) {
       if (!fs.existsSync(lp)) {
@@ -544,14 +596,20 @@ app.post('/api/render/final', async (req, res) => {
 
     updateTask(task.id, { progress: 30 });
 
+    if (isTaskCancelled(task.id)) {
+      updateTask(task.id, { status: 'cancelled', progress: 0 });
+      return;
+    }
+
     const outputFilename = `final_${Date.now()}.mp4`;
     const outputPath = path.join(MEDIA_DIR, outputFilename);
 
     await concatVideos(localPaths, outputPath);
 
+    const finalStatus = isTaskCancelled(task.id) ? 'cancelled' : 'completed';
     updateTask(task.id, {
-      status: 'completed',
-      progress: 100,
+      status: finalStatus,
+      progress: finalStatus === 'completed' ? 100 : 0,
       result: { path: `/api/media/${outputFilename}`, filename: outputFilename }
     });
   })().catch(err => {
@@ -577,11 +635,25 @@ app.post('/api/generate/video-comfy', async (req, res) => {
     return res.status(400).json({ error: 'Missing clips array' });
   }
 
+  // Validate upload paths to prevent path traversal
+  if (uploads?.referenceImages?.length > 0) {
+    for (const ref of uploads.referenceImages) {
+      if (ref.localPath && !isPathWithinDir(ref.localPath, UPLOADS_DIR)) {
+        return res.status(400).json({ error: 'Invalid upload path: must be within uploads directory' });
+      }
+    }
+  }
+
   const task = createTask('video-comfy', { total: clips.length });
 
   (async () => {
     const results = [];
     console.log(`[ComfyUI] task=${task.id} starting ${clips.length} clips`);
+
+    if (isTaskCancelled(task.id)) {
+      updateTask(task.id, { status: 'cancelled', progress: 0 });
+      return;
+    }
 
     try {
       const tunnel = await ensureTunnel(sshConfig);
@@ -592,10 +664,12 @@ app.post('/api/generate/video-comfy', async (req, res) => {
     }
 
     for (let i = 0; i < clips.length; i++) {
+      if (isTaskCancelled(task.id)) break;
       const clip = clips[i];
       let lastError = null;
 
       for (let retry = 0; retry <= 2; retry++) {
+        if (isTaskCancelled(task.id)) { lastError = 'Cancelled'; break; }
         if (retry > 0) {
           console.log(`[ComfyUI] task=${task.id} clip ${i + 1} retry ${retry}/2`);
           await new Promise(r => setTimeout(r, 3000));
@@ -614,47 +688,72 @@ app.post('/api/generate/video-comfy', async (req, res) => {
             }
           }
 
-          const promptId = await submitWorkflow(sshConfig, {
-            prompt: clip.prompt || 'Scene animation',
-            seed: clip.seed ?? Math.floor(Math.random() * 1e15),
-            duration: duration || 5,
-            refImageFiles,
-            enableLightning: enableLightning || false,
-            aspectRatio: aspectRatio || '16:9',
-            megapixels: Number.isFinite(megapixels) ? megapixels : undefined,
-          });
+          const comfyAbort = new AbortController();
+          const cancelWatcher = setInterval(() => {
+            if (isTaskCancelled(task.id)) comfyAbort.abort();
+          }, 1000);
 
-          console.log(`[ComfyUI] task=${task.id} clip ${i + 1} submitted, prompt_id=${promptId}`);
+          let promptId;
+          try {
+            promptId = await submitWorkflow(sshConfig, {
+              prompt: clip.prompt || 'Scene animation',
+              seed: clip.seed ?? Math.floor(Math.random() * 1e15),
+              duration: duration || 5,
+              refImageFiles,
+              enableLightning: enableLightning || false,
+              aspectRatio: aspectRatio || '16:9',
+              megapixels: Number.isFinite(megapixels) ? megapixels : undefined,
+              signal: comfyAbort.signal,
+            });
 
-          const result = await pollUntilDone(sshConfig, promptId, { timeoutMs: 600000 });
+            console.log(`[ComfyUI] task=${task.id} clip ${i + 1} submitted, prompt_id=${promptId}`);
 
-          if (result.status === 'success' && result.outputs.length > 0) {
-            const output = result.outputs[0];
-            const downloaded = await downloadOutput(sshConfig, output, MEDIA_DIR);
-            results.push({ index: i, status: 'ok', path: `/api/media/${downloaded.localName}`, prompt: clip.prompt });
-            console.log(`[ComfyUI] task=${task.id} clip ${i + 1} OK → ${downloaded.localName}`);
-            lastError = null;
-            break;
-          } else {
-            lastError = result.message || 'No output from ComfyUI';
-            console.log(`[ComfyUI] task=${task.id} clip ${i + 1} FAILED: ${lastError}`);
+            const result = await pollUntilDone(sshConfig, promptId, { timeoutMs: 600000, signal: comfyAbort.signal });
+
+            if (comfyAbort.signal.aborted || isTaskCancelled(task.id)) {
+              lastError = 'Cancelled';
+              console.log(`[ComfyUI] task=${task.id} clip ${i + 1} CANCELLED`);
+              break;
+            }
+
+            if (result.status === 'success' && result.outputs.length > 0) {
+              const output = result.outputs[0];
+              const downloaded = await downloadOutput(sshConfig, output, MEDIA_DIR);
+              results.push({ index: i, status: 'ok', path: `/api/media/${downloaded.localName}`, prompt: clip.prompt });
+              console.log(`[ComfyUI] task=${task.id} clip ${i + 1} OK → ${downloaded.localName}`);
+              lastError = null;
+            } else {
+              lastError = result.message || 'No output from ComfyUI';
+              console.log(`[ComfyUI] task=${task.id} clip ${i + 1} FAILED: ${lastError}`);
+            }
+          } finally {
+            clearInterval(cancelWatcher);
           }
+
+          if (lastError === 'Cancelled') break;
+          if (!lastError) break;
         } catch (err) {
+          if (err.name === 'AbortError' || err.message === 'Cancelled') {
+            lastError = 'Cancelled';
+            console.log(`[ComfyUI] task=${task.id} clip ${i + 1} CANCELLED`);
+            break;
+          }
           lastError = err.message;
           console.log(`[ComfyUI] task=${task.id} clip ${i + 1} ERROR: ${err.message}`);
         }
       }
 
-      if (lastError) {
+      if (lastError && lastError !== 'Cancelled') {
         results.push({ index: i, status: 'error', error: lastError });
       }
     }
 
     const successCount = results.filter(r => r.status === 'ok').length;
-    console.log(`[ComfyUI] task=${task.id} completed: ${successCount}/${clips.length} succeeded`);
+    const finalStatus = isTaskCancelled(task.id) ? 'cancelled' : 'completed';
+    console.log(`[ComfyUI] task=${task.id} ${finalStatus}: ${successCount}/${clips.length} succeeded`);
     updateTask(task.id, {
-      status: 'completed',
-      progress: 100,
+      status: finalStatus,
+      progress: finalStatus === 'completed' ? 100 : 0,
       result: { clips: results, total: clips.length, success: successCount }
     });
   })().catch(err => {
@@ -722,6 +821,12 @@ app.get('/api/task/:id', (req, res) => {
   const task = getTask(req.params.id);
   if (!task) return res.status(404).json({ error: 'Task not found' });
   res.json(task);
+});
+
+app.post('/api/task/:id/cancel', (req, res) => {
+  const task = cancelTask(req.params.id);
+  if (!task) return res.status(404).json({ error: 'Task not found' });
+  res.json({ ok: true, status: task.status });
 });
 
 app.get('/api/media/uploads/:filename', (req, res) => {

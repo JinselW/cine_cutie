@@ -53,6 +53,13 @@ export class RunState {
     }
   }
 
+  markRunning() {
+    if (this.#status === RunStatus.INTERRUPTED) {
+      this.#status = RunStatus.RUNNING;
+      this.#updatedAt = Date.now();
+    }
+  }
+
   markCompleted() {
     this.#status = RunStatus.COMPLETED;
     this.#updatedAt = Date.now();

@@ -1,6 +1,7 @@
 import { registerProvider } from './registry.js';
 import { state } from '../state.js';
 import { tierToMp } from '../utils/resolution.js';
+import { registerBackendTask, unregisterBackendTask } from './activeTasks.js';
 
 function getSshConfig() {
   try {
@@ -69,6 +70,7 @@ const comfyUIProvider = {
       };
     }
 
+    let taskId = null;
     try {
       const res = await fetch('/api/generate/video-comfy', {
         method: 'POST',
@@ -87,7 +89,8 @@ const comfyUIProvider = {
         }));
       }
 
-      const { taskId } = await res.json();
+      ({ taskId } = await res.json());
+      registerBackendTask(taskId);
       const startTime = Date.now();
       const MAX_WAIT = 20 * 60 * 1000;
 
@@ -137,9 +140,9 @@ const comfyUIProvider = {
             return { id: item.id, videoPath: '', status: 'failed', error: 'Incomplete results' };
           });
         }
-        if (taskData.status === 'failed') {
+        if (taskData.status === 'failed' || taskData.status === 'cancelled') {
           return items.map(item => ({
-            id: item.id, videoPath: '', status: 'failed', error: taskData.error || 'Generation failed',
+            id: item.id, videoPath: '', status: 'failed', error: taskData.status === 'cancelled' ? 'Cancelled' : (taskData.error || 'Generation failed'),
           }));
         }
       }
@@ -147,6 +150,8 @@ const comfyUIProvider = {
       return items.map(item => ({ id: item.id, videoPath: '', status: 'failed', error: 'Timeout' }));
     } catch (err) {
       return items.map(item => ({ id: item.id, videoPath: '', status: 'failed', error: err.message }));
+    } finally {
+      unregisterBackendTask(taskId);
     }
   },
 };
