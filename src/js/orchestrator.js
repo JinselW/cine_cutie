@@ -286,13 +286,13 @@ class Orchestrator {
     if (validator && data != null) {
       const valid = validator(data);
       if (!valid) {
-        addAgentMessage('⚠️', `Post-gate: ${stepId} output failed structural validation`);
-        return { verdict: QCVerdict.FAIL, issues: ['Structural validation failed'], severity: Severity.HIGH };
+        addAgentMessage('⚠️', t('pipeline.postGateStructural', { stepId }));
+        return { verdict: QCVerdict.FAIL, issues: [t('pipeline.structuralFailed')], severity: Severity.HIGH };
       }
     }
 
     if (data == null) {
-      return { verdict: QCVerdict.FAIL, issues: ['No data produced'], severity: Severity.CRITICAL };
+      return { verdict: QCVerdict.FAIL, issues: [t('pipeline.noDataProduced')], severity: Severity.CRITICAL };
     }
 
     if (metadata.verdict === QCVerdict.FAIL || artifactStatus === ArtifactStatus.FAILED) {
@@ -306,18 +306,18 @@ class Orchestrator {
     const consistencyResult = checkConsistency(stepId, data, state.entities || {});
 
     if (consistencyResult.verdict === QCVerdict.FAIL) {
-      addAgentMessage('⚠️', `Post-gate: ${stepId} consistency check failed — ${consistencyResult.issues.join('; ')}`);
+      addAgentMessage('⚠️', t('pipeline.consistencyFailed', { stepId, issues: consistencyResult.issues.join('; ') }));
     } else if (consistencyResult.verdict === QCVerdict.CONDITIONAL_PASS) {
-      addAgentMessage('⚠️', `Post-gate: ${stepId} consistency warnings — ${consistencyResult.issues.join('; ')}`);
+      addAgentMessage('⚠️', t('pipeline.consistencyWarnings', { stepId, issues: consistencyResult.issues.join('; ') }));
     }
 
     const ipResult = getIPComplianceAgent().checkStepOutput(stepId, data);
     if (ipResult.verdict === QCVerdict.FAIL) {
-      addAgentMessage('🛑', `IP Compliance: ${ipResult.issues.join('; ')}`);
+      addAgentMessage('🛑', t('pipeline.ipCompliance', { issues: ipResult.issues.join('; ') }));
       return ipResult;
     }
     if (ipResult.verdict === QCVerdict.CONDITIONAL_PASS) {
-      addAgentMessage('⚠️', `IP Compliance: ${ipResult.issues.join('; ')}`);
+      addAgentMessage('⚠️', t('pipeline.ipCompliance', { issues: ipResult.issues.join('; ') }));
       if (consistencyResult.verdict === QCVerdict.PASS) {
         return ipResult;
       }

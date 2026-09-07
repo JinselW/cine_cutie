@@ -56,7 +56,7 @@ function populateModelSelect(selectEl, presets, currentProvider, currentName, in
     if (includeComfy) {
       const comfyOpt = document.createElement('option');
       comfyOpt.value = COMFY_MODEL;
-      comfyOpt.textContent = 'ComfyUI (DGX Spark / H3)';
+      comfyOpt.textContent = t('settings.comfyUIOption');
       if (currentName === COMFY_MODEL) comfyOpt.selected = true;
       selectEl.appendChild(comfyOpt);
     }

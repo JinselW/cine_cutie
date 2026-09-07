@@ -356,7 +356,7 @@ export function renderPostProduction(data, onAdvance, readOnly = false) {
             <video src="${mediaUrl(data.finalVideo)}" controls style="width:100%;max-width:800px;border-radius:var(--radius-xs);margin-bottom:16px;background:#000"></video>
             <a href="${mediaUrl(data.finalVideo)}" download class="action-btn primary">${t('ui.postProdDownload')}</a>
           </div>`
-        : `<div style="color:var(--cream3);font-size:0.85rem;text-align:center;padding:40px 0">${data.status === 'no-clips' ? 'No video clips available' : data.status === 'failed' ? 'Render failed' : '—'}</div>`}
+        : `<div style="color:var(--cream3);font-size:0.85rem;text-align:center;padding:40px 0">${data.status === 'no-clips' ? t('ui.postProdNoClips') : data.status === 'failed' ? t('ui.postProdFailed') : '—'}</div>`}
     </div>
     ${readOnly ? '' : '<div class="action-row" id="actionRow"></div>'}
   `;
@@ -400,7 +400,7 @@ export function renderExecutionLog() {
     const tokensTotal = entry.tokens.prompt + entry.tokens.completion;
     const tokensDisplay = tokensTotal > 0 ? tokensTotal.toLocaleString() : '—';
     const retryDisplay = entry.retryCount > 0 ? entry.retryCount : '—';
-    const fallbackBadge = entry.fallbackUsed ? '<span class="log-badge fallback">FALLBACK</span>' : '';
+    const fallbackBadge = entry.fallbackUsed ? `<span class="log-badge fallback">${t('log.fallback').toUpperCase()}</span>` : '';
 
     rows += `
       <tr>
