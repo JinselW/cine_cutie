@@ -27,6 +27,8 @@ async function harness(mode = 'auto') {
   }
   const render = (result, advance) => calls.renders.push({ result, advance });
   const exports = {
+    configureMemory: () => {}, beginMemory: async () => {},
+    saveMemory: async status => { calls.memoryStatus = status; }, recordMemoryMessage: () => {},
     STEPS, dataKeyOf, state, ArtifactStore, ArtifactStatus, createArtifact,
     ExecutionCheckpoint, RunState, CancellationToken, QCVerdict, Severity,
     t: key => key, sleep: async () => {}, isConfigured: () => true,
@@ -74,6 +76,7 @@ for (const mode of ['auto', 'interactive']) {
       await h.api.startPipeline();
       assert.equal(h.orchestrator.artifactStore.getLatestByStep('script').status, ArtifactStatus.FAILED);
       assert.equal(h.orchestrator.runState.status, 'interrupted');
+      assert.equal(h.calls.memoryStatus, 'failed');
       assert.deepEqual(h.orchestrator.runState.completedSteps, []);
       assert.equal(h.orchestrator.checkpoint.has('script'), false);
       assert.equal(h.state.data.script, undefined);

@@ -1,0 +1,15 @@
+.history-dialog{margin:auto;width:min(1150px,95vw);height:88vh;max-height:94vh;border:1px solid var(--glass-border);border-radius:var(--radius);background:var(--bg2);color:var(--cream);padding:24px}
+.history-dialog::backdrop{background:rgba(0,0,0,.7)}
+.history-dialog header,.history-tools{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px}
+.history-dialog header{justify-content:space-between}.history-dialog h4{margin:16px 0 8px}
+.history-note,.history-status{font-size:.82rem;color:var(--cream3);margin-bottom:12px}
+.history-tools input{flex:1;min-width:150px;background:var(--bg3);color:var(--cream);border:1px solid var(--glass-border);border-radius:8px;padding:10px;font:inherit}
+.history-layout{display:grid;grid-template-columns:260px minmax(0,1fr);gap:22px}.history-layout nav{display:flex;flex-direction:column;gap:8px}
+.history-card{display:block;width:100%;text-align:left;background:var(--bg3);color:var(--cream);border:1px solid var(--glass-border);padding:14px;border-radius:10px;cursor:pointer;font:inherit;overflow-wrap:anywhere}
+.history-card span{display:block;font-size:.75rem;color:var(--cream3);margin-top:5px}.history-card.selected{border-color:var(--gold)}
+.history-dialog details{margin:14px 0;border:1px solid var(--glass-border);border-radius:8px;padding:12px}.history-dialog summary{cursor:pointer;color:var(--gold)}
+.history-dialog pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:.8rem;margin-top:12px;max-height:450px;overflow:auto}
+.history-text{white-space:pre-wrap;overflow-wrap:anywhere;margin:12px 0}.history-media{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin-top:10px}
+.history-media img,.history-media video,.history-media audio{width:100%;max-height:280px;object-fit:contain}.history-media a{color:var(--gold);font-size:.8rem}
+.memory-notice{background:var(--bg3);color:var(--rose);border:1px solid var(--rose);border-radius:8px;padding:10px;width:100%;cursor:pointer}
+@media(max-width:700px){.history-layout{grid-template-columns:1fr}.history-layout nav{max-height:230px;overflow:auto}.history-dialog{padding:14px}}

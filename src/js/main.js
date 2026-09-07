@@ -1,4 +1,5 @@
 import './providers/template.js';
+import { initHistory } from './ui/history.js';
 import './providers/llm.js';
 import './providers/image.js';
 import './providers/video.js';
@@ -26,6 +27,7 @@ const savedLang = localStorage.getItem('cine-cutie-lang');
 if (savedLang) state.lang = savedLang;
 applyLang();
 initSettings();
+initHistory();
 
 $('#themeToggle').addEventListener('click', () => {
   state.theme = state.theme === 'dark' ? 'light' : 'dark';

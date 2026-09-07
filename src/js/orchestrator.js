@@ -1,4 +1,5 @@
 import { STEPS, dataKeyOf } from './config.js';
+import { configureMemory, beginMemory, saveMemory, recordMemoryMessage } from './memory.js';
 import { state } from './state.js';
 import { t } from './i18n.js';
 import {
@@ -70,6 +71,7 @@ class Orchestrator {
     registerAgent('videoGeneration', new VideoAgent());
     registerAgent('postProduction', new EditorAgent());
     initObservability(this.#store);
+    configureMemory(() => ({ artifacts: this.#store.snapshot(), checkpoint: this.#checkpoint.snapshot(), runState: this.#runState.snapshot() }));
   }
 
   get artifactStore() {
@@ -95,7 +97,15 @@ class Orchestrator {
     this.#runState.startPipeline();
     this.#token = new CancellationToken();
     resetLog();
-    await this.#advanceStep();
+    for (const key of Object.keys(state.data)) state.data[key] = null;
+    state.entities = {};
+    await beginMemory();
+    try { await this.#advanceStep(); }
+    catch (error) {
+      recordMemoryMessage('system', error.message);
+      await saveMemory('failed');
+      throw error;
+    }
   }
 
   async #advanceStep() {
@@ -105,6 +115,7 @@ class Orchestrator {
       state.viewingStep = null;
       this.#runState.markCompleted();
       this.#runState.persist();
+      await saveMemory('completed');
       showCompletion();
       return;
     }
@@ -127,10 +138,14 @@ class Orchestrator {
       ]);
     } catch (err) {
       if (err instanceof StageGateError) {
-        this.#failStage(step, err);
+        await this.#failStage(step, err);
         return;
       }
-      if (!state.stopped) throw err;
+      if (!state.stopped) {
+        recordMemoryMessage('system', err.message, step.id);
+        await saveMemory('failed');
+        throw err;
+      }
       this.#runState.markInterrupted();
       this.#runState.persist();
       this.#checkpoint.persist();
@@ -158,6 +173,8 @@ class Orchestrator {
     this.#runState.completeStep(step.id);
     this.#runState.persist();
     this.#checkpoint.persist();
+
+    await saveMemory('running');
 
     if (state.viewingStep !== null) {
       if (state.mode === 'auto') {
@@ -235,9 +252,10 @@ class Orchestrator {
     return ctx;
   }
 
-  #failStage(step, error) {
+  async #failStage(step, error) {
     cancelAutoAdvance();
-    this.stopPipeline();
+    recordMemoryMessage('system', error.message, step.id);
+    await this.stopPipeline('failed');
     const anim = getGenAnim();
     if (anim) anim.stop();
     setGenAnim(null);
@@ -302,6 +320,7 @@ class Orchestrator {
     if (state.stopped) return;
     const stepIndex = STEPS.findIndex(s => s.id === stepId);
     if (stepIndex < 0) return;
+    recordMemoryMessage('user', feedback, stepId);
 
     updatePipeline(stepIndex, 'active');
     const step = STEPS[stepIndex];
@@ -321,10 +340,14 @@ class Orchestrator {
       ]);
     } catch (err) {
       if (err instanceof StageGateError) {
-        this.#failStage(step, err);
+        await this.#failStage(step, err);
         return;
       }
-      if (!state.stopped) throw err;
+      if (!state.stopped) {
+        recordMemoryMessage('system', err.message, stepId);
+        await saveMemory('failed');
+        throw err;
+      }
       return;
     }
 
@@ -337,6 +360,7 @@ class Orchestrator {
     state.stepRunning = false;
 
     state.data[dataKeyOf(step)] = result;
+    await saveMemory();
     updatePipeline(stepIndex, 'done');
 
     addAgentMessage(step.icon, t('ui.revisionComplete'));
@@ -431,6 +455,7 @@ class Orchestrator {
     state.currentStep = stepIndex;
     this.#runState.persist();
     this.#checkpoint.persist();
+    await saveMemory();
   }
 
   restoreSession() {
@@ -459,19 +484,22 @@ class Orchestrator {
   pausePipeline() {
     this.#token?.pause();
     state.paused = true;
+    saveMemory('paused');
   }
 
   resumePipeline() {
     this.#token?.resume();
     state.paused = false;
+    saveMemory('running');
   }
 
-  stopPipeline() {
+  stopPipeline(status = 'stopped') {
     this.#token?.cancel();
     state.stopped = true;
     this.#runState.markInterrupted();
     this.#runState.persist();
     this.#checkpoint.persist();
+    return saveMemory(status);
   }
 }
 

@@ -2,6 +2,7 @@ import 'dotenv/config';
 import express from 'express';
 import multer from 'multer';
 import mammoth from 'mammoth';
+import { createMemoryRouter } from './memory.js';
 import { LRUCache } from './cache.js';
 import { submitImageTask, submitImageEditTask, parseImageResultUrl, submitVideoTask, submitVideoTaskV2, pollTask, downloadFile, detectVideoMode, fileToDataUri } from './dashscope.js';
 import { createTask, getTask, updateTask } from './tasks.js';
@@ -120,6 +121,7 @@ async function extractPromptText(file) {
 }
 
 app.use(express.json({ limit: '10mb' }));
+app.use('/api/memory', createMemoryRouter(path.join(__dirname, '..', 'data', 'memory')));
 
 app.use((req, res, next) => {
   const start = Date.now();

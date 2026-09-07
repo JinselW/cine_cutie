@@ -222,6 +222,9 @@ export function stopGeneration() {
 }
 
 export function addAgentMessage(icon, text) {
+  if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+    window.dispatchEvent(new CustomEvent('agent-memory-message', { detail: { icon, text } }));
+  }
   _allCurrentMsgs.push({ icon, text });
   if (state.viewingStep !== null && state.stepRunning) {
     _msgBuffer.push({ icon, text });
