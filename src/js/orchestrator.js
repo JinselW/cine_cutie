@@ -3,11 +3,11 @@ import { state } from './state.js';
 import { t } from './i18n.js';
 import {
   updatePipeline, showGenerating, addAgentMessage, setGenAnim,
-  clearCurrentMessages, waitForResume, getGenAnim, setPipelineControls,
+  clearCurrentMessages, waitForResume, getGenAnim, setPipelineControls, showPipelineFailure,
 } from './ui/render.js';
 import {
   renderScript, renderCharacterDesign, renderStoryboard,
-  renderReferenceImages, renderVideoGeneration, renderPostProduction,
+  renderReferenceImages, renderVideoGeneration, renderPostProduction, cancelAutoAdvance,
 } from './ui/views.js';
 import { showCompletion } from './navigation.js';
 import { sleep } from './utils.js';
@@ -27,7 +27,7 @@ import { QCVerdict, Severity } from './agents/qcTypes.js';
 import { validateScript } from './agents/scriptAgent.js';
 import { validateStoryboard } from './agents/storyboardAgent.js';
 import { ExecutionCheckpoint } from './orchestrator/executionCheckpoint.js';
-import { RunState, RunStatus } from './orchestrator/runState.js';
+import { RunState } from './orchestrator/runState.js';
 import { CancellationToken } from './orchestrator/cancellationToken.js';
 import { registerAgent, resolveAgent } from './orchestrator/agentRegistry.js';
 
@@ -48,6 +48,13 @@ const POST_VALIDATORS = {
   videoGeneration: (d) => d && Array.isArray(d.clips),
   postProduction: (d) => d && typeof d === 'object' && 'finalVideo' in d,
 };
+
+class StageGateError extends Error {
+  constructor(gate) {
+    super(gate.issues.join('; '));
+    this.issues = gate.issues;
+  }
+}
 
 class Orchestrator {
   #store = new ArtifactStore();
@@ -92,6 +99,7 @@ class Orchestrator {
   }
 
   async #advanceStep() {
+    if (state.stopped) return;
     state.currentStep++;
     if (state.currentStep >= STEPS.length) {
       state.viewingStep = null;
@@ -118,6 +126,10 @@ class Orchestrator {
         sleep(delay),
       ]);
     } catch (err) {
+      if (err instanceof StageGateError) {
+        this.#failStage(step, err);
+        return;
+      }
       if (!state.stopped) throw err;
       this.#runState.markInterrupted();
       this.#runState.persist();
@@ -170,11 +182,11 @@ class Orchestrator {
       const data = result.artifacts?.[0]?.data ?? null;
       const metadata = result.metadata ?? {};
 
-      const gateResult = this.#postGate(step.id, data, metadata);
+      const gateResult = this.#postGate(step.id, data, metadata, result.artifacts?.[0]?.status);
 
       if (result.artifacts?.[0]) {
         const artifact = result.artifacts[0];
-        if (gateResult.verdict === QCVerdict.FAIL && gateResult.severity >= Severity.HIGH) {
+        if (gateResult.verdict === QCVerdict.FAIL) {
           artifact.status = ArtifactStatus.FAILED;
         }
         artifact.metrics = {
@@ -187,6 +199,8 @@ class Orchestrator {
           provenance: { agent: agentName },
         });
       }
+
+      if (gateResult.verdict === QCVerdict.FAIL) throw new StageGateError(gateResult);
 
       const committedArtifact = result.artifacts?.[0];
       if (committedArtifact && committedArtifact.status !== ArtifactStatus.STALE) {
@@ -221,7 +235,20 @@ class Orchestrator {
     return ctx;
   }
 
-  #postGate(stepId, data, metadata) {
+  #failStage(step, error) {
+    cancelAutoAdvance();
+    this.stopPipeline();
+    const anim = getGenAnim();
+    if (anim) anim.stop();
+    setGenAnim(null);
+    state.stepRunning = false;
+    state.paused = false;
+    state.viewingStep = null;
+    updatePipeline(STEPS.findIndex(s => s.id === step.id), 'failed');
+    showPipelineFailure(error.issues);
+  }
+
+  #postGate(stepId, data, metadata, artifactStatus) {
     const validator = POST_VALIDATORS[stepId];
     if (validator && data != null) {
       const valid = validator(data);
@@ -233,6 +260,14 @@ class Orchestrator {
 
     if (data == null) {
       return { verdict: QCVerdict.FAIL, issues: ['No data produced'], severity: Severity.CRITICAL };
+    }
+
+    if (metadata.verdict === QCVerdict.FAIL || artifactStatus === ArtifactStatus.FAILED) {
+      return {
+        verdict: QCVerdict.FAIL,
+        issues: metadata.consistencyIssues?.length ? metadata.consistencyIssues : [t('ui.stageOutputFailed')],
+        severity: Severity.HIGH,
+      };
     }
 
     const consistencyResult = checkConsistency(stepId, data, state.entities || {});
@@ -264,6 +299,7 @@ class Orchestrator {
   }
 
   async reviseStep(stepId, feedback) {
+    if (state.stopped) return;
     const stepIndex = STEPS.findIndex(s => s.id === stepId);
     if (stepIndex < 0) return;
 
@@ -284,6 +320,10 @@ class Orchestrator {
         sleep(delay),
       ]);
     } catch (err) {
+      if (err instanceof StageGateError) {
+        this.#failStage(step, err);
+        return;
+      }
       if (!state.stopped) throw err;
       return;
     }
@@ -319,11 +359,11 @@ class Orchestrator {
       const data = result.artifacts?.[0]?.data ?? null;
       const metadata = result.metadata ?? {};
 
-      const gateResult = this.#postGate(step.id, data, metadata);
+      const gateResult = this.#postGate(step.id, data, metadata, result.artifacts?.[0]?.status);
 
       if (result.artifacts?.[0]) {
         const artifact = result.artifacts[0];
-        if (gateResult.verdict === QCVerdict.FAIL && gateResult.severity >= Severity.HIGH) {
+        if (gateResult.verdict === QCVerdict.FAIL) {
           artifact.status = ArtifactStatus.FAILED;
         }
         artifact.metrics = {
@@ -335,8 +375,10 @@ class Orchestrator {
         this.#store.commit(artifact, {
           provenance: { agent: agentName, revision: true },
         });
-        this.#store.markDownstreamStale(artifact.id);
+        if (gateResult.verdict !== QCVerdict.FAIL) this.#store.markDownstreamStale(artifact.id);
       }
+
+      if (gateResult.verdict === QCVerdict.FAIL) throw new StageGateError(gateResult);
 
       const committedArtifact = result.artifacts?.[0];
       if (committedArtifact && committedArtifact.status !== ArtifactStatus.STALE) {

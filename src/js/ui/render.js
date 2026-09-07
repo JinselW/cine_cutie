@@ -56,12 +56,16 @@ export function updatePipeline(step, status) {
     const node = $(`#pipe${i}`);
     if (!node) continue;
     const line = $(`#line${i}`);
-    node.classList.remove('active', 'done');
+    node.classList.remove('active', 'done', 'failed');
     if (i < step) {
       node.classList.add('done');
       if (line) line.classList.add('done');
     } else if (i === step) {
       if (status === 'active') node.classList.add('active');
+      if (status === 'failed') {
+        node.classList.add('failed');
+        if (line) line.classList.remove('done');
+      }
       if (status === 'done') {
         node.classList.add('done');
         if (line) line.classList.add('done');
@@ -78,6 +82,17 @@ export function updatePipeline(step, status) {
     }
     if (i === state.currentStep && state.viewingStep !== null) node.classList.add('clickable');
   }
+}
+
+export function showPipelineFailure(issues) {
+  $('#stepContent').innerHTML = `
+    <div class="gen-status" style="text-align:center">
+      <div class="msg">${t('ui.stageBlocked')}</div>
+      <ul>${issues.map(issue => `<li>${escapeHtml(issue)}</li>`).join('')}</ul>
+      <button class="action-btn primary" id="failedBackBtn">${t('ui.backToInput')}</button>
+    </div>`;
+  $('#failedBackBtn').addEventListener('click', stopGeneration);
+  setMascot(null);
 }
 
 export function setMascot(mood) {

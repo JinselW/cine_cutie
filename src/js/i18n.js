@@ -70,6 +70,9 @@ const en = {
   'ui.resume': 'Resume',
   'ui.stop': 'Stop',
   'ui.stepPaused': 'Paused',
+  'ui.stageBlocked': 'This step failed validation. The pipeline has stopped.',
+  'ui.stageOutputFailed': 'Generation or quality validation failed.',
+  'ui.backToInput': 'Back to input',
   'ui.sessionRestored': 'Restored your previous unfinished session — review it or start a new one',
 
   'ui.planningTitle': 'Creative Direction',
@@ -341,6 +344,9 @@ const zh = {
   'ui.resume': '继续',
   'ui.stop': '停止',
   'ui.stepPaused': '已暂停',
+  'ui.stageBlocked': '当前步骤未通过检查，流程已停止。',
+  'ui.stageOutputFailed': '生成结果或质量检查失败。',
+  'ui.backToInput': '返回创作输入',
   'ui.sessionRestored': '已恢复上次未完成的会话，可查看进度或重新开拍',
 
   'ui.planningTitle': '创意方向',
