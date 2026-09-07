@@ -91,7 +91,7 @@ export function initHistory() {
           return `<details open><summary>${esc(step.icon)} ${esc(t(step.labelKey))}</summary><div class="history-media">${mediaHtml(data)}</div><pre>${esc(JSON.stringify(data, null, 2))}</pre></details>`;
         }).join('')}
         <details><summary>${t('history.sessionMessages', { count: snap.messages?.length || 0 })}</summary>${(snap.messages || []).map(m => `<p class="history-text"><small>${esc(time(m.at))} · ${esc(m.role)} ${esc(m.stepId || '')}</small><br>${esc(m.text)}</p>`).join('')}</details>
-        <details><summary>${t('history.fullSnapshot')}</summary><pre>${esc(JSON.stringify({ configuration: snap.configuration, entities: snap.entities, artifacts: snap.artifacts, checkpoint: snap.checkpoint, runState: snap.runState }, null, 2))}</pre></details>`;
+        <details><summary>${t('history.fullSnapshot')}</summary><pre>${esc(JSON.stringify({ configuration: snap.configuration, entities: snap.entities, acceptedByStep: snap.acceptedByStep, artifacts: snap.artifacts, checkpoint: snap.checkpoint, runState: snap.runState }, null, 2))}</pre></details>`;
       detail.querySelector('[data-export]').onclick = () => {
         const url = URL.createObjectURL(new Blob([JSON.stringify(record, null, 2)], { type: 'application/json' }));
         const a = document.createElement('a'); a.href = url; a.download = `cine-cutie-${id}.json`; a.click();

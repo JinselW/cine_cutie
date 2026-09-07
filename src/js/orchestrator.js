@@ -1,6 +1,6 @@
-import { STEPS, dataKeyOf } from './config.js';
+import { STEPS, dataKeyOf, producerStepOfDataKey } from './config.js';
 import { configureMemory, beginMemory, saveMemory, recordMemoryMessage } from './memory.js';
-import { state } from './state.js';
+import { state, resetState } from './state.js';
 import { t } from './i18n.js';
 import {
   updatePipeline, showGenerating, addAgentMessage, setGenAnim,
@@ -23,7 +23,7 @@ import { VideoAgent } from './agents/videoAgent.js';
 import { EditorAgent } from './agents/editorAgent.js';
 import { getIPComplianceAgent } from './agents/ipComplianceAgent.js';
 import { ArtifactStore } from './artifacts/artifactStore.js';
-import { ArtifactStatus, createArtifact } from './artifacts/artifactTypes.js';
+import { ArtifactStatus, StaleReasonCode, createArtifact } from './artifacts/artifactTypes.js';
 import { extractEntities, mergeEntities, buildConsistencyConstraints, checkConsistency } from './agents/qcConsistency.js';
 import { QCVerdict, Severity } from './agents/qcTypes.js';
 import { validateScript } from './agents/scriptAgent.js';
@@ -32,6 +32,9 @@ import { ExecutionCheckpoint } from './orchestrator/executionCheckpoint.js';
 import { RunState } from './orchestrator/runState.js';
 import { CancellationToken } from './orchestrator/cancellationToken.js';
 import { registerAgent, resolveAgent } from './orchestrator/agentRegistry.js';
+import {
+  buildWorkflowSnapshot, clearPersistedWorkflow, loadPersistedWorkflow, persistWorkflowSnapshot,
+} from './orchestrator/workflowSnapshot.js';
 import { cancelAllBackendTasks } from './providers/activeTasks.js';
 
 const RENDERERS = {
@@ -52,11 +55,38 @@ const POST_VALIDATORS = {
   postProduction: (d) => d && typeof d === 'object' && 'finalVideo' in d,
 };
 
+// A historical version can be adopted again even though it is no longer current.
+const ROLLBACKABLE_STATUSES = [ArtifactStatus.COMPLETE, ArtifactStatus.SUPERSEDED, ArtifactStatus.STALE];
+const DEFAULT_ROLLBACK_STATUSES = [ArtifactStatus.COMPLETE, ArtifactStatus.SUPERSEDED];
+
 class StageGateError extends Error {
   constructor(gate) {
     super(gate.issues.join('; '));
     this.issues = gate.issues;
   }
+}
+
+// Running a step without an adopted upstream version would produce an artifact
+// whose dependencies cannot be recorded, so the step is refused instead.
+class MissingUpstreamError extends StageGateError {
+  constructor(stepId, missingKeys) {
+    super({ issues: [t('pipeline.missingUpstream', { stepId, dataKeys: missingKeys.join(', ') })] });
+    this.name = 'MissingUpstreamError';
+    this.stepId = stepId;
+    this.missingKeys = missingKeys;
+  }
+}
+
+function mergeSourceIds(agentSourceIds, ctx) {
+  const ids = [...(agentSourceIds ?? [])];
+  for (const id of Object.values(ctx?.sourceArtifactIds ?? {})) {
+    if (id && !ids.includes(id)) ids.push(id);
+  }
+  return ids;
+}
+
+function stepIndexOf(stepId) {
+  return STEPS.findIndex(step => step.id === stepId);
 }
 
 class Orchestrator {
@@ -73,7 +103,12 @@ class Orchestrator {
     registerAgent('videoGeneration', new VideoAgent());
     registerAgent('postProduction', new EditorAgent());
     initObservability(this.#store);
-    configureMemory(() => ({ artifacts: this.#store.snapshot(), checkpoint: this.#checkpoint.snapshot(), runState: this.#runState.snapshot() }));
+    configureMemory(() => ({
+      artifacts: this.#store.snapshot(),
+      acceptedByStep: this.#store.snapshotAccepted(),
+      checkpoint: this.#checkpoint.snapshot(),
+      runState: this.#runState.snapshot(),
+    }));
   }
 
   get artifactStore() {
@@ -95,7 +130,7 @@ class Orchestrator {
     state.paused = false;
     this.#store.clear();
     this.#checkpoint.clear();
-    this.#checkpoint.clearPersisted();
+    clearPersistedWorkflow();
     this.#runState.startPipeline();
     this.#token = new CancellationToken();
     resetLog();
@@ -118,7 +153,7 @@ class Orchestrator {
     if (state.currentStep >= STEPS.length) {
       state.viewingStep = null;
       this.#runState.markCompleted();
-      this.#runState.persist();
+      this.#persistWorkflow();
       await saveMemory('completed');
       showCompletion();
       return;
@@ -134,10 +169,10 @@ class Orchestrator {
     state.stepRunning = true;
 
     const delay = isConfigured() ? 0 : (3000 + Math.random() * 2000);
-    let result;
+    let data;
     try {
-      [result] = await Promise.all([
-        this.#runMigratedStep(step),
+      [data] = await Promise.all([
+        this.#runAgentStep(step),
         sleep(delay),
       ]);
     } catch (err) {
@@ -151,16 +186,14 @@ class Orchestrator {
         throw err;
       }
       this.#runState.markInterrupted();
-      this.#runState.persist();
-      this.#checkpoint.persist();
+      this.#persistWorkflow();
       return;
     }
 
     await waitForResume();
     if (state.stopped) {
       this.#runState.markInterrupted();
-      this.#runState.persist();
-      this.#checkpoint.persist();
+      this.#persistWorkflow();
       return;
     }
 
@@ -169,14 +202,8 @@ class Orchestrator {
     setGenAnim(null);
     state.stepRunning = false;
 
-    const dataKey = dataKeyOf(step);
-    state.data[dataKey] = result;
     updatePipeline(state.currentStep, 'done');
-
-    this.#checkpoint.save(step.id, { stepIndex: state.currentStep, dataKey, result });
-    this.#runState.completeStep(step.id);
-    this.#runState.persist();
-    this.#checkpoint.persist();
+    this.#persistWorkflow();
 
     await saveMemory('running');
 
@@ -190,81 +217,149 @@ class Orchestrator {
       return;
     }
 
-    this.#renderStep(step.id, result, onAdvance);
+    this.#renderStep(step.id, data, onAdvance);
   }
 
-  async #runMigratedStep(step) {
+  // Generation and revision share one path: build context from adopted upstream
+  // versions, run the agent, gate the output, then adopt or reject it atomically.
+  async #runAgentStep(step, feedback = null) {
     const agent = resolveAgent(step.id);
     const agentName = step.agent || 'Agent';
     logStepStart(step.id, agentName);
 
     try {
       const ctx = this.#buildContext(step);
-      const result = await agent.process(ctx, this.#token);
-
-      const data = result.artifacts?.[0]?.data ?? null;
-      const metadata = result.metadata ?? {};
-
-      const gateResult = this.#postGate(step.id, data, metadata, result.artifacts?.[0]?.status);
-
-      if (result.artifacts?.[0]) {
-        const artifact = result.artifacts[0];
-        if (gateResult.verdict === QCVerdict.FAIL) {
-          artifact.status = ArtifactStatus.FAILED;
-        }
-        artifact.metrics = {
-          tokens: metadata.tokens || { prompt: 0, completion: 0 },
-          qualityScore: metadata.qualityScore ?? null,
-          retries: metadata.retries ?? 0,
-          fallbackUsed: metadata.fallbackUsed ?? false,
-        };
-        
-        const oldArtifact = this.#store.getLatestValidByStep(step.id);
-        this.#store.commit(artifact, {
-          provenance: { agent: agentName },
-        });
-        
-        if (oldArtifact && oldArtifact.id !== artifact.id) {
-          this.#store.markDownstreamStale(oldArtifact.id);
-        }
+      if (feedback != null) {
+        ctx.feedback = feedback;
+        ctx.previousResult = this.#store.getAcceptedByStep(step.id)?.data ?? null;
       }
+
+      const result = await agent.process(ctx, this.#token);
+      const artifact = result.artifacts?.[0] ?? null;
+      const data = artifact?.data ?? null;
+      const metadata = result.metadata ?? {};
+      const gateResult = this.#postGate(step.id, data, metadata, artifact?.status);
+
+      this.#commitResult(step, artifact, { gateResult, metadata, agentName, revision: feedback != null, ctx });
 
       if (gateResult.verdict === QCVerdict.FAIL) throw new StageGateError(gateResult);
-
-      const committedArtifact = result.artifacts?.[0];
-      if (committedArtifact && committedArtifact.status !== ArtifactStatus.STALE) {
-        const newEntities = extractEntities(step.id, data);
-        if (newEntities) {
-          state.entities = mergeEntities(state.entities, newEntities);
-        }
-      }
-
       return data;
     } finally {
       logStepComplete();
     }
   }
 
-  #buildContext(step) {
-    const keys = step.contextKeys || [];
-    const d = state.data;
-    const constraints = buildConsistencyConstraints(state.entities);
+  // Adopts a generated artifact or records it as failed. Only adoption supersedes
+  // the previous version, invalidates downstream steps and moves the checkpoint.
+  #commitResult(step, artifact, { gateResult, metadata, agentName, revision, ctx }) {
+    if (!artifact) return null;
+    const stepIndex = stepIndexOf(step.id);
+    const failed = gateResult.verdict === QCVerdict.FAIL;
 
+    artifact.status = failed ? ArtifactStatus.FAILED : ArtifactStatus.COMPLETE;
+    artifact.metrics = {
+      tokens: metadata.tokens || { prompt: 0, completion: 0 },
+      qualityScore: metadata.qualityScore ?? null,
+      retries: metadata.retries ?? 0,
+      fallbackUsed: metadata.fallbackUsed ?? false,
+    };
+    artifact.sourceArtifactIds = mergeSourceIds(artifact.sourceArtifactIds, ctx);
+    artifact.parentArtifactId = artifact.parentArtifactId ?? this.#store.lineageHeadId(step.id);
+    this.#store.commit(artifact, { provenance: { agent: agentName, revision } });
+
+    if (failed) {
+      this.#persistWorkflow();
+      return { accepted: false, artifact, staleStepIds: [] };
+    }
+
+    const change = this.#store.replaceAcceptedArtifact(artifact.id);
+    state.data[dataKeyOf(step)] = artifact.data;
+    this.#rebuildEntities();
+    this.#checkpoint.save(step.id, { stepIndex, acceptedArtifactId: artifact.id });
+    this.#runState.completeStep(step.id);
+    const staleStepIds = this.#invalidateStaleSteps(change?.staleArtifactIds ?? []);
+    this.#persistWorkflow();
+
+    return { accepted: true, artifact, change, staleStepIds };
+  }
+
+  #buildContext(step) {
     const ctx = {
       userInput: state.userInput,
       promptDoc: state.promptDoc?.text || '',
       genre: state.genre,
       totalDuration: state.totalDuration,
-      constraints,
+      constraints: buildConsistencyConstraints(state.entities),
       entities: state.entities || {},
       sourceArtifactIds: {},
     };
-    for (const key of keys) {
-      if (d[key] != null) ctx[key] = d[key];
-      const artifact = this.#store.getLatestValidByStep(key);
-      if (artifact) ctx.sourceArtifactIds[key] = artifact.id;
+
+    const missing = [];
+    for (const dataKey of step.contextKeys || []) {
+      const artifact = this.#store.getAcceptedByStep(producerStepOfDataKey(dataKey));
+      if (!artifact) {
+        missing.push(dataKey);
+        continue;
+      }
+      ctx[dataKey] = artifact.data;
+      ctx.sourceArtifactIds[dataKey] = artifact.id;
     }
+    if (missing.length > 0) throw new MissingUpstreamError(step.id, missing);
+
     return ctx;
+  }
+
+  // Steps that consumed the replaced version stop being valid results: their data,
+  // checkpoint and completed flag are dropped so they cannot be shown or resumed.
+  #invalidateStaleSteps(staleArtifactIds) {
+    const staleStepIds = [...new Set(
+      staleArtifactIds.map(id => this.#store.get(id)?.stepId).filter(Boolean),
+    )];
+    if (staleStepIds.length === 0) return [];
+
+    for (const stepId of staleStepIds) {
+      const step = STEPS.find(candidate => candidate.id === stepId);
+      if (!step) continue;
+      state.data[dataKeyOf(step)] = null;
+      this.#checkpoint.clear(stepId);
+      this.#runState.reopenStep(stepId);
+    }
+
+    const firstStaleIndex = Math.min(...staleStepIds.map(stepIndexOf));
+    state.currentStep = firstStaleIndex - 1;
+    if (state.viewingStep !== null && state.viewingStep > state.currentStep) state.viewingStep = null;
+
+    this.#rebuildEntities();
+    addAgentMessage('🔗', t('pipeline.downstreamInvalidated', {
+      steps: staleStepIds.map(stepId => t(STEPS.find(candidate => candidate.id === stepId)?.labelKey || stepId)).join(', '),
+    }));
+    this.#refreshPipeline();
+    return staleStepIds;
+  }
+
+  // Entities are always derived from the adopted versions so superseded or stale
+  // outputs stop influencing consistency constraints.
+  #rebuildEntities() {
+    let entities = {};
+    for (const step of STEPS) {
+      const accepted = this.#store.getAcceptedByStep(step.id);
+      if (!accepted) continue;
+      const extracted = extractEntities(step.id, accepted.data);
+      if (extracted) entities = mergeEntities(entities, extracted);
+    }
+    state.entities = entities;
+  }
+
+  #refreshPipeline() {
+    if (state.currentStep < 0) return;
+    const lastIndex = Math.min(state.currentStep, STEPS.length - 1);
+    let doneUpTo = -1;
+    for (let i = 0; i <= lastIndex; i++) {
+      if (!this.#store.getAcceptedByStep(STEPS[i].id)) break;
+      doneUpTo = i;
+    }
+    if (doneUpTo >= lastIndex) updatePipeline(state.currentStep, 'done');
+    else updatePipeline(doneUpTo + 1, 'idle');
   }
 
   async #failStage(step, error) {
@@ -347,10 +442,10 @@ class Orchestrator {
     state.stepRunning = true;
 
     const delay = isConfigured() ? 0 : (2500 + Math.random() * 1500);
-    let result;
+    let data;
     try {
-      [result] = await Promise.all([
-        this.#runMigratedRevision(step, feedback),
+      [data] = await Promise.all([
+        this.#runAgentStep(step, feedback),
         sleep(delay),
       ]);
     } catch (err) {
@@ -374,126 +469,147 @@ class Orchestrator {
     setGenAnim(null);
     state.stepRunning = false;
 
-    state.data[dataKeyOf(step)] = result;
     await saveMemory();
-    updatePipeline(stepIndex, 'done');
+    this.#refreshPipeline();
 
     addAgentMessage(step.icon, t('ui.revisionComplete'));
 
     const onAdvance = () => this.#advanceStep();
-    this.#renderStep(stepId, result, onAdvance);
+    this.#renderStep(stepId, data, onAdvance);
   }
 
-  async #runMigratedRevision(step, feedback) {
-    const agent = resolveAgent(step.id);
-    const agentName = step.agent || 'Agent';
-    logStepStart(step.id, agentName);
-
-    try {
-      const ctx = this.#buildContext(step);
-      ctx.feedback = feedback;
-      ctx.previousResult = state.data[dataKeyOf(step)];
-
-      const result = await agent.process(ctx, this.#token);
-      const data = result.artifacts?.[0]?.data ?? null;
-      const metadata = result.metadata ?? {};
-
-      const gateResult = this.#postGate(step.id, data, metadata, result.artifacts?.[0]?.status);
-
-      if (result.artifacts?.[0]) {
-        const artifact = result.artifacts[0];
-        if (gateResult.verdict === QCVerdict.FAIL) {
-          artifact.status = ArtifactStatus.FAILED;
-        }
-        artifact.metrics = {
-          tokens: metadata.tokens || { prompt: 0, completion: 0 },
-          qualityScore: metadata.qualityScore ?? null,
-          retries: metadata.retries ?? 0,
-          fallbackUsed: metadata.fallbackUsed ?? false,
-        };
-        this.#store.commit(artifact, {
-          provenance: { agent: agentName, revision: true },
-        });
-        if (gateResult.verdict !== QCVerdict.FAIL) this.#store.markDownstreamStale(artifact.id);
-      }
-
-      if (gateResult.verdict === QCVerdict.FAIL) throw new StageGateError(gateResult);
-
-      const committedArtifact = result.artifacts?.[0];
-      if (committedArtifact && committedArtifact.status !== ArtifactStatus.STALE) {
-        const newEntities = extractEntities(step.id, data);
-        if (newEntities) {
-          state.entities = mergeEntities(state.entities, newEntities);
-        }
-      }
-
-      this.#checkpoint.save(step.id, { stepIndex: STEPS.findIndex(s => s.id === step.id), dataKey: dataKeyOf(step), result: data });
-      this.#checkpoint.persist();
-
-      return data;
-    } finally {
-      logStepComplete();
-    }
-  }
-
-  async rollbackToStep(stepId) {
+  // Rolling back adopts a new version copied from a historical one, so version
+  // numbers keep growing instead of reactivating an old artifact in place.
+  async rollbackToStep(stepId, { toArtifactId = null } = {}) {
     const stepIndex = STEPS.findIndex(s => s.id === stepId);
-    if (stepIndex < 0) return;
-
-    const validArtifact = this.#store.getLatestValidByStep(stepId);
-    if (validArtifact) {
-      const newArtifact = createArtifact({
-        kind: validArtifact.kind,
-        stepId: validArtifact.stepId,
-        data: structuredClone(validArtifact.data),
-        status: ArtifactStatus.COMPLETE,
-        sourceArtifactIds: [validArtifact.id],
-      });
-      this.#store.commit(newArtifact, { provenance: { agent: 'rollback' } });
-      this.#store.markDownstreamStale(newArtifact.id);
-    }
-
+    if (stepIndex < 0) return null;
     const step = STEPS[stepIndex];
-    const dataKey = dataKeyOf(step);
-    const checkpointData = this.#checkpoint.restore(stepId);
-    if (checkpointData?.result != null) {
-      state.data[dataKey] = checkpointData.result;
-    }
 
+    const target = this.#resolveRollbackTarget(stepId, toArtifactId);
+    if (!target) return null;
+
+    const revision = this.#store.createRevision(stepId, {
+      kind: target.kind || step.artifactKind,
+      data: structuredClone(target.data),
+      sourceArtifactIds: [...(target.sourceArtifactIds ?? [])],
+      status: ArtifactStatus.COMPLETE,
+      restoredFromArtifactId: target.id,
+    });
+    this.#store.commit(revision, { provenance: { agent: 'rollback', revision: true } });
+    const change = this.#store.replaceAcceptedArtifact(revision.id, { reasonCode: StaleReasonCode.UPSTREAM_ROLLED_BACK });
+
+    state.data[dataKeyOf(step)] = revision.data;
+    this.#rebuildEntities();
+    this.#checkpoint.save(stepId, { stepIndex, acceptedArtifactId: revision.id });
+    this.#runState.completeStep(stepId);
+
+    // Two separate facts: which adopted outputs went stale because they consumed
+    // the replaced version, and which later steps were reset so the run resumes here.
+    const staleStepIds = this.#invalidateStaleSteps(change?.staleArtifactIds ?? []);
+    const resetStepIds = [];
     for (let i = stepIndex + 1; i < STEPS.length; i++) {
       const laterStep = STEPS[i];
-      const laterKey = dataKeyOf(laterStep);
-      state.data[laterKey] = null;
+      state.data[dataKeyOf(laterStep)] = null;
       this.#checkpoint.clear(laterStep.id);
+      this.#runState.reopenStep(laterStep.id);
+      resetStepIds.push(laterStep.id);
     }
 
     state.currentStep = stepIndex;
-    this.#runState.persist();
-    this.#checkpoint.persist();
+    this.#rebuildEntities();
+    this.#refreshPipeline();
+    this.#persistWorkflow();
     await saveMemory();
+
+    return {
+      acceptedArtifact: revision,
+      restoredFromArtifactId: target.id,
+      supersededArtifactId: change?.supersededArtifact?.id ?? null,
+      staleArtifactIds: change?.staleArtifactIds ?? [],
+      staleStepIds,
+      resetStepIds,
+    };
+  }
+
+  #resolveRollbackTarget(stepId, toArtifactId) {
+    if (toArtifactId) {
+      const artifact = this.#store.get(toArtifactId);
+      if (!artifact || artifact.stepId !== stepId) return null;
+      return ROLLBACKABLE_STATUSES.includes(artifact.status) ? artifact : null;
+    }
+    const acceptedId = this.#store.getAcceptedByStep(stepId)?.id ?? null;
+    const candidates = this.#store.getByStep(stepId)
+      .filter(artifact => artifact.id !== acceptedId && DEFAULT_ROLLBACK_STATUSES.includes(artifact.status));
+    return candidates.length > 0 ? candidates[candidates.length - 1] : null;
   }
 
   restoreSession() {
-    const hasCheckpoint = this.#checkpoint.loadPersisted();
-    const hasRunState = this.#runState.loadPersisted();
+    const snapshot = loadPersistedWorkflow();
+    if (!snapshot) return false;
 
-    if (!hasCheckpoint && !hasRunState) return false;
+    this.#store.restore(snapshot.artifacts);
+    this.#store.restoreAccepted(snapshot.acceptedByStep);
+    this.#checkpoint.restoreSnapshot(snapshot.checkpoint);
+    this.#runState.restoreSnapshot(snapshot.runState);
+    const migrated = this.#migrateLegacyCheckpoints();
+
+    for (const key of Object.keys(state.data)) state.data[key] = null;
+    for (const step of STEPS) {
+      const accepted = this.#store.getAcceptedByStep(step.id);
+      if (accepted) state.data[dataKeyOf(step)] = accepted.data;
+    }
+    this.#rebuildEntities();
 
     for (const stepId of this.#runState.completedSteps) {
-      const cpData = this.#checkpoint.restore(stepId);
-      if (cpData) {
-        const step = STEPS.find(s => s.id === stepId);
-        if (step) {
-          state.data[dataKeyOf(step)] = cpData.result;
-        }
-      }
+      if (!this.#store.getAcceptedByStep(stepId)) this.#runState.reopenStep(stepId);
     }
+
+    const graph = this.#store.validateGraph();
+    if (!graph.ok) console.warn('[workflow] restored artifact graph has issues:', graph.issues);
 
     if (this.#runState.currentStepIndex >= 0 && this.#runState.currentStepIndex < STEPS.length) {
       state.currentStep = this.#runState.currentStepIndex;
     }
+    this.#refreshPipeline();
+    if (migrated) this.#persistWorkflow();
 
     return this.#runState.isInterrupted;
+  }
+
+  // Schema 1 sessions kept the step result inside the checkpoint and had no
+  // artifact graph; rebuild one so a restored session has real dependencies.
+  #migrateLegacyCheckpoints() {
+    const pending = this.#checkpoint.listCompleted()
+      .map(stepId => ({ stepId, entry: this.#checkpoint.restore(stepId) }))
+      .filter(({ entry }) => entry && !entry.acceptedArtifactId && entry.result != null)
+      .sort((a, b) => stepIndexOf(a.stepId) - stepIndexOf(b.stepId));
+    if (pending.length === 0) return false;
+
+    for (const { stepId, entry } of pending) {
+      const step = STEPS.find(candidate => candidate.id === stepId);
+      if (!step) continue;
+      let artifact = this.#store.getByStep(stepId).find(candidate => candidate.status === ArtifactStatus.COMPLETE) ?? null;
+      if (!artifact) {
+        artifact = createArtifact({
+          kind: step.artifactKind,
+          stepId,
+          data: entry.result,
+          status: ArtifactStatus.COMPLETE,
+        });
+        this.#store.commit(artifact, { provenance: { agent: 'migration', revision: false } });
+      }
+      if (!artifact.sourceArtifactIds?.length) {
+        artifact.sourceArtifactIds = (step.contextKeys || [])
+          .map(dataKey => this.#store.getAcceptedByStep(producerStepOfDataKey(dataKey))?.id)
+          .filter(Boolean);
+      }
+      this.#store.acceptArtifact(artifact.id);
+      this.#checkpoint.save(stepId, {
+        stepIndex: entry.stepIndex ?? stepIndexOf(stepId),
+        acceptedArtifactId: artifact.id,
+      });
+    }
+    return true;
   }
 
   async continuePipeline() {
@@ -503,15 +619,15 @@ class Orchestrator {
     state.stepRunning = false;
     this.#token = new CancellationToken();
     this.#runState.markRunning();
-    this.#runState.persist();
+    this.#persistWorkflow();
     await this.#executeStage(STEPS[state.currentStep]);
   }
 
   clearSession() {
+    this.#store.clear();
     this.#checkpoint.clear();
-    this.#checkpoint.clearPersisted();
     this.#runState.reset();
-    this.#runState.clearPersisted();
+    clearPersistedWorkflow();
     this.#token = null;
     resetState();
   }
@@ -535,9 +651,16 @@ class Orchestrator {
     await cancelAllBackendTasks();
     state.stopped = true;
     this.#runState.markInterrupted();
-    this.#runState.persist();
-    this.#checkpoint.persist();
+    this.#persistWorkflow();
     return saveMemory(status);
+  }
+
+  #persistWorkflow() {
+    return persistWorkflowSnapshot(buildWorkflowSnapshot({
+      store: this.#store,
+      checkpoint: this.#checkpoint,
+      runState: this.#runState,
+    }));
   }
 }
 
@@ -558,8 +681,8 @@ export async function reviseStep(stepId, feedback) {
   return getOrchestrator().reviseStep(stepId, feedback);
 }
 
-export async function rollbackToStep(stepId) {
-  return getOrchestrator().rollbackToStep(stepId);
+export async function rollbackToStep(stepId, options) {
+  return getOrchestrator().rollbackToStep(stepId, options);
 }
 
 export function restoreSession() {

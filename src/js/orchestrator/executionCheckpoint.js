@@ -1,12 +1,13 @@
-const STORAGE_KEY = 'cine-cutie-checkpoint';
-
+// A checkpoint records where to resume and which artifact version was adopted.
+// The artifact store is the single source of truth for the result payload, so a
+// checkpoint never duplicates step data. Persistence lives in workflowSnapshot.js.
 export class ExecutionCheckpoint {
   #checkpoints = new Map();
 
-  save(stepId, data) {
+  save(stepId, { stepIndex, acceptedArtifactId }) {
     this.#checkpoints.set(stepId, {
-      data: structuredClone(data),
-      timestamp: Date.now(),
+      data: { stepIndex, acceptedArtifactId },
+      savedAt: Date.now(),
     });
   }
 
@@ -35,7 +36,7 @@ export class ExecutionCheckpoint {
   snapshot() {
     const result = {};
     for (const [key, entry] of this.#checkpoints) {
-      result[key] = { data: structuredClone(entry.data), timestamp: entry.timestamp };
+      result[key] = { data: structuredClone(entry.data), savedAt: entry.savedAt };
     }
     return result;
   }
@@ -46,31 +47,8 @@ export class ExecutionCheckpoint {
     for (const [key, entry] of Object.entries(snap)) {
       this.#checkpoints.set(key, {
         data: structuredClone(entry.data),
-        timestamp: entry.timestamp,
+        savedAt: entry.savedAt ?? entry.timestamp ?? null,
       });
     }
-  }
-
-  persist() {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(this.snapshot()));
-    } catch {}
-  }
-
-  loadPersisted() {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) return false;
-      this.restoreSnapshot(JSON.parse(raw));
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  clearPersisted() {
-    try {
-      localStorage.removeItem(STORAGE_KEY);
-    } catch {}
   }
 }

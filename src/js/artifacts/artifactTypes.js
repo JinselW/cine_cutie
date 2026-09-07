@@ -1,3 +1,5 @@
+export const ARTIFACT_SCHEMA_VERSION = 2;
+
 export const ArtifactKind = Object.freeze({
   SCRIPT: 'script',
   CHARACTER_DESIGN: 'characterDesign',
@@ -18,18 +20,55 @@ export const ArtifactStatus = Object.freeze({
   STALE: 'stale',
 });
 
+export const StaleReasonCode = Object.freeze({
+  UPSTREAM_REPLACED: 'UPSTREAM_REPLACED',
+  UPSTREAM_ROLLED_BACK: 'UPSTREAM_ROLLED_BACK',
+});
+
+// Statuses that terminate an artifact's life: it can still be read as history,
+// but it can never be accepted again nor consumed as a downstream input.
+export const TERMINAL_ARTIFACT_STATUSES = Object.freeze([
+  ArtifactStatus.FAILED,
+  ArtifactStatus.SUPERSEDED,
+  ArtifactStatus.STALE,
+]);
+
 let _counter = 0;
 
-export function createArtifact({ kind, stepId, data, status = ArtifactStatus.PENDING, sourceArtifactIds = [] }) {
+// Artifacts are immutable version records: revisions and rollbacks create a new
+// artifact instead of overwriting an existing one. version/rootArtifactId are
+// derived from parentArtifactId by ArtifactStore on commit.
+export function createArtifact({
+  kind,
+  stepId,
+  data,
+  status = ArtifactStatus.PENDING,
+  sourceArtifactIds = [],
+  parentArtifactId = null,
+  replacesArtifactId = null,
+  restoredFromArtifactId = null,
+}) {
+  const now = Date.now();
   return {
-    id: `${stepId}-${kind}-${Date.now()}-${++_counter}`,
+    id: `${stepId}-${kind}-${now}-${++_counter}`,
     kind,
     stepId,
     data,
     status,
-    createdAt: Date.now(),
-    updatedAt: Date.now(),
+    schemaVersion: ARTIFACT_SCHEMA_VERSION,
+    createdAt: now,
+    updatedAt: now,
     version: 1,
+    rootArtifactId: null,
+    // Version evolution within one step. Distinct from sourceArtifactIds (business
+    // inputs) and replacesArtifactId (the accepted version this one supersedes).
+    parentArtifactId: parentArtifactId ?? null,
+    replacesArtifactId: replacesArtifactId ?? null,
+    restoredFromArtifactId: restoredFromArtifactId ?? null,
+    acceptedAt: null,
+    supersededAt: null,
+    staleAt: null,
+    staleReason: null,
     refs: {},
     provenance: null,
     sourceArtifactIds: [...sourceArtifactIds],

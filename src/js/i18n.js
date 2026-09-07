@@ -276,6 +276,8 @@ const en = {
   'pipeline.consistencyFailed': 'Post-gate: {stepId} consistency check failed — {issues}',
   'pipeline.consistencyWarnings': 'Post-gate: {stepId} consistency warnings — {issues}',
   'pipeline.ipCompliance': 'IP Compliance: {issues}',
+  'pipeline.missingUpstream': 'Cannot run {stepId}: no accepted upstream output for {dataKeys}',
+  'pipeline.downstreamInvalidated': 'New version accepted. These steps consumed the previous version and must be regenerated: {steps}',
 
   'history.title': 'Creation History',
   'history.close': 'Close',
@@ -639,6 +641,8 @@ const zh = {
   'pipeline.consistencyFailed': '后置检查：{stepId} 一致性检查失败 — {issues}',
   'pipeline.consistencyWarnings': '后置检查：{stepId} 一致性警告 — {issues}',
   'pipeline.ipCompliance': 'IP 合规性：{issues}',
+  'pipeline.missingUpstream': '无法执行 {stepId}：缺少已采用的上游产物 {dataKeys}',
+  'pipeline.downstreamInvalidated': '已采用新版本。以下步骤使用了旧版本，需要重新生成：{steps}',
 
   'history.title': '创作历史',
   'history.close': '关闭',

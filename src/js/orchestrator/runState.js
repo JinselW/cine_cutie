@@ -1,5 +1,3 @@
-const STORAGE_KEY = 'cine-cutie-runstate';
-
 export const RunStatus = Object.freeze({
   IDLE: 'idle',
   RUNNING: 'running',
@@ -46,6 +44,14 @@ export class RunState {
     this.#updatedAt = Date.now();
   }
 
+  reopenStep(stepId) {
+    const index = this.#completedSteps.indexOf(stepId);
+    if (index < 0) return false;
+    this.#completedSteps.splice(index, 1);
+    this.#updatedAt = Date.now();
+    return true;
+  }
+
   markInterrupted() {
     if (this.#status === RunStatus.RUNNING) {
       this.#status = RunStatus.INTERRUPTED;
@@ -90,31 +96,7 @@ export class RunState {
     this.#completedSteps = [...(snap.completedSteps || [])];
     this.#startedAt = snap.startedAt || null;
     this.#updatedAt = snap.updatedAt || null;
-  }
-
-  persist() {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(this.snapshot()));
-    } catch {}
-  }
-
-  loadPersisted() {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) return false;
-      this.restoreSnapshot(JSON.parse(raw));
-      if (this.#status === RunStatus.RUNNING) {
-        this.#status = RunStatus.INTERRUPTED;
-      }
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  clearPersisted() {
-    try {
-      localStorage.removeItem(STORAGE_KEY);
-    } catch {}
+    // A persisted run is by definition not executing anymore.
+    if (this.#status === RunStatus.RUNNING) this.#status = RunStatus.INTERRUPTED;
   }
 }
