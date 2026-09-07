@@ -1,4 +1,4 @@
-# Cine-Cutie
+# Cine-Cutie666
 
 **一句话灵感 → 完整 AI 短片**
 
