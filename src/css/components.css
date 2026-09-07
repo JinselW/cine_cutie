@@ -78,6 +78,60 @@
 .mascot-thinking .mascot-eye{animation:none;height:3px;top:10px;border-radius:2px}
 .mascot-thinking .mascot-reel{animation-duration:4s}
 
+.mascot-wrap.mascot-compact{
+  position:fixed;top:12px;left:12px;z-index:100;
+  margin:0;
+}
+.mascot-wrap.mascot-compact .mascot{
+  width:40px;height:40px;
+  animation:mascotFloat 3s ease-in-out infinite;
+}
+.mascot-wrap.mascot-compact .mascot-body{
+  width:32px;height:25px;border-radius:8px 8px 6px 6px;left:4px;
+}
+.mascot-wrap.mascot-compact .mascot-lens{
+  width:13px;height:13px;top:5px;border-width:2px;
+}
+.mascot-wrap.mascot-compact .mascot-lens::after{
+  width:5px;height:5px;top:2px;left:2px;
+}
+.mascot-wrap.mascot-compact .mascot-eye{
+  width:4px;height:5px;top:3px;
+}
+.mascot-wrap.mascot-compact .mascot-eye.left{left:6px}
+.mascot-wrap.mascot-compact .mascot-eye.right{right:6px}
+.mascot-wrap.mascot-compact .mascot-eye::after{
+  width:2px;height:2px;top:1px;left:1px;
+}
+.mascot-wrap.mascot-compact .mascot-cheek{
+  width:5px;height:3px;top:10px;
+}
+.mascot-wrap.mascot-compact .mascot-cheek.left{left:3px}
+.mascot-wrap.mascot-compact .mascot-cheek.right{right:3px}
+.mascot-wrap.mascot-compact .mascot-mouth{
+  width:6px;height:3px;top:13px;border-bottom-width:1.5px;
+}
+.mascot-wrap.mascot-compact .mascot-reel{
+  width:9px;height:9px;top:-3px;border-width:2px;
+}
+.mascot-wrap.mascot-compact .mascot-reel::before{
+  width:3px;height:3px;
+}
+.mascot-wrap.mascot-compact .mascot-reel.left{left:6px}
+.mascot-wrap.mascot-compact .mascot-reel.right{right:6px}
+.mascot-wrap.mascot-compact .mascot-leg{
+  width:4px;height:7px;bottom:-6px;border-radius:0 0 2px 2px;
+}
+.mascot-wrap.mascot-compact .mascot-leg.left{left:10px}
+.mascot-wrap.mascot-compact .mascot-leg.right{right:10px}
+.mascot-wrap.mascot-compact.mascot-thinking .mascot-eye{
+  height:2px;top:5px;border-radius:1px;
+}
+.mascot-wrap.mascot-compact.mascot-happy .mascot-mouth{
+  width:8px;height:4px;border-bottom-width:1.5px;
+}
+.header.header-compact{padding:8px 0 8px;padding-left:60px}
+
 /* Mascot interaction effects */
 .mascot-bubble{
   position:fixed;z-index:9998;

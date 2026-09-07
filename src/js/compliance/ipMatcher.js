@@ -113,7 +113,7 @@ function exactMatch(textNorm, nameIndex, aliasIndex) {
 // ---------------------------------------------------------------------------
 
 const FUZZY_THRESHOLD_BLOCK = 0.85;
-const FUZZY_THRESHOLD_WARN = 0.70;
+const FUZZY_THRESHOLD_WARN = 0.75;
 
 const FUZZY_STOPWORDS = new Set([
   'man', 'the', 'boy', 'girl', 'red', 'blue', 'big', 'bad', 'new', 'old',
@@ -121,6 +121,7 @@ const FUZZY_STOPWORDS = new Set([
   'son', 'god', 'day', 'night', 'fire', 'ice', 'star', 'sun', 'moon',
   'super', 'magic', 'wild', 'fast', 'strong', 'young', 'black', 'white',
   'green', 'yellow', 'gold', 'silver', 'iron', 'steel', 'power', 'storm',
+  'woods', 'thorn', 'tower', 'copper', 'mushroom',
 ]);
 
 const FULL_NAME_THRESHOLD = 0.80;
@@ -164,9 +165,9 @@ function fuzzyMatch(textNorm, nameIndex, aliasIndex) {
     hits.push(...iterHits.filter(h => h.confidence >= FUZZY_THRESHOLD_WARN));
 
     const nameNoSpaces = normName.replace(/\s+/g, '');
-    if (nameNoSpaces.length >= 4) {
+    if (nameNoSpaces.length >= 5) {
       const textJoined = textWords.filter(w => !FUZZY_STOPWORDS.has(w) && w.length >= 3).join('');
-      if (textJoined.length >= 4) {
+      if (textJoined.length >= 5 && textJoined.length <= nameNoSpaces.length * 2 && nameNoSpaces.length <= textJoined.length * 2) {
         const sim = normalizedSimilarity(nameNoSpaces, textJoined);
         if (sim >= FULL_NAME_THRESHOLD) {
           const key = `${entry.name}:__fullname__`;
@@ -192,7 +193,9 @@ function keywordMatch(textNorm, keywordIndex) {
 
   for (const { keyword, entry } of keywordIndex) {
     if (keyword.length < 3) continue;
-    if (textNorm.includes(keyword)) {
+    const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp(`(?<![a-z0-9\u4e00-\u9fff])${escaped}(?![a-z0-9\u4e00-\u9fff])`);
+    if (re.test(textNorm)) {
       const key = entry.name;
       if (seen.has(key)) continue;
       seen.add(key);

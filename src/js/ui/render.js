@@ -93,6 +93,7 @@ export function showPipelineFailure(issues) {
       <button class="action-btn primary" id="failedBackBtn">${t('ui.backToInput')}</button>
     </div>`;
   $('#failedBackBtn').addEventListener('click', stopGeneration);
+  setMascotCompact(false);
   setMascot(null);
 }
 
@@ -100,6 +101,13 @@ export function setMascot(mood) {
   const m = $('#mascot');
   m.classList.remove('mascot-happy', 'mascot-thinking');
   if (mood) m.classList.add('mascot-' + mood);
+}
+
+export function setMascotCompact(compact) {
+  const wrap = $('.mascot-wrap');
+  const header = $('.header');
+  if (wrap) wrap.classList.toggle('mascot-compact', compact);
+  if (header) header.classList.toggle('header-compact', compact);
 }
 
 export function clearCurrentMessages() {
@@ -130,6 +138,7 @@ export function showGenerating(stepIndex) {
     </div>
   `;
   setMascot('thinking');
+  setMascotCompact(true);
 
   $('#pauseBtn').addEventListener('click', pauseGeneration);
   if (step.id === 'videoGeneration' && isComfySelected()) {
@@ -195,6 +204,7 @@ function renderPausedStatus() {
       </div>
     </div>
   `;
+  setMascotCompact(false);
   setMascot(null);
 
   $('#resumeBtn').addEventListener('click', resumeGeneration);
@@ -239,6 +249,7 @@ export async function stopGeneration() {
     btn.disabled = false;
     btn.textContent = t('ui.startBtn');
   }
+  setMascotCompact(false);
   setMascot(null);
 }
 
