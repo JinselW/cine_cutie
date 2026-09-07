@@ -279,6 +279,7 @@ $('#startBtn').addEventListener('click', async () => {
   const btn = $('#startBtn');
   btn.disabled = true;
   btn.textContent = t('ui.starting');
+  showSection('pipelineSection');
 
   const genreLabel = state.visualStyle === 'custom'
     ? (state.customStyle || 'cinematic')
@@ -289,7 +290,6 @@ $('#startBtn').addEventListener('click', async () => {
     : t('ui.modeCoHint');
 
   setTimeout(() => {
-    showSection('pipelineSection');
     $('#stepContent').innerHTML = '';
     addAgentMessage('🎬', t('ui.welcome', { genreHint, modeHint }));
     setTimeout(() => startPipeline(), 2000);
