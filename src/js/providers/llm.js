@@ -28,7 +28,7 @@ const IMAGE_PRESETS = ['wanx2.1-t2i-turbo', 'wanx2.1-t2i-plus'];
 const IMG2IMG_PRESETS = ['wan2.6-image'];
 
 const VIDEO_MODES = [
-  { id: 'firstFrame', presets: ['wanx2.1-i2v-plus', 'wan2.7-i2v'], defaultModel: 'wanx2.1-i2v-plus', configKey: 'video' },
+  { id: 'firstFrame', presets: ['wanx2.1-i2v-plus', 'wan2.7-i2v', 'wan2.5-i2v-preview'], defaultModel: 'wanx2.1-i2v-plus', configKey: 'video' },
   { id: 'firstLastFrame', presets: ['wan2.7-i2v', 'wanx2.1-i2v-plus'], defaultModel: 'wan2.7-i2v', configKey: 'video' },
   { id: 'referenceImage', presets: ['wan2.7-r2v'], defaultModel: 'wan2.7-r2v', configKey: 'refVideo' },
 ];
