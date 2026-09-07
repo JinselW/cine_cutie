@@ -64,7 +64,9 @@ OUTPUT JSON SCHEMA:
       "segments": [
         {
           "title": "string — segment title",
-          "description": "string — what happens in this segment"
+          "description": "string — what happens in this segment",
+          "dialogue": "string — character dialogue or narration in this segment (use character names, e.g. 'Mibao says: Hello!'). Can be empty if no dialogue.",
+          "sound_effects": "string — ambient sounds and sound effects for this segment (e.g. 'rain falling, footsteps, door creaking, crowd cheering'). Describe all audible elements including environmental sounds, character actions, and background noise."
         }
       ]
     }
@@ -77,6 +79,7 @@ Requirements:
 - 1-${maxEpisodes} episodes (limited by ${totalDuration}s total duration), each with 2-4 segments
 - Make characters visually distinctive for image generation
 - Make settings detailed enough to generate reference images
+- For each segment, provide dialogue (character speech/narration) and sound_effects (ambient sounds, action sounds, environmental audio). Think about what the audience would HEAR: voices, weather, footsteps, doors, traffic, music, etc. Even if the user didn't explicitly mention sounds, infer them from the scene context (e.g., rain scene needs rain sounds, city scene needs traffic noise).
 
 STORY COHERENCE — CRITICAL:
 - The story MUST have a clear narrative arc: setup → development → climax → resolution
@@ -176,7 +179,8 @@ OUTPUT JSON SCHEMA:
               "duration": "number — suggested duration in seconds (3-10)",
               "description": "string — what happens in this shot",
               "camera": "string — camera movement: 'static', 'pan-left', 'pan-right', 'zoom-in', 'zoom-out', 'tracking', 'tilt-up'",
-              "prompt": "string — detailed English image generation prompt describing this exact frame, including characters, setting, lighting, mood, and camera angle"
+              "prompt": "string — detailed English image generation prompt describing this exact frame, including characters, setting, lighting, mood, and camera angle",
+              "audio_description": "string — detailed English description of all audio elements for this shot: dialogue (character says...), sound effects (footsteps, door closing, glass breaking), ambient sounds (rain, wind, crowd noise), and music mood if any. Be specific about what can be heard."
             }
           ]
         }
@@ -195,6 +199,7 @@ Requirements:
 - Include setting details in prompts
 - Specify lighting and mood in each prompt
 - Duration is the ACTUAL generated clip length in seconds (3-10 per shot), and the durations of ALL shots across ALL episodes MUST add up to roughly ${totalDuration}s — the final film is exactly the sum of the clips
+- For each shot, provide audio_description in English: include all dialogue (who says what), sound effects (footsteps, doors, objects), ambient sounds (weather, crowd, traffic), and any music mood. Infer sounds from the visual context even if not explicitly stated — rain needs rain sounds, office needs keyboard/phone sounds, forest needs birds/wind, etc.
 
 SHOT-TO-SHOT CONTINUITY — CRITICAL:
 - Shots MUST form a coherent visual narrative — each shot should feel like the NEXT MOMENT after the previous one

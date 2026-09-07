@@ -349,7 +349,7 @@ app.post('/api/upload/prompt', promptUpload.single('file'), async (req, res) => 
 });
 
 app.post('/api/generate/video', async (req, res) => {
-  const { clips, model, duration, resolution, seed, aspectRatio, uploads, mode: clientMode } = req.body;
+  const { clips, model, duration, resolution, seed, aspectRatio, uploads, mode: clientMode, audio } = req.body;
   const apiKey = req.headers['x-api-key'];
 
   if (!apiKey) {
@@ -432,7 +432,7 @@ app.post('/api/generate/video', async (req, res) => {
 
             console.log(`[VideoBatch V2] task=${task.id} clip ${i + 1} media=${mediaArray.length} items`);
             taskId = await submitVideoTaskV2(clip.prompt || 'Scene animation', mediaArray, {
-              model: effectiveModel, duration: clip.duration ?? duration, resolution, apiKey, seed: clip.seed ?? seed, aspectRatio
+              model: effectiveModel, duration: clip.duration ?? duration, resolution, apiKey, seed: clip.seed ?? seed, aspectRatio, audio
             });
           } else {
             const clipRefs = Array.isArray(clip.referenceImages) ? clip.referenceImages.slice(0, MAX_VIDEO_REFS) : [];
@@ -463,7 +463,7 @@ app.post('/api/generate/video', async (req, res) => {
 
               console.log(`[VideoBatch r2v] task=${task.id} clip ${i + 1} refs=${media.length}`);
               taskId = await submitVideoTaskV2(clip.prompt || 'Scene animation', media, {
-                model: effectiveModel, duration: clipDuration, resolution, apiKey, seed: clipSeed, aspectRatio
+                model: effectiveModel, duration: clipDuration, resolution, apiKey, seed: clipSeed, aspectRatio, audio
               });
             } else {
               const firstUrl = await toDashScopeImage(firstRef);
@@ -482,7 +482,7 @@ app.post('/api/generate/video', async (req, res) => {
 
                 console.log(`[VideoBatch V2] task=${task.id} clip ${i + 1} media=${media.length} items`);
                 taskId = await submitVideoTaskV2(clip.prompt || 'Scene animation', media, {
-                  model: effectiveModel, duration: clipDuration, resolution, apiKey, seed: clipSeed, aspectRatio
+                  model: effectiveModel, duration: clipDuration, resolution, apiKey, seed: clipSeed, aspectRatio, audio
                 });
               } else {
                 if (lastRef) {
@@ -490,7 +490,7 @@ app.post('/api/generate/video', async (req, res) => {
                 }
                 console.log(`[VideoBatch] task=${task.id} clip ${i + 1} img_url=${firstUrl.slice(0, 60)}…`);
                 taskId = await submitVideoTask(clip.prompt, firstUrl, {
-                  model: effectiveModel, duration: clipDuration, resolution, apiKey, seed: clipSeed, aspectRatio
+                  model: effectiveModel, duration: clipDuration, resolution, apiKey, seed: clipSeed, aspectRatio, audio
                 });
               }
             }

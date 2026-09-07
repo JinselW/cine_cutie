@@ -165,14 +165,14 @@ export function clampVideoDuration(model, seconds) {
   return clamped;
 }
 
-export async function submitVideoTask(prompt, imageUrl, { model, duration = 5, resolution = '720P', apiKey, seed, aspectRatio } = {}) {
+export async function submitVideoTask(prompt, imageUrl, { model, duration = 5, resolution = '720P', apiKey, seed, aspectRatio, audio } = {}) {
   if (!model) throw new Error('submitVideoTask: model is required');
   const seconds = clampVideoDuration(model, duration);
   const url = `${DASHSCOPE_BASE}/services/aigc/video-generation/video-synthesis`;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 30000);
 
-  console.log(`[DashScope] Submitting video task: model=${model}, duration=${seconds}, resolution=${resolution}${seed != null ? `, seed=${seed}` : ''}`);
+  console.log(`[DashScope] Submitting video task: model=${model}, duration=${seconds}, resolution=${resolution}${seed != null ? `, seed=${seed}` : ''}${audio ? ', audio=true' : ''}`);
   console.log(`[DashScope]   img_url: ${imageUrl}`);
   console.log(`[DashScope]   prompt: ${prompt.substring(0, 80)}...`);
 
@@ -190,7 +190,13 @@ export async function submitVideoTask(prompt, imageUrl, { model, duration = 5, r
           prompt,
           img_url: imageUrl
         },
-        parameters: { duration: seconds, resolution, ...(seed != null && { seed }), ...(aspectRatio && { aspect_ratio: aspectRatio }) }
+        parameters: {
+          duration: seconds,
+          resolution,
+          ...(seed != null && { seed }),
+          ...(aspectRatio && { aspect_ratio: aspectRatio }),
+          ...(audio && { audio: true })
+        }
       }),
       signal: controller.signal
     });
@@ -268,14 +274,14 @@ export async function fileToDataUri(filePath) {
   return `data:${mime};base64,${buf.toString('base64')}`;
 }
 
-export async function submitVideoTaskV2(prompt, mediaArray, { model, duration = 5, resolution = '720P', apiKey, seed, aspectRatio } = {}) {
+export async function submitVideoTaskV2(prompt, mediaArray, { model, duration = 5, resolution = '720P', apiKey, seed, aspectRatio, audio } = {}) {
   if (!model) throw new Error('submitVideoTaskV2: model is required');
   const seconds = clampVideoDuration(model, duration);
   const url = `${DASHSCOPE_BASE}/services/aigc/video-generation/video-synthesis`;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 30000);
 
-  console.log(`[DashScope V2] Submitting video task: model=${model}, media=${mediaArray.length} items, duration=${seconds}, resolution=${resolution}`);
+  console.log(`[DashScope V2] Submitting video task: model=${model}, media=${mediaArray.length} items, duration=${seconds}, resolution=${resolution}${audio ? ', audio=true' : ''}`);
   console.log(`[DashScope V2]   prompt: ${prompt.substring(0, 80)}...`);
 
   try {
@@ -296,7 +302,8 @@ export async function submitVideoTaskV2(prompt, mediaArray, { model, duration = 
           duration: seconds,
           resolution,
           ...(seed != null && { seed }),
-          ...(aspectRatio && { aspect_ratio: aspectRatio })
+          ...(aspectRatio && { aspect_ratio: aspectRatio }),
+          ...(audio && { audio: true })
         }
       }),
       signal: controller.signal

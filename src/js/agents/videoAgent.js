@@ -126,7 +126,10 @@ export class VideoAgent extends BaseAgent {
       const prompt = sbShot?.description || sbShot?.prompt || `Scene ${i + 1}`;
       const camera = sbShot?.camera || '';
       const motion = CAMERA_MOTION_MAP[camera] || 'subtle natural motion';
-      const videoPrompt = `${prompt}, ${motion}`;
+      const audio = sbShot?.audio_description || '';
+      const parts = [prompt, motion];
+      if (audio) parts.push(audio);
+      const videoPrompt = parts.join(', ');
 
       items.push({
         id: `upload_clip_${i}`,
@@ -322,7 +325,10 @@ export class VideoAgent extends BaseAgent {
     const base = shot.prompt || `Scene of ${shot.shot_id}`;
     const camera = storyboardShot?.camera || '';
     const motion = CAMERA_MOTION_MAP[camera] || 'subtle natural motion';
-    return `${base}, ${motion}`;
+    const audio = storyboardShot?.audio_description || '';
+    const parts = [base, motion];
+    if (audio) parts.push(audio);
+    return parts.join(', ');
   }
 
   async #generateItems(items, artifact, ctx, token) {

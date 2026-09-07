@@ -90,6 +90,7 @@ const videoProvider = {
           duration: DEFAULT_CLIP_DURATION,
           resolution: dsRes,
           seed: clips[0].seed,
+          audio: true,
         }
       : {
           clips: sentClips.map(c => ({
@@ -107,6 +108,7 @@ const videoProvider = {
           duration: DEFAULT_CLIP_DURATION,
           resolution: dsRes,
           seed: sentClips[0]?.seed ?? 42,
+          audio: true,
         };
 
     let taskId = null;
