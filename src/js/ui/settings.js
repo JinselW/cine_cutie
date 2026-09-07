@@ -223,7 +223,7 @@ function handleSave() {
   if (textSelect.value === CUSTOM_VALUE) {
     const name = textCustomInput?.value?.trim();
     if (!name) {
-      showStatus(t('settings.model') + ' required', false);
+      showStatus(t('settings.required', { field: t('settings.model') }), false);
       return;
     }
     textModel = { provider: inferProvider(name) || 'dashscope', name };
@@ -256,7 +256,7 @@ function handleSave() {
   }
 
   if (!textModel.name) {
-    showStatus(t('settings.model') + ' required', false);
+    showStatus(t('settings.required', { field: t('settings.model') }), false);
     return;
   }
 
@@ -310,7 +310,7 @@ async function handleTest() {
   if (textSelect.value === CUSTOM_VALUE) {
     textModelName = textCustomInput?.value?.trim();
     if (!textModelName) {
-      showStatus(t('settings.model') + ' required', false);
+      showStatus(t('settings.required', { field: t('settings.model') }), false);
       return;
     }
     textProvider = inferProvider(textModelName) || 'dashscope';
@@ -324,11 +324,11 @@ async function handleTest() {
   const endpoint = endpointEl?.value?.trim();
 
   if (!apiKey) {
-    showStatus(`${textProvider} ` + t('settings.apiKey') + ' required', false);
+    showStatus(t('settings.required', { field: `${textProvider} ${t('settings.apiKey')}` }), false);
     return;
   }
   if (!textModelName) {
-    showStatus(t('settings.model') + ' required', false);
+    showStatus(t('settings.required', { field: t('settings.model') }), false);
     return;
   }
 
@@ -355,7 +355,7 @@ async function handleTest() {
   if (comfyChosen) {
     const config = saveComfySshConfig();
     if (!config.host) {
-      comfyLine = { ok: false, msg: 'ComfyUI: Host required' };
+      comfyLine = { ok: false, msg: t('settings.comfyHostRequired') };
     } else {
       try {
         const res = await fetch('/api/comfyui/status', {
@@ -364,13 +364,13 @@ async function handleTest() {
         const data = await res.json();
         if (data.comfyui?.online) {
           const gpuInfo = data.comfyui.gpu?.map(g => `${g.name} (${g.vram_free}/${g.vram_total}MB)`).join(', ') || 'OK';
-          comfyLine = { ok: true, msg: `ComfyUI: Connected (GPU ${gpuInfo})` };
+          comfyLine = { ok: true, msg: t('settings.comfyConnected', { gpu: gpuInfo }) };
           startComfyMonitor('comfyMonitorSettings', { force: true });
         } else {
-          comfyLine = { ok: false, msg: `ComfyUI: offline (${data.comfyui?.error || 'unknown'})` };
+          comfyLine = { ok: false, msg: t('settings.comfyOffline', { reason: data.comfyui?.error || t('ui.na') }) };
         }
       } catch (err) {
-        comfyLine = { ok: false, msg: `ComfyUI: ${err.message}` };
+        comfyLine = { ok: false, msg: t('settings.comfyError', { reason: err.message }) };
       }
     }
   }
@@ -379,7 +379,7 @@ async function handleTest() {
   textEl.textContent = t('settings.test');
 
   let ok = result.ok;
-  const parts = [`LLM: ${result.ok ? t('settings.testOk') : result.error}`];
+  const parts = [t('settings.llmTestPrefix', { result: result.ok ? t('settings.testOk') : result.error })];
   if (comfyLine) {
     ok = ok && comfyLine.ok;
     parts.push(comfyLine.msg);

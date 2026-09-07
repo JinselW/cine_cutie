@@ -180,6 +180,10 @@ export function pauseGeneration() {
   if (anim) anim.stop();
   setGenAnim(null);
 
+  renderPausedStatus();
+}
+
+function renderPausedStatus() {
   const el = $('#stepContent');
   el.innerHTML = `
     <div class="gen-status" style="text-align:center">
@@ -195,6 +199,17 @@ export function pauseGeneration() {
 
   $('#resumeBtn').addEventListener('click', resumeGeneration);
   $('#stopBtn').addEventListener('click', stopGeneration);
+}
+
+export function refreshRunningLanguage() {
+  const anim = getGenAnim();
+  if (anim) anim.stop();
+  setGenAnim(null);
+  if (state.paused) {
+    renderPausedStatus();
+    return;
+  }
+  showGenerating(state.currentStep);
 }
 
 export function resumeGeneration() {

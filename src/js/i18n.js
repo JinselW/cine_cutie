@@ -180,6 +180,23 @@ const en = {
   'settings.dashscopeVideoModel': 'Video Model',
   'settings.dashscopeOn': 'DashScope configured',
   'settings.dashscopeOff': 'DashScope not configured',
+  'settings.comfySshHost': 'SSH Host',
+  'settings.comfySshPort': 'SSH Port',
+  'settings.comfySshUser': 'Username',
+  'settings.comfyPort': 'ComfyUI Port',
+  'settings.comfyLightning': 'Enable Lightning LoRA (faster, fewer steps)',
+  'settings.required': '{field} is required',
+  'settings.comfyHostRequired': 'ComfyUI: Host is required',
+  'settings.comfyConnected': 'ComfyUI: Connected (GPU {gpu})',
+  'settings.comfyOffline': 'ComfyUI: Offline ({reason})',
+  'settings.comfyError': 'ComfyUI: {reason}',
+  'settings.llmTestPrefix': 'LLM: {result}',
+  'ui.toggleTheme': 'Toggle theme',
+  'ui.switchLanguage': 'Switch language',
+  'ui.mascotHint': 'Click me!',
+  'ui.defaultFilmTitle': 'Your Film',
+  'ui.untitled': 'Untitled',
+  'ui.unknown': 'Unknown',
 
   'settings.apiSettings': 'API Settings',
   'settings.modelSelection': 'Model Selection',
@@ -307,6 +324,10 @@ const en = {
 
   'critique.scoreDisplay': 'Quality score: {score}/10',
   'critique.retrying': 'Score {score}/10 below threshold — retrying ({retry}/{max})...',
+  'critique.retryBelowThreshold': 'The previous output scored below quality threshold.',
+  'critique.retryIssuesFound': 'Issues found:',
+  'critique.retrySuggestions': 'Suggestions for improvement:',
+  'critique.retryRegenerate': 'Please regenerate the output addressing all issues.',
 
   'log.title': 'Execution Log',
   'log.viewLog': 'Execution Log',
@@ -522,6 +543,23 @@ const zh = {
   'settings.dashscopeVideoModel': '视频模型',
   'settings.dashscopeOn': 'DashScope 已配置',
   'settings.dashscopeOff': 'DashScope 未配置',
+  'settings.comfySshHost': 'SSH 主机',
+  'settings.comfySshPort': 'SSH 端口',
+  'settings.comfySshUser': '用户名',
+  'settings.comfyPort': 'ComfyUI 端口',
+  'settings.comfyLightning': '启用 Lightning LoRA（速度更快、步数更少）',
+  'settings.required': '请填写{field}',
+  'settings.comfyHostRequired': 'ComfyUI：请填写主机地址',
+  'settings.comfyConnected': 'ComfyUI：连接成功（GPU {gpu}）',
+  'settings.comfyOffline': 'ComfyUI：离线（{reason}）',
+  'settings.comfyError': 'ComfyUI：{reason}',
+  'settings.llmTestPrefix': 'LLM：{result}',
+  'ui.toggleTheme': '切换主题',
+  'ui.switchLanguage': '切换语言',
+  'ui.mascotHint': '点我试试！',
+  'ui.defaultFilmTitle': '你的影片',
+  'ui.untitled': '未命名',
+  'ui.unknown': '未知',
 
   'settings.apiSettings': 'API 设置',
   'settings.modelSelection': '模型选择',
@@ -649,6 +687,10 @@ const zh = {
 
   'critique.scoreDisplay': '质量评分：{score}/10',
   'critique.retrying': '评分 {score}/10 低于阈值——正在重试（{retry}/{max}）...',
+  'critique.retryBelowThreshold': '上一次输出的质量评分低于阈值。',
+  'critique.retryIssuesFound': '发现的问题：',
+  'critique.retrySuggestions': '改进建议：',
+  'critique.retryRegenerate': '请针对所有问题重新生成输出。',
 
   'log.title': '执行日志',
   'log.viewLog': '执行日志',
@@ -704,7 +746,16 @@ export function getLang() {
 
 export function applyLang() {
   const langBtn = $('#langToggle');
-  if (langBtn) langBtn.textContent = state.lang === 'zh' ? 'EN' : '中';
+  if (langBtn) {
+    langBtn.textContent = state.lang === 'zh' ? 'EN' : '中';
+    langBtn.title = t('ui.switchLanguage');
+  }
+  const settingsBtn = $('#settingsBtn');
+  if (settingsBtn) settingsBtn.title = t('settings.title');
+  const themeBtn = $('#themeToggle');
+  if (themeBtn) themeBtn.title = t('ui.toggleTheme');
+  const mascot = $('#mascot');
+  if (mascot) mascot.title = t('ui.mascotHint');
 
   const subtitle = document.querySelector('.subtitle');
   if (subtitle) subtitle.textContent = t('ui.subtitle');

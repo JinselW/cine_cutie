@@ -1,3 +1,5 @@
+import { t } from './i18n.js';
+
 let busy = false;
 let bubbleTimer = null;
 
@@ -93,7 +95,7 @@ export function initMascotInteraction() {
   const mascot = document.getElementById('mascot');
   if (!mascot) return;
   mascot.style.cursor = 'pointer';
-  mascot.title = lang() === 'zh' ? '点我试试！' : 'Click me!';
+  mascot.title = t('ui.mascotHint');
   mascot.addEventListener('click', handleClick);
   initEyeTracking(mascot);
 }

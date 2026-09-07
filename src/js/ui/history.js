@@ -17,7 +17,7 @@ const getStatusLabel = status => {
   };
   return map[status] || status;
 };
-const time = value => new Date(value).toLocaleString();
+const time = value => new Date(value).toLocaleString(state.lang === 'zh' ? 'zh-CN' : 'en-US');
 
 function mediaPaths(value, found = new Set()) {
   if (typeof value === 'string' && /^\/api\/media\/(?:uploads\/)?[\w.%-]+$/.test(value)) found.add(value);
@@ -88,7 +88,7 @@ export function initHistory() {
         ${STEPS.map(step => {
           const data = snap.data?.[dataKeyOf(step)];
           if (!data) return '';
-          return `<details open><summary>${esc(step.icon)} ${esc(step.label)}</summary><div class="history-media">${mediaHtml(data)}</div><pre>${esc(JSON.stringify(data, null, 2))}</pre></details>`;
+          return `<details open><summary>${esc(step.icon)} ${esc(t(step.labelKey))}</summary><div class="history-media">${mediaHtml(data)}</div><pre>${esc(JSON.stringify(data, null, 2))}</pre></details>`;
         }).join('')}
         <details><summary>${t('history.sessionMessages', { count: snap.messages?.length || 0 })}</summary>${(snap.messages || []).map(m => `<p class="history-text"><small>${esc(time(m.at))} · ${esc(m.role)} ${esc(m.stepId || '')}</small><br>${esc(m.text)}</p>`).join('')}</details>
         <details><summary>${t('history.fullSnapshot')}</summary><pre>${esc(JSON.stringify({ configuration: snap.configuration, entities: snap.entities, artifacts: snap.artifacts, checkpoint: snap.checkpoint, runState: snap.runState }, null, 2))}</pre></details>`;
@@ -123,6 +123,22 @@ export function initHistory() {
   dialog.querySelector('[data-refresh]').onclick = () => { refresh(); if (selected) openRecord(selected); };
   let searchTimer;
   dialog.querySelector('input').oninput = () => { clearTimeout(searchTimer); searchTimer = setTimeout(refresh, 250); };
+  window.addEventListener('languagechange', async () => {
+    button.title = t('history.title');
+    button.setAttribute('aria-label', button.title);
+    dialog.setAttribute('aria-label', t('history.title'));
+    dialog.querySelector('header h2').textContent = t('history.title');
+    dialog.querySelector('[data-close]').textContent = t('history.close');
+    dialog.querySelector(':scope > .history-note').textContent = t('history.note');
+    const search = dialog.querySelector('input[type=search]');
+    search.placeholder = t('history.search');
+    search.setAttribute('aria-label', t('history.search'));
+    dialog.querySelector('[data-refresh]').textContent = t('history.refresh');
+    if (!dialog.open) return;
+    await refresh();
+    if (selected) await openRecord(selected);
+    else detail.innerHTML = `<p>${t('history.selectRecord')}</p>`;
+  });
   window.addEventListener('memory-status', e => {
     notice.textContent = e.detail.error ? t('history.retrySave', { error: e.detail.error }) : '';
     notice.classList.toggle('hidden', !e.detail.error);

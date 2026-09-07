@@ -8,12 +8,13 @@ import './providers/render.js';
 import { $, $$, escapeHtml } from './utils.js';
 import { state } from './state.js';
 import { STEPS, dataKeyOf } from './config.js';
-import { buildPipelineBar, showSection, setMascot, addAgentMessage, updatePipeline } from './ui/render.js';
+import { buildPipelineBar, showSection, setMascot, addAgentMessage, updatePipeline, refreshRunningLanguage } from './ui/render.js';
 import { showStepReadOnly } from './navigation.js';
 import { startPipeline, restoreSession, continuePipeline, clearSession, stopPipeline } from './engine.js';
 import { t, applyLang } from './i18n.js';
 import { initSettings } from './ui/settings.js';
 import { initMascotInteraction } from './mascot-interact.js';
+import { rerenderCurrentView } from './ui/views.js';
 
 const savedTheme = localStorage.getItem('cine-cutie-theme');
 if (savedTheme) {
@@ -40,6 +41,13 @@ $('#langToggle').addEventListener('click', () => {
   state.lang = state.lang === 'zh' ? 'en' : 'zh';
   localStorage.setItem('cine-cutie-lang', state.lang);
   applyLang();
+  buildPipelineBar();
+  const currentStep = STEPS[state.currentStep];
+  const hasCurrentOutput = currentStep && state.data[dataKeyOf(currentStep)] != null;
+  updatePipeline(state.currentStep, state.stepRunning ? 'active' : hasCurrentOutput ? 'done' : 'active');
+  if (state.stepRunning) refreshRunningLanguage();
+  else rerenderCurrentView();
+  window.dispatchEvent(new CustomEvent('languagechange'));
 });
 
 buildPipelineBar();

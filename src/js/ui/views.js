@@ -5,6 +5,18 @@ import { setMascot } from './render.js';
 import { t } from '../i18n.js';
 import { getExecutionLog, getTotalTokens, getAverageQuality } from '../observability.js';
 
+let currentViewRerender = null;
+
+function rememberView(renderer) {
+  currentViewRerender = renderer;
+}
+
+export function rerenderCurrentView() {
+  if (!currentViewRerender) return false;
+  currentViewRerender();
+  return true;
+}
+
 function mediaUrl(p) {
   if (!p) return '';
   return p.startsWith('/api/media/') ? p : '/api/media/' + p;
@@ -75,6 +87,7 @@ function bindFeedback(stepId, approveCallback) {
 }
 
 export function renderScript(data, onAdvance, readOnly = false) {
+  rememberView(() => renderScript(data, onAdvance, readOnly));
   const el = $('#stepContent');
   const chars = (data.characters || []).map(c => `
     <div class="char-card">
@@ -140,6 +153,7 @@ export function renderScript(data, onAdvance, readOnly = false) {
 }
 
 export function renderCharacterDesign(data, onAdvance, readOnly = false) {
+  rememberView(() => renderCharacterDesign(data, onAdvance, readOnly));
   const el = $('#stepContent');
   const { isConfigured: dsConfigured } = getDashScopeStatus();
 
@@ -196,6 +210,7 @@ export function renderCharacterDesign(data, onAdvance, readOnly = false) {
 }
 
 export function renderStoryboard(data, onAdvance, readOnly = false) {
+  rememberView(() => renderStoryboard(data, onAdvance, readOnly));
   const el = $('#stepContent');
 
   const episodes = (data.episodes || []).map(ep => {
@@ -242,6 +257,7 @@ const FRAME_ROLE_KEYS = {
 };
 
 export function renderReferenceImages(data, onAdvance, readOnly = false) {
+  rememberView(() => renderReferenceImages(data, onAdvance, readOnly));
   const el = $('#stepContent');
   const { isConfigured: dsConfigured } = getDashScopeStatus();
 
@@ -305,6 +321,7 @@ export function renderReferenceImages(data, onAdvance, readOnly = false) {
 }
 
 export function renderVideoGeneration(data, onAdvance, readOnly = false) {
+  rememberView(() => renderVideoGeneration(data, onAdvance, readOnly));
   const el = $('#stepContent');
   const { isConfigured: dsConfigured } = getDashScopeStatus();
 
@@ -340,6 +357,7 @@ export function renderVideoGeneration(data, onAdvance, readOnly = false) {
 }
 
 export function renderPostProduction(data, onAdvance, readOnly = false) {
+  rememberView(() => renderPostProduction(data, onAdvance, readOnly));
   const el = $('#stepContent');
   const { isConfigured: dsConfigured } = getDashScopeStatus();
 
@@ -385,6 +403,7 @@ function getDashScopeStatus() {
 }
 
 export function renderExecutionLog() {
+  rememberView(() => renderExecutionLog());
   const el = $('#stepContent');
   const log = getExecutionLog();
   const totalTokens = getTotalTokens();
@@ -469,8 +488,9 @@ export function renderExecutionLog() {
 }
 
 export function showCompletion() {
+  rememberView(() => showCompletion());
   const el = $('#stepContent');
-  const title = state.data.script?.title || 'Your Film';
+  const title = state.data.script?.title || t('ui.defaultFilmTitle');
   const finalVideo = state.data.finalVideo;
   const hasVideo = finalVideo?.finalVideo && finalVideo?.status === 'complete';
 
@@ -493,8 +513,8 @@ export function showCompletion() {
   $('#exportBtn').addEventListener('click', () => {
     const d = state.data;
     const exportData = {
-      title: d.script?.title || 'Untitled',
-      genre: d.script?.genre || 'Unknown',
+      title: d.script?.title || t('ui.untitled'),
+      genre: d.script?.genre || t('ui.unknown'),
       characters: d.script?.characters || [],
       settings: d.script?.settings || [],
       episodes: d.script?.episodes || [],

@@ -287,15 +287,15 @@ export function reportRetry(score, retryNum, maxRetries, agentIcon) {
 
 export function buildRetryFeedback(critiqueResult) {
   if (!critiqueResult) return '';
-  const parts = ['The previous output scored below quality threshold.'];
+  const parts = [t('critique.retryBelowThreshold')];
   if (critiqueResult.issues.length > 0) {
-    parts.push('Issues found:');
+    parts.push(t('critique.retryIssuesFound'));
     critiqueResult.issues.forEach(issue => parts.push(`- ${issue}`));
   }
   if (critiqueResult.suggestions.length > 0) {
-    parts.push('Suggestions for improvement:');
+    parts.push(t('critique.retrySuggestions'));
     critiqueResult.suggestions.forEach(s => parts.push(`- ${s}`));
   }
-  parts.push('Please regenerate the output addressing all issues.');
+  parts.push(t('critique.retryRegenerate'));
   return parts.join('\n');
 }

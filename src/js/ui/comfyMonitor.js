@@ -130,4 +130,10 @@ if (typeof window !== 'undefined') {
       if (monitor.showTaskProgress && target && latestMetrics) render(target, latestMetrics, true);
     }
   });
+  window.addEventListener('languagechange', () => {
+    for (const [targetId, monitor] of monitors) {
+      const target = $(`#${targetId}`);
+      if (target && latestMetrics) render(target, latestMetrics, monitor.showTaskProgress);
+    }
+  });
 }
