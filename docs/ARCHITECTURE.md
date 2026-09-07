@@ -227,13 +227,27 @@ BLOCK→该步 FAIL，WARN/REVIEW→CONDITIONAL_PASS 并在 UI 提示。
 | `/api/comfyui/tunnel/close` | POST | 关闭 SSH 隧道 |
 | `/api/task/:id` | GET | 轮询异步任务 |
 | `/api/media/:filename` | GET | 取生成媒体 |
+| `/api/memory` | GET/POST | 创作历史：摘要列表 + 全文搜索（`?q=`）/ 创建记录 |
+| `/api/memory/:id` | GET/PUT/PATCH/DELETE | 读取完整档案 / 保存快照 / 重命名 / 删除元数据 |
 | `/api/cache/stats` / `/api/cache/clear` | GET/POST | LLM 缓存 |
 | `/api/health` | GET | 健康检查 |
 
-- `dashscope.js`: DashScope REST 客户端，Key 经 `X-Api-Key` 逐请求传入
+- `dashscope.js`: DashScope REST 客户端，Key 经 `X-Api-Key` 逐请求传入；`clampVideoDuration(model, seconds)` 按模型档位夹取片段时长
+- `memory.js`: 创作历史档案读写，元数据落 `data/memory/<UUID>.json`（临时文件 + rename 原子写入）
 - `ssh-tunnel.js` + `comfyui.js`: 经 SSH 隧道访问远程 ComfyUI（密码来自 env `COMFY_SSH_PASSWORD`），补丁式修改 workflow 节点
 - `render.js`: ffmpeg-static 拼接；先 `-c copy`，混编码失败时回退 libx264/aac 重编码
 - 静态托管 `dist/` + SPA catch-all；媒体落盘 `media/`
+
+## 创作历史 Memory (`memory.js` + `server/memory.js`)
+
+每次新创作由 `beginMemory()` 单独建档，Orchestrator 在推进/修订/暂停/停止/失败/完成各节点调用 `saveMemory(status)`
+写入完整快照：输入（含提示词文件提取文本）、修订反馈、Agent 消息、六步结果 `state.data`、实体、当前步、
+ArtifactStore 版本与尝试记录、检查点、RunState，以及**仅模型配置与 videoMode**（`snapshot()` 刻意排除 API Key / SSH 密码等凭据）。
+
+- 前端 `memory.js`：串行队列 + 防抖写入，`memory-status` 事件在保存失败时提示可重试；`frozen` 快照冻结已停止/失败的记录
+- 后端 `server/memory.js` + `/api/memory*`：档案 CRUD + 全文搜索；媒体沿用 `media/`，记录只存引用（JSON 导出不含二进制）
+- 历史面板 `ui/history.js`（右上角 🕘）：独立预览，不修改当前任务；当前不支持从历史断点续跑
+- 详见 [docs/MEMORY.md](MEMORY.md)
 
 ## 国际化 (`i18n.js`)
 

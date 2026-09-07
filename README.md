@@ -6,16 +6,23 @@ Cine-Cutie 是一个端到端的 AI 电影创作系统。输入一句话故事�
 
 ## 特性
 
-- **创作历史 Memory**：自动保存会话、工作流结果与素材引用，支持历史搜索、预览、重命名、导出和删除；使用及备份说明见 [docs/MEMORY.md](docs/MEMORY.md)。
-
-- **6 步全自动 Pipeline**：剧本 → 角色&场景设计 → 分镜 → 图片生成 → 视频生成 → 后期合成
-- **端到端视频输出**：不只是文本规划——真正调用 DashScope API 生成图片和视频，最终用 ffmpeg 拼接成片
+- **6 步全自动 Pipeline**：剧本 → 角色&场景设计 → 分镜 → 图片生成 → 视频生成 → 后期合成，每步由独立 Agent 执行
+- **端到端视频输出**：不只是文本规划——真正调用 DashScope / ComfyUI 生成图片和视频，最终用 ffmpeg 拼接成片
+- **三种视频生成方式**：首帧生视频 / 首尾帧生视频 / 参考图生视频，由设置面板的「视频生成方式」统一驱动步骤 4 产帧规划与步骤 5 取素材、选模型
+- **提示词文件上传**：支持上传 .docx/.txt/.md 提示词文件（≤20MB），解析为纯文本后注入创作
 - **角色一致性**：先由 LLM 写出角色/场景设计稿（design + visualTag + palette），再据此生成三视图定妆图（正/背/侧）、正面肖像与场景空镜图；图片生成阶段把命中的定妆图与场景图作为图生图参考，所有包含该角色的视频片段复用同一张正面图作为 i2v 首帧，保持角色外貌贯穿全片
 - **跨语言角色匹配**：支持中/英文名匹配（enName），确保角色名在不同语言 prompt 中正确关联
 - **运镜指令**：从分镜数据提取 camera 参数（pan/tilt/zoom/dolly/tracking），自动转为视频 motion prompt
+- **逐片段时长**：分镜为每个镜头规划 3–10 秒时长，提交前由服务端按所选模型支持的档位自动夹取
 - **剧情连贯性约束**：剧本和分镜 prompt 内置叙事弧（setup → climax → resolution）和镜头间连续性要求
-- **Self-Critique 质量保障**：每步输出自动评分，低于阈值重试，保留最优结果
+- **Self-Critique 质量保障**：每步输出由 LLM 按 4 条针对性标准自评 1–10 分（阈值 7），媒体步骤附加真实图片/视频帧做多模态评审；一致性检查作为硬门禁（最终分 = min(LLM 分, 结构分)）
+- **Per-item 自动重试**：媒体项按失败类型选择重试策略（RETRY_SAME / REWRITE_PROMPT / CHANGE_SEED / SWAP_REFERENCE / GIVE_UP，最多 3 次），文本步追加 critique 反馈重跑，保留最优结果
+- **IP 合规审查**：内置 IP 库 + 四层证据匹配（exact → alias → fuzzy → keyword）+ 策略裁决（BLOCK/WARN/REVIEW/ALLOW），每步输出过合规门禁
 - **跨步骤实体追踪**：自动提取角色名、外貌、场景等实体，注入后续步骤确保一致性
+- **双后端视频生成**：DashScope 通义万相 + 远程 ComfyUI（H3 模型，DGX Spark 经 SSH 隧道）
+- **会话管理**：暂停/继续/停止（CancellationToken 统一驱动，AbortSignal 中止在途请求）+ 断点续跑（ExecutionCheckpoint + RunState）+ 步骤修订 + 回滚
+- **可观测性**：ArtifactStore 版本化产物追踪（itemLineage 尝试历史 + metrics），Pipeline 完成后展示执行日志（耗时/token/评分/重试次数/是否降级）
+- **创作历史 Memory**：自动保存会话、工作流结果与素材引用，支持历史搜索、预览、重命名、导出和删除；使用及备份说明见 [docs/MEMORY.md](docs/MEMORY.md)
 - **Seed 可复现**：图片和视频生成支持 seed 参数，相同输入产出稳定
 - **优雅降级**：未配置 API Key 时自动使用模板生成，仍可体验完整流程
 - **中英双语**：完整 i18n 支持
@@ -137,40 +144,62 @@ cine-cutie/
 ├── Dockerfile
 │
 ├── server/                       # Express 后端 (port 3006)
-│   ├── index.js                  # API 路由：LLM 代理、图片/视频生成、任务管理、媒体服务
-│   ├── dashscope.js              # DashScope API 封装：submitImageTask, submitVideoTask, pollTask
+│   ├── index.js                  # API 路由：LLM 代理、图片/视频生成、提示词上传、任务、媒体、Memory
+│   ├── dashscope.js              # DashScope API 封装：submitImageTask, submitVideoTask, pollTask, clampVideoDuration
+│   ├── comfyui.js                # 远程 ComfyUI 客户端（workflow 补丁式改写）
+│   ├── ssh-tunnel.js             # 到 DGX Spark 的 SSH 隧道
+│   ├── memory.js                 # 创作历史档案读写（data/memory/<UUID>.json）
 │   ├── cache.js                  # LRU 缓存
 │   ├── tasks.js                  # 异步任务状态管理
-│   └── render.js                 # ffmpeg 视频拼接
+│   ├── render.js                 # ffmpeg 视频拼接（copy 失败回退重编码）
+│   └── workflows/                # ComfyUI workflow 模板（h3_reference_to_video.json）
 │
 ├── src/
-│   ├── css/                      # 样式（base, components, pipeline, animations, responsive）
+│   ├── css/                      # 样式（base, components, pipeline, animations, history, responsive）
 │   └── js/
 │       ├── main.js               # 应用入口
 │       ├── config.js             # 6 步 Pipeline 配置（STEPS, contextKeys）
 │       ├── state.js              # 全局状态
-│       ├── engine.js             # Pipeline 引擎（推进、渲染调度）
-│       ├── orchestrator.js       # 编排器（Agent 调度、恢复、回滚）
+│       ├── engine.js             # 转发壳（re-export startPipeline / reviseStep / restoreSession）
+│       ├── orchestrator.js       # 编排器（Agent 调度、门禁、恢复、回滚、暂停/停止）
+│       ├── memory.js             # 创作历史前端（自动建档、快照、搜索、导出）
+│       ├── observability.js      # 执行日志（从 ArtifactStore 派生）
 │       ├── i18n.js               # 国际化（中/英）
-│       ├── observability.js      # 执行日志（从 Artifact 派生）
-│       ├── agents/               # 6 个 Agent（Script/Storyboard/Character/Reference/Video/Editor）
-│       ├── artifacts/            # ArtifactStore + 版本化 + 状态追踪
-│       ├── orchestrator/         # ExecutionCheckpoint / RunState / CancellationToken
+│       ├── navigation.js         # 视图导航
+│       ├── mascot-interact.js    # 吉祥物交互
+│       ├── agents/               # 6 个核心 Agent + 质量/重试/合规
+│       │   ├── baseAgent.js      # BaseAgent 基类（process → run，CancellationToken 边界）
+│       │   ├── scriptAgent.js    # 剧本生成 + JSON 修复 + validateScript
+│       │   ├── characterAgent.js # 角色&场景设计稿 + 三视图定妆图 + 场景空镜
+│       │   ├── storyboardAgent.js# 分镜（集/段/镜头）+ validateStoryboard
+│       │   ├── referenceAgent.js # 按 videoMode 规划帧图 + 图生图参考
+│       │   ├── videoAgent.js     # 按 videoMode 取素材 + 运镜 motion + 逐片段时长
+│       │   ├── editorAgent.js    # ffmpeg 拼接成片（确定性）
+│       │   ├── qcAgent.js        # Self-Critique 评分 + combineVerdict 硬门禁
+│       │   ├── qcConsistency.js  # 实体提取/合并 + 一致性约束 + checkConsistency
+│       │   ├── qcTypes.js        # QCVerdict / Severity / FailureType / maxRetriesFor
+│       │   ├── retryAgent.js     # per-item 重试策略规划（最多 3 次）
+│       │   └── ipComplianceAgent.js # IP 合规筛查（checkStepOutput）
+│       ├── artifacts/            # ArtifactStore 版本化 + ArtifactStatus/itemLineage/metrics
+│       ├── compliance/           # ipDatabase（IP 库）+ ipMatcher（四层证据匹配）
+│       ├── orchestrator/         # agentRegistry / executionCheckpoint / runState / cancellationToken
 │       ├── providers/
-│       │   ├── registry.js       # Provider 注册与调度
-│       │   ├── llm.js            # LLM Provider（OpenAI 兼容 API）
-│       │   ├── image.js          # 图片 Provider（DashScope 文生图 + 角色规范图管理）
-│       │   ├── video.js          # 视频 Provider（DashScope i2v + 角色图匹配 + 运镜指令）
+│       │   ├── registry.js       # Provider 注册与 capability 调度
+│       │   ├── llm.js            # LLM Provider（OpenAI 兼容 API，直连或经代理）
+│       │   ├── image.js          # 图片 Provider（DashScope 文生图 + 图生图编辑）
+│       │   ├── video.js          # 视频 Provider（DashScope i2v / r2v）
+│       │   ├── videoComfy.js     # 视频 Provider（远程 ComfyUI H3）
+│       │   ├── render.js         # 后期渲染 Provider（ffmpeg 拼接）
 │       │   ├── template.js       # 模板 Provider（离线降级）
-│       │   ├── prompts.js        # 所有步骤的 Prompt 模板
-│       │   ├── critic.js         # Self-Critique 质量评审
-│       │   ├── consistency.js    # 实体追踪与一致性约束
-│       │   └── render.js         # 后期渲染 Provider
+│       │   └── prompts.js        # 所有步骤的 Prompt 模板
+│       ├── utils/                # resolution.js（分辨率）+ visionMedia.js（多模态帧采样）
 │       └── ui/
-│           ├── render.js         # UI 渲染工具
-│           ├── views.js          # 各步骤视图
-│           └── settings.js       # 设置面板
+│           ├── render.js         # UI 渲染工具 + Pipeline 控制回调
+│           ├── views.js          # 各步骤视图 + 执行日志视图
+│           ├── settings.js       # 设置面板（模型/视频生成方式/代理/SSH）
+│           └── history.js        # 创作历史面板
 │
+├── data/memory/                  # 创作历史档案（<UUID>.json）
 └── media/                        # 生成的图片/视频文件存储
 ```
 
@@ -178,21 +207,28 @@ cine-cutie/
 
 | 端点 | 方法 | 说明 |
 |------|------|------|
-| `/api/chat/completions` | POST | LLM 代理（转发到 OpenAI 兼容 API，带 LRU 缓存） |
+| `/api/chat/completions` | POST | LLM 代理（转发到 OpenAI 兼容 API，带 LRU 缓存，`X-Cache` 头） |
 | `/api/generate/image` | POST | 批量生图：无 `refs` 时走文生图，带参考图且设置中选了图生图模型时逐条走图生图编辑 |
-| `/api/generate/video` | POST | 批量图生视频：模型由请求体传入（前端读设置里该生成方式对应的模型）；本地 `/api/media` 帧图转 Base64 data URI 后提交——V1 模型走 `input.img_url`（仅首帧），`wan2.7` 系列走 `media` 数组（`first_frame`/`last_frame`/`reference_image`）；每条片段带分镜规划的 `duration`，服务端按该模型支持的档位夹取 |
-| `/api/render/final` | POST | ffmpeg 拼接视频片段 |
+| `/api/generate/video` | POST | 批量图生视频：模型由请求体传入；本地 `/api/media` 帧图转 Base64 data URI 后提交——V1 模型走 `input.img_url`（仅首帧），`wan2.7` 系列走 `media` 数组（`first_frame`/`last_frame`/`reference_image`）；每条片段带分镜规划的 `duration`，服务端按该模型支持的档位夹取 |
+| `/api/generate/video-comfy` | POST | 远程 ComfyUI 生成（H3 模型，经 SSH 隧道） |
+| `/api/upload/prompt` | POST | 解析提示词文件（.docx/.txt/.md，≤20MB，UTF-8→GBK 回退，>20000 字截断） |
+| `/api/render/final` | POST | ffmpeg 拼接视频片段（copy 失败回退重编码） |
+| `/api/memory` | GET/POST | 创作历史：摘要列表 + 全文搜索（`?q=`）/ 创建记录 |
+| `/api/memory/:id` | GET/PUT/PATCH/DELETE | 读取完整档案 / 保存快照 / 重命名 / 删除 |
+| `/api/comfyui/status` | GET | SSH 隧道 + GPU 状态 |
 | `/api/task/:id` | GET | 查询异步任务状态 |
 | `/api/media/:filename` | GET | 获取生成的媒体文件 |
+| `/api/cache/stats` · `/api/cache/clear` | GET/POST | LLM 缓存统计 / 清空 |
 | `/api/health` | GET | 健康检查 |
 
 ## 技术栈
 
 - **前端**：原生 HTML/CSS/JS (ES Modules)，零框架依赖
 - **构建**：Vite 6
-- **后端**：Node.js + Express
-- **AI 模型**：DashScope（通义万相 wanx2.1 系列）
+- **后端**：Node.js + Express（端口 3006）
+- **AI 模型**：任意 OpenAI 兼容 API（文本及评估）、DashScope 通义万相（图片/视频）、ComfyUI H3（视频）
 - **视频处理**：ffmpeg（通过 ffmpeg-static）
+- **远程 GPU**：DGX Spark (GB10) 经 SSH 隧道运行 ComfyUI
 - **部署**：Docker 支持
 
 ## Docker 部署
