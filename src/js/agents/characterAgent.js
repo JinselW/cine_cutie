@@ -14,11 +14,12 @@ const SHEET_SUFFIX = '__sheet';
 const FRONT_SUFFIX = '__front';
 const JSON_REPAIR_PROMPT = 'Your last reply was not valid JSON. Please reply again with ONLY the JSON object. No markdown, no code fences, no commentary.';
 
-function applyVisualRetryFeedback(items, critique) {
+function applyVisualRetryFeedback(items, critique, userFeedback) {
   const note = (critique.suggestions || []).join('; ');
+  const feedback = userFeedback ? `\nUser feedback: ${userFeedback}` : '';
   for (const item of items) {
     item.seed = (item.seed ?? 42) + 7;
-    if (note) item.prompt = `${item.prompt}\n${note}`;
+    if (note || feedback) item.prompt = `${item.prompt}${note}${feedback}`;
   }
 }
 
@@ -75,7 +76,7 @@ export class CharacterAgent extends BaseAgent {
       if (crit.source === 'structural') break;
 
       reportRetry(crit.score, attempt + 1, MAX_STAGE_RETRIES, '🎨');
-      applyVisualRetryFeedback(items, crit);
+      applyVisualRetryFeedback(items, crit, ctx.feedback);
     }
 
     const finalData = bestData || { characters: [], settings: [] };
