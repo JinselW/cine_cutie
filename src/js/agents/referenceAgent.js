@@ -80,7 +80,8 @@ export class ReferenceAgent extends BaseAgent {
     const complete = finalData.shots.filter(s => s.status === 'complete' || s.imagePath).length;
 
     artifact.data = finalData;
-    artifact.status = complete > 0 ? ArtifactStatus.COMPLETE : ArtifactStatus.FAILED;
+    const comfyTextFallback = complete === 0 && getActiveProvider('video')?.id === 'video-comfy';
+    artifact.status = complete > 0 || comfyTextFallback ? ArtifactStatus.COMPLETE : ArtifactStatus.FAILED;
 
     return {
       artifacts: [artifact],
@@ -92,6 +93,7 @@ export class ReferenceAgent extends BaseAgent {
         qualityScore: bestCrit?.score ?? 0,
         consistencyIssues: bestCrit?.consistency?.issues || [],
         verdict: bestCrit?.verdict ?? null,
+        comfyTextFallback,
       },
     };
   }
@@ -235,15 +237,6 @@ export class ReferenceAgent extends BaseAgent {
 
     const results = new Map();
     const pending = [...items];
-
-    for (const item of items) {
-      recordItemAttempt(artifact, item.id, {
-        seed: item.seed,
-        prompt: item.prompt,
-        referenceId: item.refs?.[0] || null,
-        status: 'pending',
-      });
-    }
 
     addAgentMessage('🖼️', t('ui.refImagesGenerating', { current: 1, total: items.length }));
 

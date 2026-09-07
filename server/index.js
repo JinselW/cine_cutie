@@ -7,8 +7,8 @@ import { LRUCache } from './cache.js';
 import { submitImageTask, submitImageEditTask, parseImageResultUrl, submitVideoTask, submitVideoTaskV2, pollTask, downloadFile, detectVideoMode, fileToDataUri } from './dashscope.js';
 import { createTask, getTask, updateTask, cancelTask, isTaskCancelled } from './tasks.js';
 import { concatVideos, checkFfmpeg } from './render.js';
-import { submitWorkflow, pollUntilDone, downloadOutput, uploadImageToComfy, checkComfyUIStatus } from './comfyui.js';
-import { ensureTunnel, closeTunnel, getTunnelStatus } from './ssh-tunnel.js';
+import { submitWorkflow, pollUntilDone, downloadOutput, uploadImageToComfy, checkComfyUIStatus, selectWorkflowMode, cancelPrompt, MAX_COMFY_REFERENCE_IMAGES } from './comfyui.js';
+import { ensureTunnel, closeTunnel, getTunnelStatus, deleteComfyInputFiles } from './ssh-tunnel.js';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
@@ -620,7 +620,7 @@ app.post('/api/render/final', async (req, res) => {
 });
 
 app.post('/api/generate/video-comfy', async (req, res) => {
-  const { clips, sshConfig: clientSsh, duration, aspectRatio, megapixels, enableLightning, uploads } = req.body;
+  const { clips, sshConfig: clientSsh, aspectRatio, megapixels, enableLightning, uploads } = req.body;
 
   if (!clientSsh?.host || !clientSsh?.user) {
     return res.status(400).json({ error: 'Missing SSH config (host, user required)' });
@@ -645,6 +645,7 @@ app.post('/api/generate/video-comfy', async (req, res) => {
   }
 
   const task = createTask('video-comfy', { total: clips.length });
+  const remoteImageCache = new Map();
 
   (async () => {
     const results = [];
@@ -668,47 +669,64 @@ app.post('/api/generate/video-comfy', async (req, res) => {
       const clip = clips[i];
       let lastError = null;
 
-      for (let retry = 0; retry <= 2; retry++) {
+      // Item-level retries are owned by VideoAgent. Submitting again here would
+      // multiply long-running GPU jobs and hide the failed attempt from lineage.
+      for (let retry = 0; retry < 1; retry++) {
         if (isTaskCancelled(task.id)) { lastError = 'Cancelled'; break; }
-        if (retry > 0) {
-          console.log(`[ComfyUI] task=${task.id} clip ${i + 1} retry ${retry}/2`);
-          await new Promise(r => setTimeout(r, 3000));
-        }
         try {
           updateTask(task.id, { status: 'running', current: i + 1, progress: Math.round((i / clips.length) * 100) });
 
-          let refImageFiles = [];
-          if (uploads?.referenceImages?.length > 0) {
-            for (const ref of uploads.referenceImages) {
-              if (ref.localPath) {
-                const remoteName = `ref_${task.id}_${i}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}${path.extname(ref.localPath)}`;
-                await uploadImageToComfy(sshConfig, ref.localPath, remoteName);
-                refImageFiles.push(remoteName);
-              }
+          const requestedRefs = Array.isArray(clip.images) ? clip.images.slice(0, MAX_COMFY_REFERENCE_IMAGES) : [];
+          const legacyRefs = uploads?.referenceImages?.map(ref => ref.localPath).filter(Boolean) || [];
+          const localImagePaths = requestedRefs.length
+            ? requestedRefs.map(ref => resolveMediaRef(ref))
+            : legacyRefs;
+          if (requestedRefs.length && localImagePaths.some(filePath => !filePath)) {
+            throw new Error('One or more ComfyUI input images are missing from the media directory');
+          }
+
+          const mode = selectWorkflowMode(clip.mode, localImagePaths.filter(Boolean).length);
+          const imageFiles = [];
+          for (const localPath of localImagePaths.filter(Boolean)) {
+            let remoteName = remoteImageCache.get(localPath);
+            if (!remoteName) {
+              remoteName = `cine_${task.id}_${i}_${imageFiles.length}_${Date.now()}${path.extname(localPath) || '.png'}`;
+              await uploadImageToComfy(sshConfig, localPath, remoteName);
+              remoteImageCache.set(localPath, remoteName);
             }
+            imageFiles.push(remoteName);
           }
 
           const comfyAbort = new AbortController();
+          let promptId;
+          let promptFinished = false;
+          let remoteCancellation = null;
+          const cancelRemote = () => {
+            comfyAbort.abort();
+            if (promptId && !remoteCancellation) remoteCancellation = cancelPrompt(sshConfig, promptId);
+            return remoteCancellation;
+          };
           const cancelWatcher = setInterval(() => {
-            if (isTaskCancelled(task.id)) comfyAbort.abort();
+            if (isTaskCancelled(task.id)) void cancelRemote();
           }, 1000);
 
-          let promptId;
           try {
             promptId = await submitWorkflow(sshConfig, {
+              mode,
               prompt: clip.prompt || 'Scene animation',
               seed: clip.seed ?? Math.floor(Math.random() * 1e15),
-              duration: duration || 5,
-              refImageFiles,
+              duration: clip.duration ?? 5,
+              imageFiles,
               enableLightning: enableLightning || false,
               aspectRatio: aspectRatio || '16:9',
               megapixels: Number.isFinite(megapixels) ? megapixels : undefined,
               signal: comfyAbort.signal,
             });
 
-            console.log(`[ComfyUI] task=${task.id} clip ${i + 1} submitted, prompt_id=${promptId}`);
+            console.log(`[ComfyUI] task=${task.id} clip ${i + 1} submitted, mode=${mode}, images=${imageFiles.length}, duration=${clip.duration ?? 5}s, prompt_id=${promptId}`);
 
             const result = await pollUntilDone(sshConfig, promptId, { timeoutMs: 600000, signal: comfyAbort.signal });
+            promptFinished = true;
 
             if (comfyAbort.signal.aborted || isTaskCancelled(task.id)) {
               lastError = 'Cancelled';
@@ -728,6 +746,8 @@ app.post('/api/generate/video-comfy', async (req, res) => {
             }
           } finally {
             clearInterval(cancelWatcher);
+            if (!promptFinished && promptId) await cancelRemote();
+            else if (remoteCancellation) await remoteCancellation;
           }
 
           if (lastError === 'Cancelled') break;
@@ -759,6 +779,12 @@ app.post('/api/generate/video-comfy', async (req, res) => {
   })().catch(err => {
     console.error(`[ComfyUI] task=${task.id} FATAL: ${err.message}`);
     updateTask(task.id, { status: 'failed', error: err.message });
+  }).finally(async () => {
+    try {
+      await deleteComfyInputFiles(sshConfig, [...remoteImageCache.values()]);
+    } catch (err) {
+      console.warn(`[ComfyUI] task=${task.id} input cleanup failed: ${err.message}`);
+    }
   });
 
   res.json({ taskId: task.id });
@@ -813,8 +839,9 @@ app.get('/api/comfyui/status', async (req, res) => {
 });
 
 app.post('/api/comfyui/tunnel/close', (req, res) => {
-  closeTunnel();
-  res.json({ ok: true });
+  closeTunnel()
+    .then(() => res.json({ ok: true }))
+    .catch(err => res.status(500).json({ error: err.message }));
 });
 
 app.get('/api/task/:id', (req, res) => {

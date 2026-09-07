@@ -222,14 +222,6 @@ export class CharacterAgent extends BaseAgent {
     const results = new Map();
     const pending = [...items];
 
-    for (const item of items) {
-      recordItemAttempt(artifact, item.id, {
-        seed: item.seed,
-        prompt: item.prompt,
-        status: 'pending',
-      });
-    }
-
     addAgentMessage('🎨', t('ui.charDesignGenerating', { total: items.length }));
 
     for (let attempt = 0; attempt < MAX_ITEM_ATTEMPTS && pending.length > 0; attempt++) {

@@ -43,7 +43,9 @@ export class RetryAgent {
 
       switch (strategy) {
         case ItemRetryStrategy.REWRITE_PROMPT:
-          overrides.promptOverrides = feedback || `Regenerate with improved prompt for ${item.itemId}`;
+          overrides.promptOverrides = {
+            [item.itemId]: feedback || `Regenerate with improved prompt for ${item.itemId}`,
+          };
           overrides.seed = baseSeed + 1;
           break;
         case ItemRetryStrategy.CHANGE_SEED:
@@ -83,7 +85,7 @@ export class RetryAgent {
       return ItemRetryStrategy.SWAP_REFERENCE;
     }
 
-    if (/prompt|content.*policy|quality/i.test(error) && attemptCount === 0) {
+    if (/prompt|content.*policy|quality/i.test(error) && attemptCount <= 1) {
       return ItemRetryStrategy.REWRITE_PROMPT;
     }
 

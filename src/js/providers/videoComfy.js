@@ -2,6 +2,9 @@ import { registerProvider } from './registry.js';
 import { state } from '../state.js';
 import { tierToMp } from '../utils/resolution.js';
 import { registerBackendTask, unregisterBackendTask } from './activeTasks.js';
+import { selectComfyWorkflow } from './comfyWorkflowMode.js';
+
+const DEFAULT_CLIP_DURATION = 5;
 
 function getSshConfig() {
   try {
@@ -37,38 +40,40 @@ const comfyUIProvider = {
 
     const clips = items.map(item => {
       const overridePrompt = overrides.promptOverrides?.[item.id];
+      const overrideReference = overrides.referenceOverrides?.[item.id];
       const overrideSeed = overrides.seed?.[item.id];
+      const source = overrideReference
+        ? { ...item, imagePath: '', imageUrl: overrideReference, referenceImages: item.referenceImages?.length ? [overrideReference] : [] }
+        : item;
+      const workflow = selectComfyWorkflow(source, uploads);
       return {
         id: item.id,
         prompt: overridePrompt || item.prompt,
+        duration: item.duration ?? DEFAULT_CLIP_DURATION,
         seed: overrideSeed ?? item.seed ?? Math.floor(Math.random() * 1e15),
+        mode: workflow.mode,
+        images: workflow.images,
       };
     });
 
-    const hasUploads = uploads && (uploads.firstFrame || uploads.referenceImages?.length > 0);
-
     const body = {
-      clips: clips.map(c => ({ prompt: c.prompt, seed: c.seed })),
+      clips: clips.map(c => ({
+        prompt: c.prompt,
+        duration: c.duration,
+        seed: c.seed,
+        mode: c.mode,
+        images: c.images,
+      })),
       sshConfig: {
         host: sshConfig.host,
         port: sshConfig.port || 6078,
         user: sshConfig.user || 'Developer',
         comfyPort: sshConfig.comfyPort || 8188,
       },
-      duration: 5,
       aspectRatio: state.aspectRatio || '16:9',
       megapixels: tierToMp(state.resolution),
       enableLightning: sshConfig.enableLightning || false,
     };
-
-    if (hasUploads) {
-      body.uploads = {
-        referenceImages: (uploads.referenceImages || []).map(r => ({
-          localPath: r.localPath,
-          name: r.name,
-        })),
-      };
-    }
 
     let taskId = null;
     try {
@@ -92,9 +97,12 @@ const comfyUIProvider = {
       ({ taskId } = await res.json());
       registerBackendTask(taskId);
       const startTime = Date.now();
-      const MAX_WAIT = 20 * 60 * 1000;
+      // The server allows one 10-minute ComfyUI attempt per clip. Keep a small
+      // transfer/polling margin without waiting through obsolete backend retries.
+      const MAX_WAIT = Math.max(20 * 60 * 1000, clips.length * 11 * 60 * 1000);
+      const maxPollAttempts = Math.ceil(MAX_WAIT / 5000);
 
-      for (let attempt = 0; attempt < 400; attempt++) {
+      for (let attempt = 0; attempt < maxPollAttempts; attempt++) {
         if (signal?.aborted) {
           return items.map(item => ({ id: item.id, videoPath: '', status: 'failed', error: 'Cancelled' }));
         }

@@ -152,7 +152,7 @@ cine-cutie/
 │   ├── cache.js                  # LRU 缓存
 │   ├── tasks.js                  # 异步任务状态管理
 │   ├── render.js                 # ffmpeg 视频拼接（copy 失败回退重编码）
-│   └── workflows/                # ComfyUI workflow 模板（h3_reference_to_video.json）
+│   └── workflows/                # ComfyUI H3 的 t2v / 首帧 / 首尾帧 / 参考图工作流模板
 │
 ├── src/
 │   ├── css/                      # 样式（base, components, pipeline, animations, history, responsive）

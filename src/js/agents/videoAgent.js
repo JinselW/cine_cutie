@@ -223,6 +223,7 @@ export class VideoAgent extends BaseAgent {
     const sbById = new Map(sbShots.map(s => [s.shot_id, s]));
     const shots = refImages.shots || [];
     const items = [];
+    const allowsTextFallback = getActiveProvider('video')?.id === 'video-comfy';
 
     for (let i = 0; i < shots.length; i++) {
       const shot = shots[i];
@@ -237,13 +238,16 @@ export class VideoAgent extends BaseAgent {
 
       if (mode === 'referenceImage') {
         const referenceImages = this.#referenceListFor(shot, matchedChar);
-        if (!referenceImages.length) continue;
-        items.push({ ...base, referenceImages, referenceId: referenceImages[0] });
+        if (!referenceImages.length && !allowsTextFallback) continue;
+        items.push({ ...base, referenceImages, referenceId: referenceImages[0] || null });
         continue;
       }
 
       const first = this.#firstFrameFor(shot, matchedChar);
-      if (!first) continue;
+      if (!first) {
+        if (allowsTextFallback) items.push(base);
+        continue;
+      }
 
       if (mode === 'firstLastFrame') {
         const last = this.#lastFrameFor(shot, shots, i, refImages.extraFrames);
@@ -330,15 +334,6 @@ export class VideoAgent extends BaseAgent {
     const results = new Map();
     const pending = [...items];
 
-    for (const item of items) {
-      recordItemAttempt(artifact, item.id, {
-        seed: item.seed,
-        prompt: item.prompt,
-        referenceId: item.referenceId,
-        status: 'pending',
-      });
-    }
-
     addAgentMessage('🎥', t('ui.videoGenGenerating', { current: 1, total: items.length }));
 
     for (let attempt = 0; attempt < MAX_ITEM_ATTEMPTS && pending.length > 0; attempt++) {
@@ -361,7 +356,8 @@ export class VideoAgent extends BaseAgent {
         recordItemAttempt(artifact, result.id, {
           seed: batch.find(b => b.id === result.id)?.seed,
           prompt: batch.find(b => b.id === result.id)?.prompt,
-          referenceId: batch.find(b => b.id === result.id)?.imageUrl,
+          referenceId: pending.find(b => b.id === result.id)?.referenceId
+            || batch.find(b => b.id === result.id)?.imageUrl,
           status: result.status,
           error: result.error,
         });
@@ -396,6 +392,7 @@ export class VideoAgent extends BaseAgent {
           if (plan.overrides.referenceOverrides?.[plan.itemId]) {
             item.imageUrl = plan.overrides.referenceOverrides[plan.itemId];
             item.imagePath = '';
+            item.referenceImages = [plan.overrides.referenceOverrides[plan.itemId]];
             item.referenceId = plan.overrides.referenceOverrides[plan.itemId];
           }
         }
@@ -419,15 +416,6 @@ export class VideoAgent extends BaseAgent {
 
     const results = new Map();
     const pending = [...items];
-
-    for (const item of items) {
-      recordItemAttempt(artifact, item.id, {
-        seed: item.seed,
-        prompt: item.prompt,
-        referenceId: item.referenceId,
-        status: 'pending',
-      });
-    }
 
     addAgentMessage('🎥', t('ui.videoGenGenerating', { current: 1, total: items.length }));
 
@@ -500,10 +488,10 @@ export class VideoAgent extends BaseAgent {
         return {
           shot_id: shot.shot_id,
           videoPath: result.videoPath || '',
-          status: result.status === 'complete' ? 'complete' : 'failed',
+          status: result.status === 'complete' ? 'complete' : result.status === 'skipped' ? 'skipped' : 'failed',
         };
       }
-      if (!shot.imagePath || !shot.imageUrl) {
+      if (!shot.imagePath && !shot.imageUrl) {
         return { shot_id: shot.shot_id, videoPath: '', status: 'skipped' };
       }
       return { shot_id: shot.shot_id, videoPath: '', status: 'failed' };

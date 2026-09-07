@@ -273,13 +273,18 @@ function handleSave() {
     useProxy,
   });
 
-  saveDashScopeConfig({
+  const dashScopeConfig = {
     apiKey: apiProviders.dashscope?.apiKey || '',
     imageModel: imageName || IMAGE_PRESETS[0],
     img2imgModel: img2imgName || IMG2IMG_PRESETS[0],
-    videoModel: comfyChosen ? slotDefaultModel('video') : slotModels.video,
-    refVideoModel: comfyChosen ? slotDefaultModel('refVideo') : slotModels.refVideo,
-  });
+  };
+  // Keep the ComfyUI sentinel in the shared settings record. The API provider
+  // retains its previous model in memory and receives new values when selected.
+  if (!comfyChosen) {
+    dashScopeConfig.videoModel = slotModels.video;
+    dashScopeConfig.refVideoModel = slotModels.refVideo;
+  }
+  saveDashScopeConfig(dashScopeConfig);
 
   saveComfySshConfig();
 
@@ -413,7 +418,8 @@ function setupVideoModeSelect() {
   const select = $('#cfgVideoMode');
   if (!select) return;
   select.addEventListener('change', () => {
-    applyVideoMode(select.value);
+    const keepComfy = $('#cfgVideoModeModel')?.value === COMFY_MODEL;
+    applyVideoMode(select.value, keepComfy ? COMFY_MODEL : undefined);
   });
 }
 

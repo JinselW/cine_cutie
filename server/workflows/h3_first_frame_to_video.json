@@ -6,7 +6,7 @@
       "format.codec": "auto",
       "codec": "auto",
       "video": [
-        "130",
+        "105:91",
         0
       ]
     },
@@ -15,18 +15,50 @@
       "title": "保存视频"
     }
   },
+  "114": {
+    "inputs": {
+      "image": "landfill_scene_v4_1788421035.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "加载图像"
+    }
+  },
   "115": {
     "inputs": {
-      "aspect_ratio": "16:9 (Widescreen)",
+      "aspect_ratio": "1:1 (Square)",
       "megapixels": 0.4,
       "multiple": 32
     },
     "class_type": "ResolutionSelector",
     "_meta": {
-      "title": "Resolution Selector (Size)"
+      "title": "分辨率选择器"
     }
   },
   "119": {
+    "inputs": {
+      "upscale_method": "nearest-exact",
+      "megapixels": 0.9,
+      "resolution_steps": 32
+    },
+    "class_type": "ImageScaleToTotalPixels",
+    "_meta": {
+      "title": "缩放图像（像素）"
+    }
+  },
+  "120": {
+    "inputs": {
+      "image": [
+        "119",
+        0
+      ]
+    },
+    "class_type": "GetImageSize",
+    "_meta": {
+      "title": "获取图像尺寸"
+    }
+  },
+  "105:11": {
     "inputs": {
       "vae_name": "minimax_h3_video_vae_fp16.safetensors"
     },
@@ -35,7 +67,7 @@
       "title": "加载VAE"
     }
   },
-  "120": {
+  "105:24": {
     "inputs": {
       "vae_name": "minimax_h3_audio_vae_fp32.safetensors"
     },
@@ -44,14 +76,14 @@
       "title": "加载VAE"
     }
   },
-  "121": {
+  "105:23": {
     "inputs": {
       "samples": [
-        "125",
+        "105:14",
         0
       ],
       "vae": [
-        "120",
+        "105:24",
         0
       ]
     },
@@ -60,14 +92,14 @@
       "title": "VAE解码（音频）"
     }
   },
-  "122": {
+  "105:10": {
     "inputs": {
       "samples": [
-        "125",
+        "105:14",
         0
       ],
       "vae": [
-        "119",
+        "105:11",
         0
       ]
     },
@@ -76,7 +108,7 @@
       "title": "VAE解码"
     }
   },
-  "123": {
+  "105:17": {
     "inputs": {
       "sampler_name": "res_multistep"
     },
@@ -85,16 +117,16 @@
       "title": "K采样器选择"
     }
   },
-  "124": {
+  "105:9": {
     "inputs": {
       "scheduler": "simple",
       "steps": [
-        "142",
+        "105:123",
         0
       ],
       "denoise": 1,
       "model": [
-        "127",
+        "105:122",
         0
       ]
     },
@@ -103,26 +135,26 @@
       "title": "基本调度器"
     }
   },
-  "125": {
+  "105:14": {
     "inputs": {
       "noise": [
-        "129",
+        "105:15",
         0
       ],
       "guider": [
-        "126",
+        "105:16",
         0
       ],
       "sampler": [
-        "123",
+        "105:17",
         0
       ],
       "sigmas": [
-        "124",
+        "105:9",
         0
       ],
       "latent_image": [
-        "136",
+        "105:104",
         1
       ]
     },
@@ -131,14 +163,14 @@
       "title": "自定义采样器（高级）"
     }
   },
-  "126": {
+  "105:16": {
     "inputs": {
       "model": [
-        "141",
+        "105:122",
         0
       ],
       "conditioning": [
-        "136",
+        "105:104",
         0
       ]
     },
@@ -147,9 +179,9 @@
       "title": "基本引导器"
     }
   },
-  "127": {
+  "105:6": {
     "inputs": {
-      "unet_name": "minimax_h3_ref2va_pruned_int8_convrot.safetensors",
+      "unet_name": "minimax_h3_fl2va_pruned_int8_convrot.safetensors",
       "weight_dtype": "default"
     },
     "class_type": "UNETLoader",
@@ -157,7 +189,7 @@
       "title": "UNet加载器"
     }
   },
-  "128": {
+  "105:13": {
     "inputs": {
       "clip_name": "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
       "type": "minimax",
@@ -168,26 +200,26 @@
       "title": "加载CLIP"
     }
   },
-  "129": {
+  "105:15": {
     "inputs": {
-      "noise_seed": 261662374822964
+      "noise_seed": 757358688076805
     },
     "class_type": "RandomNoise",
     "_meta": {
       "title": "随机噪波"
     }
   },
-  "130": {
+  "105:91": {
     "inputs": {
       "fps": 24,
       "bit_depth": 8,
       "color_space": "sRGB",
       "images": [
-        "122",
+        "105:10",
         0
       ],
       "audio": [
-        "121",
+        "105:23",
         0
       ]
     },
@@ -196,34 +228,9 @@
       "title": "创建视频"
     }
   },
-  "131": {
+  "105:104": {
     "inputs": {
-      "expression": "max(5, round(a * 24)) + (5 - (max(5, round(a * 24)) % 17)) % 17",
-      "values.a": [
-        "132",
-        0
-      ]
-    },
-    "class_type": "ComfyMathExpression",
-    "_meta": {
-      "title": "数学表达式"
-    }
-  },
-  "132": {
-    "inputs": {
-      "value": 5
-    },
-    "class_type": "PrimitiveFloat",
-    "_meta": {
-      "title": "Float (Duration)"
-    }
-  },
-  "136": {
-    "inputs": {
-      "prompt": [
-        "138",
-        0
-      ],
+      "prompt": "Editorial tech product film. The transparent gaming mouse from <Picture 1> in its original scene: a pitch-black studio void with a dark, subtle reflective surface, lit by dramatic duotone vibrant blue and warm neon orange rim lighting, deep soft shadow falloff into pure black. Monochromatic dark palette with electric blue and amber accents. Material motif: glowing internal metallic micro-components and glossy acrylic refractions. The environment is constant throughout.\nSHOT 1: The scene opens exactly on image 1, the mouse resting confidently on the dark surface; the blue and orange lights slowly pulse brighter, refracting deeply through the transparent acrylic shell as the camera executes a slow, deliberate push-in to reveal the intricate circuitry.\nSHOT 2: Cut to an extreme macro profile of the ridged scroll wheel and layered internal micro-components; the camera glides slowly along the side as a sharp beam of warm orange light sweeps across the metallic textures, contrasting perfectly against the deep blue ambient glow.\nSHOT 3: Cut to a low-angle beauty shot: the mouse levitates weightlessly a few centimeters above the dark reflective surface, rotating in a slow, precise orbit; the duotone lighting flares gently along the glassy transparent edges before fading slowly into a sleek silhouette.\nAudio: deep pulsing sub-bass room tone, sharp tactile mechanical clicks, a sweeping glassy whoosh on cuts, and a rising electronic swell that resolves to near-silence on the final fade. ",
       "width": [
         "115",
         0
@@ -233,127 +240,55 @@
         1
       ],
       "length": [
-        "131",
+        "105:107",
         1
       ],
-      "ref_image_size": "match",
       "clip": [
-        "128",
+        "105:13",
         0
       ],
       "vae": [
-        "119",
+        "105:11",
         0
       ],
-      "audio_vae": [
-        "120",
-        0
-      ],
-      "ref_images.ref_image_0": [
-        "137",
-        0
-      ],
-      "ref_images.ref_image_1": [
-        "139",
+      "first_frame": [
+        "114",
         0
       ]
     },
-    "class_type": "MiniMaxH3ReferenceToVideo",
+    "class_type": "MiniMaxH3ImageToVideo",
     "_meta": {
-      "title": "MiniMax H3 参考转视频"
+      "title": "MiniMax H3 图像转视频"
     }
   },
-  "137": {
+  "105:107": {
     "inputs": {
-      "image": "red_superboy_on_city_roof.png"
-    },
-    "class_type": "LoadImage",
-    "_meta": {
-      "title": "加载图像"
-    }
-  },
-  "138": {
-    "inputs": {
-      "value": "Bold comic-book ink style, heavy linework, red and blue-black palette, night city. Use <Picture 2> and <Picture 1> as reference frames and <Audio 1> exactly as it is.\nCUT 1: top-down view of the little boy superhero on the rooftop — red cape fluttering in the wind, hands planted on his hips, freckles and a cocky grin as he looks straight up into the camera. The camera slowly descends toward him as he delivers his line — as he speaks, comic-book graphic overlay text word by word in sync with his voice: \"GET READY TO\" - \"MEET\" — \"YOUR\" — \"MAKER\" — huge jagged comic lettering, white with heavy black outlines and red drop shadows, tilted at scrappy angles, until the three words hang stacked in the air above him between his face and the lens.\nTRANSITION: a violent WHIP PAN off the rooftop that SMEARS the floating words away with it, motion-streaked —\nCUT 2: low hero angle on the colossal black mech-kaiju towering over the skyline as it rears back and unleashes a GIANT terrifying ROAR — jaws wide with fangs, red eyes and chest-core flaring blinding bright, blue lightning arcing off its head, the roar's shockwave rippling dust and rattling windows down the buildings, comic-style speed-lines and ink splatter bursting from the impact of the sound. It leans INTO the camera as the roar peaks. Hold on the roar."
-    },
-    "class_type": "PrimitiveStringMultiline",
-    "_meta": {
-      "title": "Input Text (Prompt)"
-    }
-  },
-  "139": {
-    "inputs": {
-      "image": "mecha_dragon_lightning.png"
-    },
-    "class_type": "LoadImage",
-    "_meta": {
-      "title": "加载图像"
-    }
-  },
-  "141": {
-    "inputs": {
-      "switch": [
-        "146",
-        0
-      ],
-      "on_false": [
-        "127",
-        0
-      ],
-      "on_true": [
-        "145",
+      "expression": "max(5, round(a * 24)) + (5 - (max(5, round(a * 24)) % 17)) % 17",
+      "values.a": [
+        "105:111",
         0
       ]
     },
-    "class_type": "ComfySwitchNode",
+    "class_type": "ComfyMathExpression",
     "_meta": {
-      "title": "If/Else Switch (model)"
+      "title": "数学表达式"
     }
   },
-  "142": {
+  "105:111": {
     "inputs": {
-      "switch": [
-        "146",
-        0
-      ],
-      "on_false": [
-        "143",
-        0
-      ],
-      "on_true": [
-        "144",
-        0
-      ]
+      "value": 5
     },
-    "class_type": "ComfySwitchNode",
+    "class_type": "PrimitiveFloat",
     "_meta": {
-      "title": "If/Else Switch (Steps)"
+      "title": "Float (duration)"
     }
   },
-  "143": {
-    "inputs": {
-      "value": 20
-    },
-    "class_type": "PrimitiveInt",
-    "_meta": {
-      "title": "Int (Full)"
-    }
-  },
-  "144": {
-    "inputs": {
-      "value": 4
-    },
-    "class_type": "PrimitiveInt",
-    "_meta": {
-      "title": "Int (Lightning LoRA)"
-    }
-  },
-  "145": {
+  "105:121": {
     "inputs": {
       "lora_name": "minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors",
       "strength_model": 1,
       "model": [
-        "127",
+        "105:6",
         0
       ]
     },
@@ -362,7 +297,65 @@
       "title": "LoRA加载器（仅模型）"
     }
   },
-  "146": {
+  "105:122": {
+    "inputs": {
+      "switch": [
+        "105:126",
+        0
+      ],
+      "on_false": [
+        "105:6",
+        0
+      ],
+      "on_true": [
+        "105:121",
+        0
+      ]
+    },
+    "class_type": "ComfySwitchNode",
+    "_meta": {
+      "title": "If/Else Switch (Model)"
+    }
+  },
+  "105:123": {
+    "inputs": {
+      "switch": [
+        "105:126",
+        0
+      ],
+      "on_false": [
+        "105:124",
+        0
+      ],
+      "on_true": [
+        "105:125",
+        0
+      ]
+    },
+    "class_type": "ComfySwitchNode",
+    "_meta": {
+      "title": "If/Else Switch (Steps)"
+    }
+  },
+  "105:124": {
+    "inputs": {
+      "value": 20
+    },
+    "class_type": "PrimitiveInt",
+    "_meta": {
+      "title": "整数"
+    }
+  },
+  "105:125": {
+    "inputs": {
+      "value": 8
+    },
+    "class_type": "PrimitiveInt",
+    "_meta": {
+      "title": "整数"
+    }
+  },
+  "105:126": {
     "inputs": {
       "value": false
     },

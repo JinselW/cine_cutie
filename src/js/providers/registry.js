@@ -2,6 +2,7 @@ const providers = {};
 let activeProviders = {};
 
 const STORAGE_KEY = 'cine-cutie-providers';
+const DEFAULT_PROVIDER_IDS = Object.freeze({ video: 'video' });
 
 function loadPreferences() {
   try {
@@ -29,6 +30,8 @@ export function getProviders(capability) {
 export function getActiveProvider(capability) {
   const id = activeProviders[capability];
   if (id && providers[id]) return providers[id];
+  const defaultId = DEFAULT_PROVIDER_IDS[capability];
+  if (defaultId && providers[defaultId]) return providers[defaultId];
   const available = getProviders(capability);
   return available[available.length - 1] || null;
 }

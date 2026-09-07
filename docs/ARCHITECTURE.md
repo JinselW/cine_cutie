@@ -103,7 +103,7 @@ setActiveProvider(cap, id)     // 切换（localStorage `cine-cutie-providers`�
 | `llm` | text | 任意 OpenAI 兼容 `/chat/completions`（直连或经 server 代理） |
 | `image` | image | DashScope 文生图；条目带 `refs` 且设置中选了图生图模型时逐条走图生图编辑（server `/api/generate/image`） |
 | `video` | video | DashScope i2v / r2v（server `/api/generate/video`）；按生成方式选模型——参考图方式读 `models.refVideo`，另两种读 `models.video`，并逐条转发 `imagePath`/`lastFramePath`/`referenceImages` |
-| `video-comfy` | video | 远程 ComfyUI（server `/api/generate/video-comfy`，SSH 隧道） |
+| `video-comfy` | video | 仅在设置选择 ComfyUI 时启用；步骤 5 按素材选择 H3 文生视频、首帧、首尾帧或参考图工作流，经 server `/api/generate/video-comfy` 和 SSH 隧道提交；缺图时降级到文生视频 |
 | `render` | render | server ffmpeg 拼接（`/api/render/final`） |
 | `template` | 全部 | 离线降级模板（未配置 API Key 或 LLM 失败时） |
 
@@ -234,7 +234,7 @@ BLOCK→该步 FAIL，WARN/REVIEW→CONDITIONAL_PASS 并在 UI 提示。
 
 - `dashscope.js`: DashScope REST 客户端，Key 经 `X-Api-Key` 逐请求传入；`clampVideoDuration(model, seconds)` 按模型档位夹取片段时长
 - `memory.js`: 创作历史档案读写，元数据落 `data/memory/<UUID>.json`（临时文件 + rename 原子写入）
-- `ssh-tunnel.js` + `comfyui.js`: 经 SSH 隧道访问远程 ComfyUI（密码来自 env `COMFY_SSH_PASSWORD`），补丁式修改 workflow 节点
+- `ssh-tunnel.js` + `comfyui.js`: 经 SSH 隧道访问远程 ComfyUI（密码来自 env `COMFY_SSH_PASSWORD`）。不同 SSH/ComfyUI 配置使用独立隧道；步骤 5 将每镜提示词、seed、分镜时长、宽高比和分辨率写入所选 H3 工作流；首帧传 1 张、首尾帧传 2 张、参考图最多传 6 张，媒体先上传到 ComfyUI input，并在任务结束后通过 SFTP 清理。远端 input 目录可用 `COMFYUI_INPUT_DIR` 覆盖。取消和超时会同步删除远端队列项，并在对应任务正在运行时调用 interrupt。只有 `video-comfy` Provider 使用这些模板，其他视频模型仍走各自 API。
 - `render.js`: ffmpeg-static 拼接；先 `-c copy`，混编码失败时回退 libx264/aac 重编码
 - 静态托管 `dist/` + SPA catch-all；媒体落盘 `media/`
 
