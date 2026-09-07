@@ -96,6 +96,11 @@ const comfyUIProvider = {
 
       ({ taskId } = await res.json());
       registerBackendTask(taskId);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('comfy-task-progress', {
+          detail: { id: taskId, status: 'running', phase: 'connecting', progress: 0, current: 0, total: clips.length },
+        }));
+      }
       const startTime = Date.now();
       // The server allows one 10-minute ComfyUI attempt per clip. Keep a small
       // transfer/polling margin without waiting through obsolete backend retries.
@@ -122,6 +127,9 @@ const comfyUIProvider = {
           const taskRes = await fetch(`/api/task/${taskId}`, { signal: ctrl.signal });
           clearTimeout(tid);
           taskData = await taskRes.json();
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('comfy-task-progress', { detail: taskData }));
+          }
         } catch {
           clearTimeout(tid);
           if (signal?.aborted) break;

@@ -300,3 +300,23 @@ export async function checkComfyUIStatus(sshConfig) {
     return { online: false, error: err.message };
   }
 }
+
+export async function getComfyMonitorStatus(sshConfig) {
+  const [stats, queue] = await Promise.all([
+    comfyRequest(sshConfig, '/system_stats'),
+    comfyRequest(sshConfig, '/queue'),
+  ]);
+  return {
+    online: true,
+    version: stats.system?.comfyui_version || null,
+    devices: (stats.devices || []).map(device => ({
+      name: device.name || null,
+      memoryTotalMiB: Number.isFinite(device.vram_total) ? device.vram_total / 1024 / 1024 : null,
+      memoryFreeMiB: Number.isFinite(device.vram_free) ? device.vram_free / 1024 / 1024 : null,
+    })),
+    queue: {
+      running: Array.isArray(queue.queue_running) ? queue.queue_running.length : 0,
+      pending: Array.isArray(queue.queue_pending) ? queue.queue_pending.length : 0,
+    },
+  };
+}

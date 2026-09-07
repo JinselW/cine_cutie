@@ -20,6 +20,7 @@ Cine-Cutie 是一个端到端的 AI 电影创作系统。输入一句话故事�
 - **IP 合规审查**：内置 IP 库 + 四层证据匹配（exact → alias → fuzzy → keyword）+ 策略裁决（BLOCK/WARN/REVIEW/ALLOW），每步输出过合规门禁
 - **跨步骤实体追踪**：自动提取角色名、外貌、场景等实体，注入后续步骤确保一致性
 - **双后端视频生成**：DashScope 通义万相 + 远程 ComfyUI（H3 模型，DGX Spark 经 SSH 隧道）
+- **DGX 实时监控**：选择并连接 ComfyUI 后展示 GPU/显存/温度/功耗、系统内存、磁盘、队列及步骤 5 片段进度
 - **会话管理**：暂停/继续/停止（CancellationToken 统一驱动，AbortSignal 中止在途请求）+ 断点续跑（ExecutionCheckpoint + RunState）+ 步骤修订 + 回滚
 - **可观测性**：ArtifactStore 版本化产物追踪（itemLineage 尝试历史 + metrics），Pipeline 完成后展示执行日志（耗时/token/评分/重试次数/是否降级）
 - **创作历史 Memory**：自动保存会话、工作流结果与素材引用，支持历史搜索、预览、重命名、导出和删除；使用及备份说明见 [docs/MEMORY.md](docs/MEMORY.md)
@@ -216,6 +217,7 @@ cine-cutie/
 | `/api/memory` | GET/POST | 创作历史：摘要列表 + 全文搜索（`?q=`）/ 创建记录 |
 | `/api/memory/:id` | GET/PUT/PATCH/DELETE | 读取完整档案 / 保存快照 / 重命名 / 删除 |
 | `/api/comfyui/status` | GET | SSH 隧道 + GPU 状态 |
+| `/api/comfyui/monitor` | GET | DGX GPU、显存、磁盘和 ComfyUI 队列实时监控 |
 | `/api/task/:id` | GET | 查询异步任务状态 |
 | `/api/media/:filename` | GET | 获取生成的媒体文件 |
 | `/api/cache/stats` · `/api/cache/clear` | GET/POST | LLM 缓存统计 / 清空 |

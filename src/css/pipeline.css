@@ -121,6 +121,37 @@
   transition:width 0.3s linear;
 }
 
+.comfy-monitor{
+  margin-top:18px;padding:16px;border:1px solid rgba(78,205,196,.28);
+  border-radius:var(--radius-sm);background:linear-gradient(145deg,rgba(78,205,196,.08),rgba(10,18,28,.35));
+  text-align:left;color:var(--cream2);
+}
+.comfy-monitor-step{max-width:760px;margin-left:auto;margin-right:auto}
+.comfy-monitor-head,.comfy-task-line,.comfy-meter-head{
+  display:flex;align-items:center;justify-content:space-between;gap:12px;
+}
+.comfy-monitor-head{font-size:.84rem;margin-bottom:12px}
+.comfy-monitor-time{font-size:.7rem;color:var(--cream3)}
+.comfy-live-dot{
+  display:inline-block;width:8px;height:8px;margin-right:7px;border-radius:50%;background:#4ade80;
+  box-shadow:0 0 10px rgba(74,222,128,.75);animation:pulse 1.5s ease infinite;
+}
+.comfy-monitor-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin-bottom:12px}
+.comfy-stat{min-width:0;padding:10px;background:rgba(0,0,0,.16);border-radius:var(--radius-xs)}
+.comfy-stat span,.comfy-stat small{display:block;color:var(--cream3);font-size:.68rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.comfy-stat strong{display:block;margin:4px 0;font-size:.82rem;color:var(--cream);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.comfy-meter{margin-top:8px}
+.comfy-meter-head{font-size:.68rem;color:var(--cream3);margin-bottom:4px}
+.comfy-meter-track{height:5px;border-radius:999px;background:rgba(255,255,255,.08);overflow:hidden}
+.comfy-meter-track span{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,#4ecdc4,var(--gold));transition:width .45s ease}
+.comfy-task-progress{margin-top:14px;padding-top:12px;border-top:1px solid var(--glass-border)}
+.comfy-task-line{font-size:.78rem;color:var(--cream2)}
+.comfy-task-detail{font-size:.68rem;color:var(--cream3);margin-top:7px}
+
+@media(max-width:700px){
+  .comfy-monitor-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+
 .color-swatch-grid{display:flex;gap:10px;flex-wrap:wrap;margin:12px 0}
 .color-swatch{
   width:60px;height:60px;border-radius:var(--radius-xs);

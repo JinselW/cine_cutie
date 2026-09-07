@@ -163,6 +163,96 @@ export function getTunnelStatus() {
   };
 }
 
+export async function execRemoteCommand(config, command, { timeoutMs = 8000 } = {}) {
+  const tunnel = await ensureTunnel(config);
+  const entry = tunnels.get(tunnel.key);
+  if (!entry?.ready) throw new Error('SSH tunnel is not ready');
+  touchTunnel(tunnel.key, entry);
+
+  return new Promise((resolve, reject) => {
+    let stdout = '';
+    let stderr = '';
+    let settled = false;
+    const finish = (err, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (err) reject(err);
+      else resolve(value);
+    };
+    const timer = setTimeout(() => finish(new Error('Remote metrics command timed out')), timeoutMs);
+
+    entry.client.exec(command, (err, stream) => {
+      if (err) { finish(err); return; }
+      stream.setEncoding('utf8');
+      stream.on('data', chunk => { stdout += chunk; });
+      stream.stderr.on('data', chunk => { stderr += chunk; });
+      stream.on('close', (code) => {
+        if (code && !stdout) finish(new Error(stderr.trim() || `Remote command failed (${code})`));
+        else finish(null, { stdout, stderr, code });
+      });
+      stream.on('error', finish);
+    });
+  });
+}
+
+function shellQuote(value) {
+  return `'${String(value).replaceAll("'", `'"'"'`)}'`;
+}
+
+export function parseDgxMetrics(output) {
+  const [systemBlock = '', diskBlock = ''] = String(output || '').split('\n__DISK__\n');
+  const [gpuBlock = '', memoryBlock = ''] = systemBlock.split('\n__MEMORY__\n');
+  const gpus = gpuBlock.trim().split(/\r?\n/).filter(Boolean).map(line => {
+    const [index, name, utilization, memoryUsed, memoryTotal, temperature, powerDraw, powerLimit] = line.split(',').map(v => v.trim());
+    return {
+      index: Number(index),
+      name,
+      utilization: Number(utilization),
+      memoryUsedMiB: Number(memoryUsed),
+      memoryTotalMiB: Number(memoryTotal),
+      temperatureC: Number(temperature),
+      powerDrawW: Number(powerDraw),
+      powerLimitW: Number(powerLimit),
+    };
+  }).filter(gpu => Number.isFinite(gpu.index));
+
+  const fields = diskBlock.trim().split(/\s+/);
+  const memoryFields = memoryBlock.trim().split(/\s+/).map(Number);
+  const memory = memoryFields.length >= 3 && memoryFields.every(Number.isFinite) ? {
+    totalBytes: memoryFields[0],
+    usedBytes: memoryFields[1],
+    availableBytes: memoryFields[2],
+    usedPercent: percentOf(memoryFields[1], memoryFields[0]),
+  } : null;
+  const disk = fields.length >= 6 ? {
+    filesystem: fields[0],
+    totalBytes: Number(fields[1]) * 1024,
+    usedBytes: Number(fields[2]) * 1024,
+    availableBytes: Number(fields[3]) * 1024,
+    usedPercent: Number(String(fields[4]).replace('%', '')),
+    mount: fields.slice(5).join(' '),
+  } : null;
+  return { gpus, memory, disk };
+}
+
+function percentOf(used, total) {
+  return total > 0 ? Math.round((used / total) * 1000) / 10 : 0;
+}
+
+export async function getDgxMetrics(config) {
+  const diskPath = process.env.COMFYUI_DISK_PATH || process.env.COMFYUI_INPUT_DIR || DEFAULT_COMFY_INPUT_DIR;
+  const command = [
+    'nvidia-smi --query-gpu=index,name,utilization.gpu,memory.used,memory.total,temperature.gpu,power.draw,power.limit --format=csv,noheader,nounits',
+    "printf '\\n__MEMORY__\\n'",
+    "free -b | awk '/^Mem:/ {print $2, $3, $7}'",
+    "printf '\\n__DISK__\\n'",
+    `df -Pk -- ${shellQuote(diskPath)} | tail -n 1`,
+  ].join('; ');
+  const result = await execRemoteCommand(config, command);
+  return parseDgxMetrics(result.stdout);
+}
+
 function withSftp(config, operation) {
   const normalized = normalizedConfig(config);
   return new Promise((resolve, reject) => {

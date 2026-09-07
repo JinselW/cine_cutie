@@ -3,6 +3,7 @@ import { STEPS, dataKeyOf } from '../config.js';
 import { state, resetState } from '../state.js';
 import { t } from '../i18n.js';
 import { onNodeClick } from '../navigation.js';
+import { isComfySelected, startComfyMonitor, stopComfyMonitor } from './comfyMonitor.js';
 
 let _genAnim = null;
 let _msgBuffer = [];
@@ -122,6 +123,7 @@ export function showGenerating(stepIndex) {
         <div class="progress-bar"><div class="progress-fill" id="genProgress"></div></div>
         <div class="progress-label"><span>${label}</span><span id="genPercent">0%</span></div>
       </div>
+      ${step.id === 'videoGeneration' ? '<div id="comfyMonitorStep" class="comfy-monitor comfy-monitor-step hidden" aria-live="polite"></div>' : ''}
       <div style="margin-top:12px;text-align:center">
         <button class="action-btn" id="pauseBtn" style="padding:6px 20px;font-size:13px">${t('ui.pause')}</button>
       </div>
@@ -130,6 +132,9 @@ export function showGenerating(stepIndex) {
   setMascot('thinking');
 
   $('#pauseBtn').addEventListener('click', pauseGeneration);
+  if (step.id === 'videoGeneration' && isComfySelected()) {
+    startComfyMonitor('comfyMonitorStep', { showTaskProgress: true });
+  }
 
   const msgInterval = setInterval(() => {
     idx = (idx + 1) % msgs.length;
@@ -155,6 +160,7 @@ export function showGenerating(stepIndex) {
       const pct = $('#genPercent');
       if (fill) fill.style.width = '100%';
       if (pct) pct.textContent = '100%';
+      stopComfyMonitor('comfyMonitorStep');
     }
   };
   setGenAnim(anim);

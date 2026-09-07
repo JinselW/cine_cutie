@@ -7,8 +7,8 @@ import { LRUCache } from './cache.js';
 import { submitImageTask, submitImageEditTask, parseImageResultUrl, submitVideoTask, submitVideoTaskV2, pollTask, downloadFile, detectVideoMode, fileToDataUri } from './dashscope.js';
 import { createTask, getTask, updateTask, cancelTask, isTaskCancelled } from './tasks.js';
 import { concatVideos, checkFfmpeg } from './render.js';
-import { submitWorkflow, pollUntilDone, downloadOutput, uploadImageToComfy, checkComfyUIStatus, selectWorkflowMode, cancelPrompt, MAX_COMFY_REFERENCE_IMAGES } from './comfyui.js';
-import { ensureTunnel, closeTunnel, getTunnelStatus, deleteComfyInputFiles } from './ssh-tunnel.js';
+import { submitWorkflow, pollUntilDone, downloadOutput, uploadImageToComfy, checkComfyUIStatus, getComfyMonitorStatus, selectWorkflowMode, cancelPrompt, MAX_COMFY_REFERENCE_IMAGES } from './comfyui.js';
+import { ensureTunnel, closeTunnel, getTunnelStatus, deleteComfyInputFiles, getDgxMetrics } from './ssh-tunnel.js';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
@@ -650,6 +650,7 @@ app.post('/api/generate/video-comfy', async (req, res) => {
   (async () => {
     const results = [];
     console.log(`[ComfyUI] task=${task.id} starting ${clips.length} clips`);
+    updateTask(task.id, { status: 'running', phase: 'connecting', progress: 0 });
 
     if (isTaskCancelled(task.id)) {
       updateTask(task.id, { status: 'cancelled', progress: 0 });
@@ -660,7 +661,7 @@ app.post('/api/generate/video-comfy', async (req, res) => {
       const tunnel = await ensureTunnel(sshConfig);
       console.log(`[ComfyUI] tunnel ready at localhost:${tunnel.port}`);
     } catch (err) {
-      updateTask(task.id, { status: 'failed', error: `SSH tunnel failed: ${err.message}` });
+      updateTask(task.id, { status: 'failed', phase: 'failed', error: `SSH tunnel failed: ${err.message}` });
       return;
     }
 
@@ -674,7 +675,10 @@ app.post('/api/generate/video-comfy', async (req, res) => {
       for (let retry = 0; retry < 1; retry++) {
         if (isTaskCancelled(task.id)) { lastError = 'Cancelled'; break; }
         try {
-          updateTask(task.id, { status: 'running', current: i + 1, progress: Math.round((i / clips.length) * 100) });
+          updateTask(task.id, {
+            status: 'running', phase: 'uploading', current: i + 1,
+            progress: Math.round((i / clips.length) * 100),
+          });
 
           const requestedRefs = Array.isArray(clip.images) ? clip.images.slice(0, MAX_COMFY_REFERENCE_IMAGES) : [];
           const legacyRefs = uploads?.referenceImages?.map(ref => ref.localPath).filter(Boolean) || [];
@@ -724,6 +728,10 @@ app.post('/api/generate/video-comfy', async (req, res) => {
             });
 
             console.log(`[ComfyUI] task=${task.id} clip ${i + 1} submitted, mode=${mode}, images=${imageFiles.length}, duration=${clip.duration ?? 5}s, prompt_id=${promptId}`);
+            updateTask(task.id, {
+              phase: 'generating', current: i + 1, promptId,
+              workflowMode: mode, clipStartedAt: Date.now(),
+            });
 
             const result = await pollUntilDone(sshConfig, promptId, { timeoutMs: 600000, signal: comfyAbort.signal });
             promptFinished = true;
@@ -735,11 +743,16 @@ app.post('/api/generate/video-comfy', async (req, res) => {
             }
 
             if (result.status === 'success' && result.outputs.length > 0) {
+              updateTask(task.id, { phase: 'downloading' });
               const output = result.outputs[0];
               const downloaded = await downloadOutput(sshConfig, output, MEDIA_DIR);
               results.push({ index: i, status: 'ok', path: `/api/media/${downloaded.localName}`, prompt: clip.prompt });
               console.log(`[ComfyUI] task=${task.id} clip ${i + 1} OK → ${downloaded.localName}`);
               lastError = null;
+              updateTask(task.id, {
+                phase: 'clip-complete', promptId: null,
+                progress: Math.round(((i + 1) / clips.length) * 100),
+              });
             } else {
               lastError = result.message || 'No output from ComfyUI';
               console.log(`[ComfyUI] task=${task.id} clip ${i + 1} FAILED: ${lastError}`);
@@ -773,12 +786,14 @@ app.post('/api/generate/video-comfy', async (req, res) => {
     console.log(`[ComfyUI] task=${task.id} ${finalStatus}: ${successCount}/${clips.length} succeeded`);
     updateTask(task.id, {
       status: finalStatus,
+      phase: finalStatus,
+      promptId: null,
       progress: finalStatus === 'completed' ? 100 : 0,
       result: { clips: results, total: clips.length, success: successCount }
     });
   })().catch(err => {
     console.error(`[ComfyUI] task=${task.id} FATAL: ${err.message}`);
-    updateTask(task.id, { status: 'failed', error: err.message });
+    updateTask(task.id, { status: 'failed', phase: 'failed', promptId: null, error: err.message });
   }).finally(async () => {
     try {
       await deleteComfyInputFiles(sshConfig, [...remoteImageCache.values()]);
@@ -835,6 +850,39 @@ app.get('/api/comfyui/status', async (req, res) => {
     res.json({ tunnel, comfyui: comfyStatus });
   } catch (err) {
     res.json({ tunnel: getTunnelStatus(), comfyui: { online: false, error: err.message } });
+  }
+});
+
+app.get('/api/comfyui/monitor', async (req, res) => {
+  const sshConfigStr = req.headers['x-ssh-config'];
+  if (!sshConfigStr) return res.status(400).json({ error: 'No SSH config provided' });
+  try {
+    const sshConfig = buildSshConfig(JSON.parse(sshConfigStr));
+    if (!sshConfig) return res.status(500).json({ error: 'COMFY_SSH_PASSWORD not set on server' });
+    const [comfy, system] = await Promise.allSettled([
+      getComfyMonitorStatus(sshConfig),
+      getDgxMetrics(sshConfig),
+    ]);
+    if (comfy.status === 'rejected' && system.status === 'rejected') {
+      return res.status(502).json({ error: comfy.reason?.message || system.reason?.message || 'DGX Spark unavailable' });
+    }
+    const comfyui = comfy.status === 'fulfilled' ? comfy.value : { online: false, error: comfy.reason?.message };
+    const systemInfo = system.status === 'fulfilled' ? system.value : { gpus: [], memory: null, disk: null, error: system.reason?.message };
+    systemInfo.gpus = (systemInfo.gpus || []).map((gpu, index) => {
+      const device = comfyui.devices?.[index];
+      const memoryTotalMiB = Number.isFinite(gpu.memoryTotalMiB) ? gpu.memoryTotalMiB : device?.memoryTotalMiB;
+      const memoryUsedMiB = Number.isFinite(gpu.memoryUsedMiB)
+        ? gpu.memoryUsedMiB
+        : (Number.isFinite(memoryTotalMiB) && Number.isFinite(device?.memoryFreeMiB) ? memoryTotalMiB - device.memoryFreeMiB : null);
+      return { ...gpu, memoryUsedMiB, memoryTotalMiB };
+    });
+    res.json({
+      timestamp: Date.now(),
+      comfyui,
+      system: systemInfo,
+    });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
   }
 });
 

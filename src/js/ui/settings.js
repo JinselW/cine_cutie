@@ -3,6 +3,7 @@ import { t } from '../i18n.js';
 import { saveConfig, getConfig, isConfigured, testConnection, inferProvider, MODEL_PRESETS, IMAGE_PRESETS, IMG2IMG_PRESETS, VIDEO_MODES, videoModeById, PROVIDER_DEFAULTS } from '../providers/llm.js';
 import { saveConfig as saveDashScopeConfig } from '../providers/image.js';
 import { setActiveProvider } from '../providers/registry.js';
+import { startComfyMonitor, stopComfyMonitor } from './comfyMonitor.js';
 
 const PROVIDER_LIST = ['openai', 'deepseek', 'dashscope', 'ark', 'kling', 'gemini'];
 const CUSTOM_VALUE = '__custom__';
@@ -195,11 +196,14 @@ function openModal() {
 
   clearStatus();
   modal.classList.remove('hidden');
+  if (comfyActive && comfyCfg.host) startComfyMonitor('comfyMonitorSettings', { force: true });
+  else stopComfyMonitor('comfyMonitorSettings');
 }
 
 function closeModal() {
   const modal = $('#settingsModal');
   if (modal) modal.classList.add('hidden');
+  stopComfyMonitor('comfyMonitorSettings');
 }
 
 function handleSave() {
@@ -289,6 +293,8 @@ function handleSave() {
   saveComfySshConfig();
 
   setActiveProvider('video', comfyChosen ? 'video-comfy' : 'video');
+  if (comfyChosen) startComfyMonitor('comfyMonitorSettings', { force: true });
+  else stopComfyMonitor('comfyMonitorSettings');
 
   updateIndicator();
   showStatus(t('settings.saved'), true);
@@ -359,6 +365,7 @@ async function handleTest() {
         if (data.comfyui?.online) {
           const gpuInfo = data.comfyui.gpu?.map(g => `${g.name} (${g.vram_free}/${g.vram_total}MB)`).join(', ') || 'OK';
           comfyLine = { ok: true, msg: `ComfyUI: Connected (GPU ${gpuInfo})` };
+          startComfyMonitor('comfyMonitorSettings', { force: true });
         } else {
           comfyLine = { ok: false, msg: `ComfyUI: offline (${data.comfyui?.error || 'unknown'})` };
         }
@@ -450,6 +457,10 @@ export function initSettings() {
   setupModelSelectChange('#cfgImageModel', '#imageModelCustomWrap', IMAGE_PRESETS);
   setupModelSelectChange('#cfgImg2ImgModel', '#img2imgModelCustomWrap', IMG2IMG_PRESETS);
   setupModelSelectChange('#cfgVideoModeModel', '#videoModeModelCustomWrap', []);
+  $('#cfgVideoModeModel')?.addEventListener('change', (event) => {
+    if (event.target.value === COMFY_MODEL) startComfyMonitor('comfyMonitorSettings', { force: true });
+    else stopComfyMonitor('comfyMonitorSettings');
+  });
 
   const saveBtn = $('#saveSettingsBtn');
   if (saveBtn) saveBtn.addEventListener('click', handleSave);

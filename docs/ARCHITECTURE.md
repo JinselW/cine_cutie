@@ -224,6 +224,7 @@ BLOCK→该步 FAIL，WARN/REVIEW→CONDITIONAL_PASS 并在 UI 提示。
 | `/api/generate/video-comfy` | POST | 远程 ComfyUI 生成 |
 | `/api/upload/comfy` | POST | 上传到 ComfyUI input |
 | `/api/comfyui/status` | GET | 隧道 + GPU 状态 |
+| `/api/comfyui/monitor` | GET | 只读获取 DGX GPU/显存/温度/功耗、系统内存、磁盘和 ComfyUI 队列状态 |
 | `/api/comfyui/tunnel/close` | POST | 关闭 SSH 隧道 |
 | `/api/task/:id` | GET | 轮询异步任务 |
 | `/api/media/:filename` | GET | 取生成媒体 |
@@ -235,6 +236,7 @@ BLOCK→该步 FAIL，WARN/REVIEW→CONDITIONAL_PASS 并在 UI 提示。
 - `dashscope.js`: DashScope REST 客户端，Key 经 `X-Api-Key` 逐请求传入；`clampVideoDuration(model, seconds)` 按模型档位夹取片段时长
 - `memory.js`: 创作历史档案读写，元数据落 `data/memory/<UUID>.json`（临时文件 + rename 原子写入）
 - `ssh-tunnel.js` + `comfyui.js`: 经 SSH 隧道访问远程 ComfyUI（密码来自 env `COMFY_SSH_PASSWORD`）。不同 SSH/ComfyUI 配置使用独立隧道；步骤 5 将每镜提示词、seed、分镜时长、宽高比和分辨率写入所选 H3 工作流；首帧传 1 张、首尾帧传 2 张、参考图最多传 6 张，媒体先上传到 ComfyUI input，并在任务结束后通过 SFTP 清理。远端 input 目录可用 `COMFYUI_INPUT_DIR` 覆盖。取消和超时会同步删除远端队列项，并在对应任务正在运行时调用 interrupt。只有 `video-comfy` Provider 使用这些模板，其他视频模型仍走各自 API。
+- `comfyMonitor.js`: 仅在已选择 ComfyUI 且监控端点确认连接成功时轮询；设置面板显示 DGX 系统状态，步骤 5 额外显示当前片段、工作流阶段、耗时、队列和整体完成比例。关闭设置或离开生成状态后停止轮询。
 - `render.js`: ffmpeg-static 拼接；先 `-c copy`，混编码失败时回退 libx264/aac 重编码
 - 静态托管 `dist/` + SPA catch-all；媒体落盘 `media/`
 
