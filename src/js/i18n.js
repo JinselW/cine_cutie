@@ -219,6 +219,7 @@ const en = {
   'settings.nav.preferences': 'Preferences & Audio',
   'settings.preferencesTitle': 'General Preferences',
   'settings.modelSelection': 'Model Selection',
+  'settings.videoAudioHint': 'To get videos with built-in audio, choose a video model that supports audio generation — models without it produce silent clips.',
   'settings.textModel': 'Text & Evaluation Model',
   'settings.textModelHint': '(for script, storyboard & media scoring — vision model recommended for images/video)',
   'settings.imageModelLabel': 'Text-to-Image Model',
@@ -619,6 +620,7 @@ const zh = {
   'settings.nav.preferences': '偏好与音频',
   'settings.preferencesTitle': '通用偏好',
   'settings.modelSelection': '模型选择',
+  'settings.videoAudioHint': '若希望得到自带音频的视频，请选择支持音频生成的视频模型；不支持的模型只能输出无声片段。',
   'settings.textModel': '文本及评估模型',
   'settings.textModelHint': '（用于剧本、分镜与图片/视频评分；图片/视频建议选视觉模型，如 qwen-vl-max / gpt-4o）',
   'settings.imageModelLabel': '文生图模型',
@@ -891,6 +893,8 @@ export function applyLang() {
   if (apiSettingsTitle) apiSettingsTitle.textContent = t('settings.apiSettings');
   const modelSelectionTitle = $('#modelSelectionTitle');
   if (modelSelectionTitle) modelSelectionTitle.textContent = t('settings.modelSelection');
+  const videoAudioHint = $('#videoAudioHint');
+  if (videoAudioHint) videoAudioHint.textContent = t('settings.videoAudioHint');
 
   const lblTextModel = $('#lblTextModel');
   if (lblTextModel && lblTextModel.firstChild) {
