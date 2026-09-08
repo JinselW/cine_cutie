@@ -264,6 +264,14 @@ export function detectVideoMode(uploads) {
   return 'legacy';
 }
 
+export function hasVideoUploads(uploads) {
+  return Boolean(
+    uploads?.firstFrame?.localPath
+    || uploads?.lastFrame?.localPath
+    || uploads?.referenceImages?.some(ref => ref?.localPath),
+  );
+}
+
 export async function fileToDataUri(filePath) {
   const { readFile } = await import('fs/promises');
   const { extname } = await import('path');

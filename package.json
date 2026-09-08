@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "server": "node server/index.js",
     "start": "npm run build && npm run server",
-    "test": "node --experimental-vm-modules --test test/artifact-store.test.js test/artifact-dependency.test.js test/artifact-persistence.test.js test/orchestrator-gate.test.js test/orchestrator-revision.test.js test/orchestrator-rollback.test.js test/comfy-monitor.test.js test/comfy-workflows.test.js test/ip-compliance.test.js test/memory.test.js test/retry-agent.test.js test/progress-tracker.test.js test/render-progress.test.js",
+    "test": "node --experimental-vm-modules --test test/artifact-store.test.js test/artifact-dependency.test.js test/artifact-persistence.test.js test/orchestrator-gate.test.js test/orchestrator-revision.test.js test/orchestrator-rollback.test.js test/comfy-monitor.test.js test/comfy-workflows.test.js test/dashscope-video-input.test.js test/ip-compliance.test.js test/memory.test.js test/retry-agent.test.js test/progress-tracker.test.js test/render-progress.test.js",
     "test:e2e": "node test/memory-browser.mjs"
   },
   "dependencies": {

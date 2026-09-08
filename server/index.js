@@ -4,7 +4,7 @@ import multer from 'multer';
 import mammoth from 'mammoth';
 import { createMemoryRouter } from './memory.js';
 import { LRUCache } from './cache.js';
-import { submitImageTask, submitImageEditTask, parseImageResultUrl, submitVideoTask, submitVideoTaskV2, pollTask, downloadFile, detectVideoMode, fileToDataUri } from './dashscope.js';
+import { submitImageTask, submitImageEditTask, parseImageResultUrl, submitVideoTask, submitVideoTaskV2, pollTask, downloadFile, detectVideoMode, hasVideoUploads, fileToDataUri } from './dashscope.js';
 import { createTask, getTask, updateTask, cancelTask, isTaskCancelled, cleanupTasks } from './tasks.js';
 import { concatVideos, checkFfmpeg } from './render.js';
 import { submitWorkflow, pollUntilDone, downloadOutput, uploadImageToComfy, checkComfyUIStatus, getComfyMonitorStatus, selectWorkflowMode, cancelPrompt, MAX_COMFY_REFERENCE_IMAGES } from './comfyui.js';
@@ -421,12 +421,20 @@ app.post('/api/generate/video', async (req, res) => {
     }
   }
 
-  const hasUploads = uploads && (uploads.firstFrame?.localPath || uploads.referenceImages?.length > 0);
+  const hasUploads = hasVideoUploads(uploads);
   const mode = hasUploads ? detectVideoMode(uploads) : 'legacy';
   const effectiveModel = model;
 
   if (!effectiveModel) {
     return res.status(400).json({ error: 'Missing model — pick one in Settings' });
+  }
+
+  if (mode === 'i2v' && uploads.lastFrame?.localPath && !uploads.firstFrame?.localPath) {
+    return res.status(400).json({ error: 'A last frame requires a first frame' });
+  }
+
+  if (mode === 'r2v' && !isV2Model(effectiveModel)) {
+    return res.status(400).json({ error: `${effectiveModel} accepts no reference images — pick a wan2.7 r2v model in Settings` });
   }
 
   const task = createTask('video', { total: clips.length });
@@ -451,35 +459,46 @@ app.post('/api/generate/video', async (req, res) => {
 
           let taskId;
 
-          if (hasUploads && isV2Model(effectiveModel)) {
-            const mediaArray = [];
-            if (uploads.firstFrame?.localPath) {
-              const dataUri = await fileToDataUri(uploads.firstFrame.localPath);
-              mediaArray.push({ type: 'first_frame', url: dataUri });
-            }
-            if (uploads.lastFrame?.localPath) {
-              const dataUri = await fileToDataUri(uploads.lastFrame.localPath);
-              mediaArray.push({ type: 'last_frame', url: dataUri });
-            }
-            if (uploads.referenceImages?.length > 0) {
-              for (const ref of uploads.referenceImages) {
-                if (ref.localPath) {
-                  const dataUri = await fileToDataUri(ref.localPath);
-                  mediaArray.push({ type: 'reference_image', url: dataUri });
+          if (hasUploads) {
+            if (isV2Model(effectiveModel)) {
+              const mediaArray = [];
+              if (uploads.firstFrame?.localPath) {
+                const dataUri = await fileToDataUri(uploads.firstFrame.localPath);
+                mediaArray.push({ type: 'first_frame', url: dataUri });
+              }
+              if (uploads.lastFrame?.localPath) {
+                const dataUri = await fileToDataUri(uploads.lastFrame.localPath);
+                mediaArray.push({ type: 'last_frame', url: dataUri });
+              }
+              if (uploads.referenceImages?.length > 0) {
+                for (const ref of uploads.referenceImages) {
+                  if (ref.localPath) {
+                    const dataUri = await fileToDataUri(ref.localPath);
+                    mediaArray.push({ type: 'reference_image', url: dataUri });
+                  }
                 }
               }
-            }
 
-            if (mediaArray.length === 0) {
-              lastError = null;
-              results.push({ index: i, status: 'error', error: 'No valid upload media' });
-              break;
-            }
+              if (mediaArray.length === 0) {
+                lastError = null;
+                results.push({ index: i, status: 'error', error: 'No valid upload media' });
+                break;
+              }
 
-            console.log(`[VideoBatch V2] task=${task.id} clip ${i + 1} media=${mediaArray.length} items`);
-            taskId = await submitVideoTaskV2(clip.prompt || 'Scene animation', mediaArray, {
-              model: effectiveModel, duration: clip.duration ?? duration, resolution, apiKey, seed: clip.seed ?? seed, aspectRatio, audio
-            });
+              console.log(`[VideoBatch V2] task=${task.id} clip ${i + 1} media=${mediaArray.length} items`);
+              taskId = await submitVideoTaskV2(clip.prompt || 'Scene animation', mediaArray, {
+                model: effectiveModel, duration: clip.duration ?? duration, resolution, apiKey, seed: clip.seed ?? seed, aspectRatio, audio
+              });
+            } else {
+              const firstUrl = await fileToDataUri(uploads.firstFrame.localPath);
+              if (uploads.lastFrame?.localPath) {
+                console.warn(`[VideoBatch] task=${task.id} clip ${i + 1}: ${effectiveModel} only takes a first frame (input.img_url) — the uploaded last frame was ignored; choose a wan2.7 model in Settings for first+last frame video`);
+              }
+              console.log(`[VideoBatch] task=${task.id} clip ${i + 1} uploaded img_url=${firstUrl.slice(0, 60)}…`);
+              taskId = await submitVideoTask(clip.prompt || 'Scene animation', firstUrl, {
+                model: effectiveModel, duration: clip.duration ?? duration, resolution, apiKey, seed: clip.seed ?? seed, aspectRatio, audio
+              });
+            }
           } else {
             const clipRefs = Array.isArray(clip.referenceImages) ? clip.referenceImages.slice(0, MAX_VIDEO_REFS) : [];
             const clipSeed = clip.seed ?? seed;
