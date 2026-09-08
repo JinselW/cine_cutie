@@ -128,7 +128,7 @@
 
 .comfy-monitor{
   margin-top:18px;padding:16px;border:1px solid rgba(78,205,196,.28);
-  border-radius:var(--radius-sm);background:linear-gradient(145deg,rgba(78,205,196,.08),rgba(10,18,28,.35));
+  border-radius:var(--radius-sm);background:transparent;
   text-align:left;color:var(--cream2);
 }
 .comfy-monitor-step{max-width:760px;margin-left:auto;margin-right:auto}
