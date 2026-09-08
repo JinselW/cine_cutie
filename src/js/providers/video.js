@@ -5,6 +5,7 @@ import { state } from '../state.js';
 import { dsVideoResolution } from '../utils/resolution.js';
 import { registerBackendTask, unregisterBackendTask } from './activeTasks.js';
 import { reportBatchProgress } from '../progressTracker.js';
+import { videoClipPayloadForMode } from '../videoModePlanning.js';
 
 // wan2.7-r2v 最多接受 5 张参考图
 const MAX_REFERENCE_IMAGES = 5;
@@ -19,6 +20,7 @@ function effectiveVideoMode(uploads) {
 }
 
 function inferItemMode(item) {
+  if (['firstFrame', 'firstLastFrame', 'referenceImage', 'textToVideo'].includes(item.videoMode)) return item.videoMode;
   if ((item.referenceImages || []).length > 0) return 'referenceImage';
   if (item.lastFramePath || item.lastFrameUrl) return 'firstLastFrame';
   if (item.imagePath || item.imageUrl) return 'firstFrame';
@@ -123,6 +125,7 @@ const videoProvider = {
         lastFramePath: item.lastFramePath || '',
         lastFrameUrl: item.lastFrameUrl || '',
         referenceImages: (item.referenceImages || []).slice(0, MAX_REFERENCE_IMAGES),
+        videoMode: item.videoMode,
         duration: item.duration ?? DEFAULT_CLIP_DURATION,
         seed: overrideSeed ?? item.seed ?? 42,
       };
@@ -149,16 +152,7 @@ const videoProvider = {
         }
         const dsRes = dsVideoResolution(state.resolution || '720P', group.model);
         const bodyPayload = {
-          clips: group.clips.map(c => ({
-            prompt: c.prompt,
-            imagePath: c.imagePath,
-            imageUrl: c.imageUrl,
-            lastFramePath: c.lastFramePath,
-            lastFrameUrl: c.lastFrameUrl,
-            referenceImages: c.referenceImages,
-            duration: c.duration,
-            seed: c.seed,
-          })),
+          clips: group.clips.map(c => videoClipPayloadForMode(c, groupMode)),
           model: group.model,
           mode: groupMode,
           duration: DEFAULT_CLIP_DURATION,
@@ -174,7 +168,7 @@ const videoProvider = {
               allResults.set(clipId, {
                 videoPath: r.path || '',
                 status: r.status === 'ok' ? 'complete' : 'failed',
-                error: r.status === 'ok' ? null : 'Generation failed',
+                error: r.status === 'ok' ? null : (r.error || 'Generation failed'),
               });
             }
           }

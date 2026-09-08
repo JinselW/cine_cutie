@@ -47,6 +47,19 @@ test('client maps each step-5 media shape to its matching ComfyUI workflow', () 
     selectComfyWorkflow({ referenceImages: ['/api/media/a.png', '/api/media/b.png'] }),
     { mode: 'referenceImage', images: ['/api/media/a.png', '/api/media/b.png'] },
   );
+  assert.deepEqual(
+    selectComfyWorkflow({
+      videoMode: 'firstFrame',
+      imagePath: '/api/media/first.png',
+      lastFramePath: '/api/media/last.png',
+      referenceImages: ['/api/media/ref.png'],
+    }),
+    { mode: 'firstFrame', images: ['/api/media/first.png'] },
+  );
+  assert.deepEqual(
+    selectComfyWorkflow({ videoMode: 'textToVideo', imagePath: '/api/media/first.png' }),
+    { mode: 'textToVideo', images: [] },
+  );
 });
 
 test('server degrades missing frame inputs without selecting an invalid workflow', () => {

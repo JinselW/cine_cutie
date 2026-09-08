@@ -28,6 +28,10 @@ function probeDuration(inputPath) {
 
 function runFfmpeg(args, { durationSeconds = 0, onProgress, cancelCheck } = {}) {
   return new Promise((resolve, reject) => {
+    if (cancelCheck?.()) {
+      reject(new Error('Cancelled'));
+      return;
+    }
     const outputPath = args[args.length - 1];
     const child = spawn(ffmpegPath, [
       ...args.slice(0, -1), '-progress', 'pipe:1', '-nostats', outputPath,
@@ -48,7 +52,8 @@ function runFfmpeg(args, { durationSeconds = 0, onProgress, cancelCheck } = {}) 
     child.on('error', err => { stopPolling(); reject(new Error(`ffmpeg concat failed: ${err.message}`)); });
     child.on('close', code => {
       stopPolling();
-      if (code) reject(new Error(`ffmpeg concat failed: ${stderr || `exit code ${code}`}`));
+      if (cancelCheck?.()) reject(new Error('Cancelled'));
+      else if (code) reject(new Error(`ffmpeg concat failed: ${stderr || `exit code ${code}`}`));
       else resolve();
     });
     if (typeof cancelCheck === 'function') {
@@ -58,7 +63,7 @@ function runFfmpeg(args, { durationSeconds = 0, onProgress, cancelCheck } = {}) 
           child.kill('SIGKILL');
           reject(new Error('Cancelled'));
         }
-      }, 500);
+      }, 100);
     }
   });
 }

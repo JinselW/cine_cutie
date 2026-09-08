@@ -8,6 +8,8 @@ import { createArtifact, ArtifactKind, ArtifactStatus, recordItemAttempt } from 
 import { addAgentMessage } from '../ui/render.js';
 import { t } from '../i18n.js';
 import { reportPhase } from '../progressTracker.js';
+import { buildVideoModeCandidates, isVideoModelUnavailableError } from '../videoModePlanning.js';
+import { escapeHtml } from '../utils.js';
 
 const MAX_ITEM_ATTEMPTS = 3;
 const MAX_STAGE_RETRIES = 1;
@@ -100,6 +102,7 @@ export class VideoAgent extends BaseAgent {
 
     const finalData = bestData || { mode, clips: [] };
     const complete = finalData.clips.filter(c => c.status === 'complete').length;
+    const fallbackClips = finalData.clips.filter(c => c.plannedVideoMode && c.plannedVideoMode !== c.videoMode).length;
 
     artifact.data = finalData;
     artifact.status = complete > 0 ? ArtifactStatus.COMPLETE : ArtifactStatus.FAILED;
@@ -111,6 +114,8 @@ export class VideoAgent extends BaseAgent {
         totalClips: finalData.clips.length,
         completeClips: complete,
         failedClips: finalData.clips.filter(c => c.status === 'failed').length,
+        fallbackClips,
+        fallbackUsed: fallbackClips > 0,
         qualityScore: bestCrit?.score ?? 0,
         consistencyIssues: bestCrit?.consistency?.issues || [],
         verdict: bestCrit?.verdict ?? null,
@@ -221,12 +226,35 @@ export class VideoAgent extends BaseAgent {
     try { return getImageConfig(); } catch { return {}; }
   }
 
-  #resolveShotMode(shot, globalMode) {
-    const dsConfig = this.#dashScopeConfig();
-    let mode = globalMode === 'auto' ? (shot.videoMode || 'firstFrame') : globalMode;
-    if (mode === 'referenceImage' && !dsConfig?.refVideoModel) mode = 'firstFrame';
-    if (mode === 'firstLastFrame' && !dsConfig?.lastFrameVideoModel) mode = 'firstFrame';
-    return mode;
+  #modeHasModel(mode) {
+    if (getActiveProvider('video')?.id === 'video-comfy') return true;
+    const cfg = this.#dashScopeConfig();
+    if (!cfg?.apiKey || mode === 'textToVideo') return false;
+    if (mode === 'referenceImage') return Boolean(cfg.refVideoModel);
+    if (mode === 'firstLastFrame') return Boolean(cfg.lastFrameVideoModel);
+    return Boolean(cfg.videoModel);
+  }
+
+  #setNextMode(item) {
+    if (!Array.isArray(item.modeCandidates)) return false;
+    const nextIndex = (item.modeIndex || 0) + 1;
+    if (nextIndex >= item.modeCandidates.length) return false;
+    const previousMode = item.videoMode;
+    item.modeIndex = nextIndex;
+    item.videoMode = item.modeCandidates[nextIndex];
+    item.referenceId = item.videoMode === 'referenceImage'
+      ? item.referenceImages?.[0] || null
+      : item.imagePath || item.imageUrl || null;
+    this.#reportModeFallback(item.id, previousMode, item.videoMode);
+    return true;
+  }
+
+  #reportModeFallback(shotId, from, to) {
+    addAgentMessage('↪️', t('ui.videoModeFallback', {
+      shot: escapeHtml(String(shotId)),
+      from: t(`settings.videoMode.${from}`),
+      to: t(`settings.videoMode.${to}`),
+    }));
   }
 
   #storyboardShots(ctx) {
@@ -249,46 +277,42 @@ export class VideoAgent extends BaseAgent {
 
     for (let i = 0; i < shots.length; i++) {
       const shot = shots[i];
-      const shotMode = this.#resolveShotMode(shot, mode);
+      const preferredMode = mode === 'auto' ? (shot.videoMode || 'firstFrame') : mode;
       const matchedChar = this.#matchCharacter(shot, characters);
       const sbShot = sbById.get(shot.shot_id) || sbShots[i];
+      const first = this.#firstFrameFor(shot, matchedChar);
+      const referenceImages = this.#referenceListFor(shot, matchedChar);
+      const usableMedia = value => {
+        if (!value) return '';
+        if (!allowsTextFallback) return value;
+        return typeof value === 'string' && value.startsWith('/api/media/') ? value : '';
+      };
+      const assets = {
+        imagePath: usableMedia(first?.path),
+        imageUrl: usableMedia(first?.url),
+        lastFramePath: usableMedia(shot.lastFramePath),
+        lastFrameUrl: usableMedia(shot.lastFrameUrl),
+        referenceImages,
+      };
+      let modeCandidates = buildVideoModeCandidates(preferredMode, assets, { allowText: allowsTextFallback });
+      if (mode !== 'auto' && !allowsTextFallback) modeCandidates = modeCandidates.filter(candidate => candidate === preferredMode);
+      modeCandidates = modeCandidates.filter(candidate => this.#modeHasModel(candidate));
+      if (!modeCandidates.length) continue;
+      const shotMode = modeCandidates[0];
+      if (shotMode !== preferredMode) this.#reportModeFallback(shot.shot_id, preferredMode, shotMode);
       const base = {
         id: shot.shot_id,
         prompt: this.#buildVideoPrompt(shot, sbShot),
         duration: this.#clipDuration(sbShot),
         seed: 42,
+        plannedVideoMode: preferredMode,
+        videoMode: shotMode,
+        videoModeReason: shot.videoModeReason || '',
+        modeCandidates,
+        modeIndex: 0,
+        ...assets,
       };
-
-      if (shotMode === 'referenceImage') {
-        const referenceImages = this.#referenceListFor(shot, matchedChar);
-        if (!referenceImages.length && !allowsTextFallback) continue;
-        items.push({ ...base, referenceImages, referenceId: referenceImages[0] || null });
-        continue;
-      }
-
-      const first = this.#firstFrameFor(shot, matchedChar);
-      if (!first) {
-        if (allowsTextFallback) items.push(base);
-        continue;
-      }
-
-      if (shotMode === 'firstLastFrame') {
-        const lastPath = shot.lastFramePath || '';
-        const lastUrl = shot.lastFrameUrl || '';
-        if (!lastPath && !lastUrl) {
-          items.push({ ...base, imagePath: first.path, imageUrl: first.url, referenceId: first.path || first.url });
-        } else {
-          items.push({ ...base, imagePath: first.path, imageUrl: first.url, lastFramePath: lastPath, lastFrameUrl: lastUrl, referenceId: first.path || first.url });
-        }
-        continue;
-      }
-
-      items.push({
-        ...base,
-        imagePath: first.path,
-        imageUrl: first.url,
-        referenceId: first.path || first.url,
-      });
+      items.push({ ...base, referenceId: shotMode === 'referenceImage' ? referenceImages[0] : (first?.path || first?.url || null) });
     }
     return items;
   }
@@ -321,8 +345,13 @@ export class VideoAgent extends BaseAgent {
   }
 
   #referenceListFor(shot, matchedChar) {
-    const candidates = [shot.imagePath, ...(shot.refs || []), matchedChar?.imagePath];
-    const refs = candidates.filter(r => typeof r === 'string' && r.startsWith('/api/media/'));
+    const candidates = [
+      shot.imagePath, shot.imageUrl, ...(shot.refs || []),
+      matchedChar?.imagePath, matchedChar?.imageUrl,
+    ];
+    const localOnly = getActiveProvider('video')?.id === 'video-comfy';
+    const refs = candidates.filter(r => typeof r === 'string'
+      && (r.startsWith('/api/media/') || (!localOnly && /^https?:\/\//i.test(r))));
     return [...new Set(refs)].slice(0, MAX_REFERENCE_IMAGES);
   }
 
@@ -347,7 +376,8 @@ export class VideoAgent extends BaseAgent {
 
     addAgentMessage('🎥', t('ui.videoGenGenerating', { current: 1, total: items.length }));
 
-    for (let attempt = 0; attempt < MAX_ITEM_ATTEMPTS && pending.length > 0; attempt++) {
+    const maxAttempts = Math.max(MAX_ITEM_ATTEMPTS, ...items.map(item => item.modeCandidates?.length || 1));
+    for (let attempt = 0; attempt < maxAttempts && pending.length > 0; attempt++) {
       const batch = pending.map(item => ({
         id: item.id,
         prompt: item.prompt,
@@ -358,6 +388,7 @@ export class VideoAgent extends BaseAgent {
         lastFramePath: item.lastFramePath,
         lastFrameUrl: item.lastFrameUrl,
         referenceImages: item.referenceImages,
+        videoMode: item.videoMode,
       }));
 
       const providerResults = await provider.generate({ items: batch, overrides: {}, signal: token?.signal });
@@ -367,6 +398,7 @@ export class VideoAgent extends BaseAgent {
         recordItemAttempt(artifact, result.id, {
           seed: batch.find(b => b.id === result.id)?.seed,
           prompt: batch.find(b => b.id === result.id)?.prompt,
+          videoMode: batch.find(b => b.id === result.id)?.videoMode,
           referenceId: pending.find(b => b.id === result.id)?.referenceId
             || batch.find(b => b.id === result.id)?.imageUrl,
           status: result.status,
@@ -374,15 +406,25 @@ export class VideoAgent extends BaseAgent {
         });
 
         if (result.status === 'complete') {
-          results.set(result.id, result);
           const idx = pending.findIndex(p => p.id === result.id);
+          const item = idx >= 0 ? pending[idx] : null;
+          results.set(result.id, {
+            ...result,
+            plannedVideoMode: item?.plannedVideoMode,
+            videoMode: item?.videoMode,
+          });
           if (idx >= 0) pending.splice(idx, 1);
-        } else if (result.status !== 'skipped') {
-          failedItems.push({ itemId: result.id, error: result.error });
+        } else {
+          const item = pending.find(p => p.id === result.id);
+          const canChangeMode = getConfig().videoMode === 'auto' || provider.id === 'video-comfy';
+          const shouldChangeMode = result.status === 'skipped' || isVideoModelUnavailableError(result.error);
+          if (!(canChangeMode && shouldChangeMode && item && this.#setNextMode(item)) && result.status !== 'skipped') {
+            failedItems.push({ itemId: result.id, error: result.error });
+          }
         }
       }
 
-      if (failedItems.length > 0 && attempt < MAX_ITEM_ATTEMPTS - 1) {
+      if (failedItems.length > 0 && attempt < maxAttempts - 1) {
         const lineage = {};
         for (const item of items) {
           lineage[item.id] = artifact.itemLineage[item.id];
@@ -412,7 +454,14 @@ export class VideoAgent extends BaseAgent {
 
     for (const item of pending) {
       if (!results.has(item.id)) {
-        results.set(item.id, { id: item.id, videoPath: '', status: 'failed', error: 'Max retries exceeded' });
+        results.set(item.id, {
+          id: item.id,
+          videoPath: '',
+          status: 'failed',
+          error: 'Max retries exceeded',
+          plannedVideoMode: item.plannedVideoMode,
+          videoMode: item.videoMode,
+        });
       }
     }
 
@@ -498,15 +547,17 @@ export class VideoAgent extends BaseAgent {
       if (result) {
         return {
           shot_id: shot.shot_id,
-          videoMode: shot.videoMode || 'firstFrame',
+          plannedVideoMode: result.plannedVideoMode || shot.videoMode || 'firstFrame',
+          videoMode: result.videoMode || shot.videoMode || 'firstFrame',
+          videoModeReason: shot.videoModeReason || '',
           videoPath: result.videoPath || '',
           status: result.status === 'complete' ? 'complete' : result.status === 'skipped' ? 'skipped' : 'failed',
         };
       }
       if (!shot.imagePath && !shot.imageUrl) {
-        return { shot_id: shot.shot_id, videoMode: shot.videoMode || 'firstFrame', videoPath: '', status: 'skipped' };
+        return { shot_id: shot.shot_id, plannedVideoMode: shot.videoMode || 'firstFrame', videoMode: shot.videoMode || 'firstFrame', videoPath: '', status: 'skipped' };
       }
-      return { shot_id: shot.shot_id, videoMode: shot.videoMode || 'firstFrame', videoPath: '', status: 'failed' };
+      return { shot_id: shot.shot_id, plannedVideoMode: shot.videoMode || 'firstFrame', videoMode: shot.videoMode || 'firstFrame', videoPath: '', status: 'failed' };
     });
 
     return { mode, clips };
