@@ -23,6 +23,7 @@ export function rerenderCurrentView() {
 
 function mediaUrl(p) {
   if (!p) return '';
+  if (/^(?:https?:|data:|blob:)/i.test(p)) return p;
   return p.startsWith('/api/media/') ? p : '/api/media/' + p;
 }
 
@@ -266,7 +267,6 @@ export function renderReferenceImages(data, onAdvance, readOnly = false) {
   const { isConfigured: dsConfigured } = getDashScopeStatus();
 
   const roleLabel = role => t(FRAME_ROLE_KEYS[role] || 'ui.frameFirst');
-  const isChained = data?.mode === 'firstLastFrame' || data?.mode === 'auto';
 
   const frameThumb = (imagePath, alt, status) => (imagePath
     ? `<img src="${mediaUrl(imagePath)}" alt="${escapeHtml(alt)}" class="media-thumb" data-src="${mediaUrl(imagePath)}" style="width:100%;aspect-ratio:16/9;object-fit:cover;border-radius:var(--radius-xs);margin-bottom:4px">`
@@ -274,14 +274,21 @@ export function renderReferenceImages(data, onAdvance, readOnly = false) {
 
   const shots = (data.shots || []).map(sh => `
     <div style="text-align:center">
-      ${frameThumb(sh.imagePath, sh.shot_id, sh.status)}
+      <div style="display:grid;grid-template-columns:${sh.lastFramePath || sh.lastFrameUrl ? '1fr 1fr' : '1fr'};gap:6px">
+        <div>
+          ${frameThumb(sh.imagePath || sh.imageUrl, `${sh.shot_id} ${roleLabel(sh.role)}`, sh.status)}
+          <div style="font-size:0.66rem;color:var(--cream3)">${roleLabel(sh.role)}</div>
+        </div>
+        ${sh.lastFramePath || sh.lastFrameUrl ? `<div>
+          ${frameThumb(sh.lastFramePath || sh.lastFrameUrl, `${sh.shot_id} ${t('ui.frameLast')}`, sh.status)}
+          <div style="font-size:0.66rem;color:var(--cream3)">${t('ui.frameLast')}</div>
+        </div>` : ''}
+      </div>
       <div style="display:flex;justify-content:space-between;gap:6px;font-size:0.7rem;color:var(--cream3)">
         <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(sh.shot_id)}</span>
-        <span style="color:var(--gold);white-space:nowrap">${roleLabel(sh.role)}</span>
+        <span style="color:var(--gold);white-space:nowrap">${t('settings.videoMode.' + (sh.videoMode || 'firstFrame'))}</span>
       </div>
-      ${sh.videoMode && sh.videoMode !== 'firstFrame' ? `<div style="font-size:0.68rem;color:var(--cream3);margin-top:2px">
-        ${t('settings.videoMode.' + sh.videoMode)}
-      </div>` : ''}
+      ${sh.videoModeReason ? `<div title="${escapeHtml(sh.videoModeReason)}" style="font-size:0.66rem;color:var(--cream3);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(sh.videoModeReason)}</div>` : ''}
     </div>
   `).join('');
 
@@ -332,7 +339,10 @@ export function renderVideoGeneration(data, onAdvance, readOnly = false) {
       ${clip.videoPath && clip.status === 'complete'
         ? `<video src="${mediaUrl(clip.videoPath)}" controls style="width:100%;aspect-ratio:16/9;border-radius:var(--radius-xs);margin-bottom:4px;background:#000"></video>`
         : `<div style="width:100%;aspect-ratio:16/9;background:var(--bg3);border-radius:var(--radius-xs);display:flex;align-items:center;justify-content:center;color:var(--cream3);font-size:0.7rem;margin-bottom:4px">${clip.status === 'pending' ? t('ui.videoGenPending') : '—'}</div>`}
-      <div style="font-size:0.7rem;color:var(--cream3)">${escapeHtml(clip.shot_id)}</div>
+      <div style="display:flex;justify-content:space-between;gap:6px;font-size:0.7rem;color:var(--cream3)">
+        <span>${escapeHtml(clip.shot_id)}</span>
+        <span style="color:var(--gold)">${t('settings.videoMode.' + (clip.videoMode || 'firstFrame'))}</span>
+      </div>
     </div>
   `).join('');
 

@@ -226,6 +226,8 @@ Rules:
 - Prefer "firstFrame" for most shots — it is the most reliable.
 - Use "referenceImage" only when the shot prominently features a main character AND character design has good reference images.
 - Use "firstLastFrame" sparingly for shots with strong narrative arc (clear start and end state).
+- A "firstLastFrame" shot requires two independently generated images for that same shot: its own opening frame and its own closing frame.
+- Never reuse the first frame of the next shot as the current shot's last frame.
 - Return assignments for ALL shots in order.`,
     buildUser(ctx) {
       const shots = [];

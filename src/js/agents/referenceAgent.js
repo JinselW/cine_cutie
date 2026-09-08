@@ -8,6 +8,7 @@ import { createArtifact, ArtifactKind, ArtifactStatus, recordItemAttempt } from 
 import { addAgentMessage } from '../ui/render.js';
 import { t } from '../i18n.js';
 import { reportPhase } from '../progressTracker.js';
+import { normalizeShotModeAssignments } from '../videoModePlanning.js';
 
 const MAX_ITEM_ATTEMPTS = 3;
 const MAX_STAGE_RETRIES = 1;
@@ -124,14 +125,7 @@ export class ReferenceAgent extends BaseAgent {
     }
 
     const parsed = parseJson(raw);
-    const assignments = parsed?.assignments || [];
-    const modeMap = new Map(assignments.map(a => [a.shot_id, a.mode]));
-    const validModes = new Set(['firstFrame', 'firstLastFrame', 'referenceImage']);
-
-    return pairs.map(p => ({
-      shot: p.shot,
-      mode: validModes.has(modeMap.get(p.shot.shot_id)) ? modeMap.get(p.shot.shot_id) : 'firstFrame',
-    }));
+    return normalizeShotModeAssignments(pairs.map(p => p.shot), parsed?.assignments);
   }
 
   #extractShots(ctx) {
@@ -350,6 +344,7 @@ export class ReferenceAgent extends BaseAgent {
       const shot = {
         shot_id: pair.shot.shot_id,
         videoMode: shotMode,
+        videoModeReason: shotModes?.[i]?.reason || '',
         role,
         imagePath: result.path || '',
         imageUrl: result.imageUrl || '',
