@@ -154,15 +154,16 @@ export function checkConsistency(stepId, data, entities) {
         issues.push(`${pending.length}/${actualShots} reference images not generated`);
       }
       if (data.mode === 'firstLastFrame') {
-        const extras = data.extraFrames || [];
-        const closing = extras.find(f => f.imagePath || f.imageUrl);
-        if (!closing) {
-          issues.push('No dedicated closing frame for the last shot');
-        }
         const noLast = (data.shots || []).filter(s => !s.lastFramePath && !s.lastFrameUrl);
         if (noLast.length > 0) {
           issues.push(`${noLast.length}/${actualShots} shots have no last frame for first-last-frame video`);
         }
+      }
+      if (data.mode === 'auto') {
+        const refNoImg = (data.shots || []).filter(s => s.videoMode === 'referenceImage' && !s.imagePath && s.status !== 'complete');
+        if (refNoImg.length > 0) issues.push(`${refNoImg.length} shots assigned referenceImage but have no image`);
+        const lastMissing = (data.shots || []).filter(s => s.videoMode === 'firstLastFrame' && !s.lastFramePath && !s.lastFrameUrl);
+        if (lastMissing.length > 0) issues.push(`${lastMissing.length} shots assigned firstLastFrame but have no last frame`);
       }
       break;
     }
@@ -178,7 +179,7 @@ export function checkConsistency(stepId, data, entities) {
         issues.push(`${failed.length}/${actualClips} video clips failed to generate`);
       }
       const plannedMode = entities?.refVideoMode;
-      if (plannedMode && data.mode && plannedMode !== data.mode) {
+      if (plannedMode && plannedMode !== 'auto' && data.mode && plannedMode !== data.mode) {
         issues.push(`Step 4 frames were planned for ${plannedMode} but the clips were generated in ${data.mode} mode — rerun step 4 or restore the Settings choice`);
       }
       break;

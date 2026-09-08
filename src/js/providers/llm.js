@@ -31,6 +31,7 @@ const VIDEO_MODES = [
   { id: 'firstFrame', presets: ['wanx2.1-i2v-plus', 'wan2.7-i2v', 'wan2.5-i2v-preview'], defaultModel: 'wanx2.1-i2v-plus', configKey: 'video' },
   { id: 'firstLastFrame', presets: ['wan2.7-i2v', 'wanx2.1-i2v-plus'], defaultModel: 'wan2.7-i2v', configKey: 'video' },
   { id: 'referenceImage', presets: ['wan2.7-r2v'], defaultModel: 'wan2.7-r2v', configKey: 'refVideo' },
+  { id: 'auto', presets: [], defaultModel: '', configKey: null },
 ];
 
 function videoModeById(id) {

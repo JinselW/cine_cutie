@@ -3,6 +3,7 @@ import { RetryAgent, ItemRetryStrategy } from './retryAgent.js';
 import { QCAgent, SCORE_THRESHOLD, reportScore, reportRetry } from './qcAgent.js';
 import { getActiveProvider } from '../providers/registry.js';
 import { getConfig } from '../providers/llm.js';
+import { getConfig as getImageConfig } from '../providers/image.js';
 import { createArtifact, ArtifactKind, ArtifactStatus, recordItemAttempt } from '../artifacts/artifactTypes.js';
 import { addAgentMessage } from '../ui/render.js';
 import { t } from '../i18n.js';
@@ -212,7 +213,20 @@ export class VideoAgent extends BaseAgent {
 
   #videoMode() {
     const mode = getConfig().videoMode;
+    if (mode === 'auto') return 'auto';
     return mode === 'firstLastFrame' || mode === 'referenceImage' ? mode : 'firstFrame';
+  }
+
+  #dashScopeConfig() {
+    try { return getImageConfig(); } catch { return {}; }
+  }
+
+  #resolveShotMode(shot, globalMode) {
+    const dsConfig = this.#dashScopeConfig();
+    let mode = globalMode === 'auto' ? (shot.videoMode || 'firstFrame') : globalMode;
+    if (mode === 'referenceImage' && !dsConfig?.refVideoModel) mode = 'firstFrame';
+    if (mode === 'firstLastFrame' && !dsConfig?.lastFrameVideoModel) mode = 'firstFrame';
+    return mode;
   }
 
   #storyboardShots(ctx) {
@@ -235,6 +249,7 @@ export class VideoAgent extends BaseAgent {
 
     for (let i = 0; i < shots.length; i++) {
       const shot = shots[i];
+      const shotMode = this.#resolveShotMode(shot, mode);
       const matchedChar = this.#matchCharacter(shot, characters);
       const sbShot = sbById.get(shot.shot_id) || sbShots[i];
       const base = {
@@ -244,7 +259,7 @@ export class VideoAgent extends BaseAgent {
         seed: 42,
       };
 
-      if (mode === 'referenceImage') {
+      if (shotMode === 'referenceImage') {
         const referenceImages = this.#referenceListFor(shot, matchedChar);
         if (!referenceImages.length && !allowsTextFallback) continue;
         items.push({ ...base, referenceImages, referenceId: referenceImages[0] || null });
@@ -257,16 +272,14 @@ export class VideoAgent extends BaseAgent {
         continue;
       }
 
-      if (mode === 'firstLastFrame') {
-        const last = this.#lastFrameFor(shot, shots, i, refImages.extraFrames);
-        items.push({
-          ...base,
-          imagePath: first.path,
-          imageUrl: first.url,
-          lastFramePath: last.path,
-          lastFrameUrl: last.url,
-          referenceId: first.path || first.url,
-        });
+      if (shotMode === 'firstLastFrame') {
+        const lastPath = shot.lastFramePath || '';
+        const lastUrl = shot.lastFrameUrl || '';
+        if (!lastPath && !lastUrl) {
+          items.push({ ...base, imagePath: first.path, imageUrl: first.url, referenceId: first.path || first.url });
+        } else {
+          items.push({ ...base, imagePath: first.path, imageUrl: first.url, lastFramePath: lastPath, lastFrameUrl: lastUrl, referenceId: first.path || first.url });
+        }
         continue;
       }
 
@@ -305,19 +318,6 @@ export class VideoAgent extends BaseAgent {
       return { path: matchedChar.imagePath || '', url: matchedChar.imageUrl || '' };
     }
     return null;
-  }
-
-  // 设置可能在步骤4之后被改过：步骤4没记尾帧时按"复用下一镜首帧"现算，末镜退回独立收尾帧
-  #lastFrameFor(shot, shots, index, extraFrames) {
-    if (shot.lastFramePath || shot.lastFrameUrl) {
-      return { path: shot.lastFramePath || '', url: shot.lastFrameUrl || '' };
-    }
-    const next = shots[index + 1];
-    if (next?.imagePath || next?.imageUrl) {
-      return { path: next.imagePath || '', url: next.imageUrl || '' };
-    }
-    const closing = (extraFrames || []).find(f => f.shot_id === shot.shot_id && f.role === 'last_frame');
-    return { path: closing?.imagePath || '', url: closing?.imageUrl || '' };
   }
 
   #referenceListFor(shot, matchedChar) {
@@ -498,14 +498,15 @@ export class VideoAgent extends BaseAgent {
       if (result) {
         return {
           shot_id: shot.shot_id,
+          videoMode: shot.videoMode || 'firstFrame',
           videoPath: result.videoPath || '',
           status: result.status === 'complete' ? 'complete' : result.status === 'skipped' ? 'skipped' : 'failed',
         };
       }
       if (!shot.imagePath && !shot.imageUrl) {
-        return { shot_id: shot.shot_id, videoPath: '', status: 'skipped' };
+        return { shot_id: shot.shot_id, videoMode: shot.videoMode || 'firstFrame', videoPath: '', status: 'skipped' };
       }
-      return { shot_id: shot.shot_id, videoPath: '', status: 'failed' };
+      return { shot_id: shot.shot_id, videoMode: shot.videoMode || 'firstFrame', videoPath: '', status: 'failed' };
     });
 
     return { mode, clips };

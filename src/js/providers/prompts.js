@@ -210,7 +210,35 @@ SHOT-TO-SHOT CONTINUITY — CRITICAL:
 - If a character is sitting in shot 1, they should still be sitting (or in the process of standing up) in shot 2 — not suddenly in a different location
 - End each segment on a visual that naturally leads into the next segment`;
     }
-  }
+  },
+
+  autoModeEval: {
+    system: `You are a video production director. For each storyboard shot, decide the best video generation mode.
+
+Available modes:
+- "firstFrame": Single first frame → video. Reliable, good for simple motion or static scenes.
+- "firstLastFrame": First + last frames → video. Best for shots with clear start/end compositions or transitions.
+- "referenceImage": Reference images → video. Best when character identity/consistency is critical and good reference images exist.
+
+Return JSON: { "assignments": [{ "shot_id": "...", "mode": "...", "reason": "..." }, ...] }
+
+Rules:
+- Prefer "firstFrame" for most shots — it is the most reliable.
+- Use "referenceImage" only when the shot prominently features a main character AND character design has good reference images.
+- Use "firstLastFrame" sparingly for shots with strong narrative arc (clear start and end state).
+- Return assignments for ALL shots in order.`,
+    buildUser(ctx) {
+      const shots = [];
+      for (const ep of (ctx.storyboard?.episodes || []))
+        for (const seg of (ep.segments || []))
+          for (const shot of (seg.shots || []))
+            shots.push({ shot_id: shot.shot_id, type: shot.type, description: shot.description, prompt: shot.prompt, camera: shot.camera });
+      const chars = (ctx.characterDesign?.characters || []).map(c => ({
+        name: c.name, hasSheet: !!(c.sheetPath || c.sheetUrl), hasPortrait: !!(c.imagePath || c.imageUrl),
+      }));
+      return `CHARACTER REFERENCES:\n${JSON.stringify(chars)}\n\nSHOTS (${shots.length}):\n${JSON.stringify(shots)}\n\nAssign a video mode to each shot.`;
+    },
+  },
 };
 
 export function buildMessages(stepId, ctx) {
