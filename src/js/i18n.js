@@ -287,6 +287,9 @@ const en = {
   'pipeline.consistencyFailed': 'Post-gate: {stepId} consistency check failed — {issues}',
   'pipeline.consistencyWarnings': 'Post-gate: {stepId} consistency warnings — {issues}',
   'pipeline.ipCompliance': 'IP Compliance: {issues}',
+  'pipeline.ipRegenerating': 'Generated content triggered IP protection; automatically rewriting ({current}/{max})...',
+  'pipeline.ipRetryExhausted': 'Automatic IP rewrite limit reached; the step is kept with a warning instead of stopping the movie',
+  'ui.ipInputBlocked': 'Your prompt contains protected IP references ({names}). Please revise it and try again. Your original input has been kept.',
   'pipeline.missingUpstream': 'Cannot run {stepId}: no accepted upstream output for {dataKeys}',
   'pipeline.downstreamInvalidated': 'New version accepted. These steps consumed the previous version and must be regenerated: {steps}',
 
@@ -665,6 +668,9 @@ const zh = {
   'pipeline.consistencyFailed': '后置检查：{stepId} 一致性检查失败 — {issues}',
   'pipeline.consistencyWarnings': '后置检查：{stepId} 一致性警告 — {issues}',
   'pipeline.ipCompliance': 'IP 合规性：{issues}',
+  'pipeline.ipRegenerating': 'AI 生成内容触发 IP 保护，正在自动改写（{current}/{max}）…',
+  'pipeline.ipRetryExhausted': '已达到 IP 自动改写次数上限；该步骤将保留警告并继续，不会停止整部电影',
+  'ui.ipInputBlocked': '你的提示词包含受版权保护的 IP 引用（{names}）。请修改后重新提交，原有输入已为你保留。',
   'pipeline.missingUpstream': '无法执行 {stepId}：缺少已采用的上游产物 {dataKeys}',
   'pipeline.downstreamInvalidated': '已采用新版本。以下步骤使用了旧版本，需要重新生成：{steps}',
 

@@ -15,6 +15,34 @@ const REJECT_SCENARIOS = [
 ];
 
 for (const mode of ['auto', 'interactive']) {
+  test(`${mode}: generated IP block is automatically regenerated without stopping`, async () => {
+    const h = await createHarness({ mode });
+    h.plan('script', [
+      { gate: { verdict: QCVerdict.FAIL, severity: Severity.CRITICAL, issues: ['IP BLOCK'], requiresRegeneration: true, regenerationPrompt: 'Use original characters' } },
+      { gate: { verdict: QCVerdict.PASS, issues: [] } },
+    ]);
+    await h.api.startPipeline();
+
+    assert.equal(h.calls.runs.length, 2);
+    assert.equal(h.calls.runs[1].feedback, 'Use original characters');
+    assert.equal(h.store.getLatestByStep('script').status, ArtifactStatus.COMPLETE);
+    assert.ok(h.accepted('script'));
+    assert.equal(h.calls.failures.length, 0);
+    assert.notEqual(h.orchestrator.runState.status, 'interrupted');
+  });
+
+  test(`${mode}: exhausted generated IP rewrites continue with a warning`, async () => {
+    const h = await createHarness({ mode });
+    const blocked = { verdict: QCVerdict.FAIL, severity: Severity.CRITICAL, issues: ['IP BLOCK'], requiresRegeneration: true, regenerationPrompt: 'Rewrite' };
+    h.plan('script', [{ gate: blocked }, { gate: blocked }, { gate: blocked }]);
+    await h.api.startPipeline();
+
+    assert.equal(h.calls.runs.length, 3);
+    assert.ok(h.accepted('script'));
+    assert.equal(h.calls.failures.length, 0);
+    assert.notEqual(h.orchestrator.runState.status, 'interrupted');
+  });
+
   for (const scenario of REJECT_SCENARIOS) {
     test(`${mode}: ${scenario.name} stops before accepting the output`, async () => {
       const h = await createHarness({ mode });

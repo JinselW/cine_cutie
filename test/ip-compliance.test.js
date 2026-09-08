@@ -345,6 +345,20 @@ test('checkStepOutput PASS returns empty issues', () => {
   assert.equal(r.issues.length, 0);
 });
 
+test('generated blocking match requests regeneration instead of terminal failure handling', () => {
+  const r = agent.checkGeneratedOutput('script', { title: 'Spider-Man Adventure' });
+  assert.equal(r.verdict, QCVerdict.FAIL);
+  assert.equal(r.source, 'generated');
+  assert.equal(r.requiresRegeneration, true);
+  assert.match(r.regenerationPrompt, /Spider-Man/);
+});
+
+test('user input remains strict and is identified as user-authored', () => {
+  const r = agent.checkUserInput('Make a Spider-Man movie');
+  assert.equal(r.verdict, QCVerdict.FAIL);
+  assert.equal(r.source, 'user');
+});
+
 // =========================================================================
 // Additional: Structured result schema
 // =========================================================================

@@ -95,7 +95,10 @@ export async function createHarness({ mode = 'auto' } = {}) {
     cancelAllBackendTasks: async () => {},
     registerAgent: (id, agent) => agents.set(id, agent),
     resolveAgent: id => agents.get(id),
-    getIPComplianceAgent: () => ({ checkStepOutput: stepId => gates.get(stepId) ?? PASS_GATE }),
+    getIPComplianceAgent: () => ({
+      checkStepOutput: stepId => gates.get(stepId) ?? PASS_GATE,
+      checkGeneratedOutput: stepId => gates.get(stepId) ?? PASS_GATE,
+    }),
     checkConsistency: () => PASS_GATE,
     validateScript: value => !!value?.title,
     validateStoryboard: value => !!value?.shots,

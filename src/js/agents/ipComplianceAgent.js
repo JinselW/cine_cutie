@@ -255,6 +255,17 @@ function buildResult(findings) {
   };
 }
 
+function buildRegenerationPrompt(result) {
+  const names = [...new Set(result.findings
+    .filter(f => f.verdict === QCVerdict.FAIL)
+    .map(f => f.candidateIp))];
+  return [
+    'The generated output introduced protected IP references that were not required by the user.',
+    `Regenerate this step and replace these references with fully original names, designs, settings, and descriptions: ${names.join(', ')}.`,
+    'Do not mention, imitate, paraphrase, or visually evoke those properties. Preserve the story intent and required output structure.',
+  ].join(' ');
+}
+
 // ---------------------------------------------------------------------------
 // IPComplianceAgent class
 // ---------------------------------------------------------------------------
@@ -286,10 +297,26 @@ export class IPComplianceAgent {
     return buildResult(findings);
   }
 
+  /**
+   * Generated material is recoverable: a blocking match asks the producing
+   * agent to rewrite its own output instead of terminating the whole pipeline.
+   */
+  checkGeneratedOutput(stepId, data) {
+    const result = this.checkStepOutput(stepId, data);
+    return {
+      ...result,
+      source: 'generated',
+      requiresRegeneration: result.verdict === QCVerdict.FAIL,
+      regenerationPrompt: result.verdict === QCVerdict.FAIL
+        ? buildRegenerationPrompt(result)
+        : null,
+    };
+  }
+
   checkUserInput(userInput) {
     const { evidence } = scanText(userInput);
     const findings = evaluateEvidence(evidence);
-    return buildResult(findings);
+    return { ...buildResult(findings), source: 'user' };
   }
 
   // -----------------------------------------------------------------------

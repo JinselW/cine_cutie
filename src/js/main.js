@@ -16,6 +16,7 @@ import { initSettings } from './ui/settings.js';
 import { initMascotInteraction } from './mascot-interact.js';
 import { rerenderCurrentView } from './ui/views.js';
 import { startProgressRun } from './progressTracker.js';
+import { getIPComplianceAgent } from './agents/ipComplianceAgent.js';
 
 const savedTheme = localStorage.getItem('cine-cutie-theme');
 if (savedTheme) {
@@ -268,6 +269,18 @@ $('#startBtn').addEventListener('click', async () => {
     $('#userInput').focus();
     $('#userInput').style.borderColor = 'var(--rose)';
     setTimeout(() => $('#userInput').style.borderColor = '', 2000);
+    return;
+  }
+
+  const suppliedTexts = [input, state.promptDoc?.text].filter(Boolean);
+  const inputCheck = getIPComplianceAgent().checkTexts(suppliedTexts);
+  if (inputCheck.verdict === 'FAIL') {
+    const names = [...new Set(inputCheck.findings
+      .filter(f => f.verdict === 'FAIL')
+      .map(f => f.candidateIp))].join(', ');
+    window.alert(t('ui.ipInputBlocked', { names }));
+    // Deliberately keep both the textarea and uploaded prompt document intact.
+    $('#userInput').focus();
     return;
   }
 

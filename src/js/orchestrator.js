@@ -59,6 +59,7 @@ const POST_VALIDATORS = {
 // A historical version can be adopted again even though it is no longer current.
 const ROLLBACKABLE_STATUSES = [ArtifactStatus.COMPLETE, ArtifactStatus.SUPERSEDED, ArtifactStatus.STALE];
 const DEFAULT_ROLLBACK_STATUSES = [ArtifactStatus.COMPLETE, ArtifactStatus.SUPERSEDED];
+const MAX_IP_REGENERATIONS = 2;
 
 class StageGateError extends Error {
   constructor(gate) {
@@ -236,16 +237,42 @@ class Orchestrator {
         ctx.previousResult = this.#store.getAcceptedByStep(step.id)?.data ?? null;
       }
 
-      const result = await agent.process(ctx, this.#token);
-      const artifact = result.artifacts?.[0] ?? null;
-      const data = artifact?.data ?? null;
-      const metadata = result.metadata ?? {};
-      const gateResult = this.#postGate(step.id, data, metadata, artifact?.status);
+      for (let ipAttempt = 0; ; ipAttempt++) {
+        const result = await agent.process(ctx, this.#token);
+        const artifact = result.artifacts?.[0] ?? null;
+        const data = artifact?.data ?? null;
+        const metadata = result.metadata ?? {};
+        let gateResult = this.#postGate(step.id, data, metadata, artifact?.status);
+        const retryIp = gateResult.requiresRegeneration === true && ipAttempt < MAX_IP_REGENERATIONS;
 
-      this.#commitResult(step, artifact, { gateResult, metadata, agentName, revision: feedback != null, ctx });
+        if (retryIp) {
+          this.#commitResult(step, artifact, { gateResult, metadata, agentName, revision: true, ctx });
+          addAgentMessage('🔄', t('pipeline.ipRegenerating', { current: ipAttempt + 1, max: MAX_IP_REGENERATIONS }));
+          ctx.feedback = gateResult.regenerationPrompt;
+          ctx.previousResult = data;
+          continue;
+        }
 
-      if (gateResult.verdict === QCVerdict.FAIL) throw new StageGateError(gateResult);
-      return data;
+        // Generated text must not kill an otherwise viable movie run. If the
+        // producing agent cannot remove the reference after bounded rewrites,
+        // retain a prominent warning and let the user revise that step later.
+        if (gateResult.requiresRegeneration === true) {
+          gateResult = {
+            ...gateResult,
+            verdict: QCVerdict.CONDITIONAL_PASS,
+            severity: Severity.HIGH,
+            issues: gateResult.issues.map(issue => `${issue} (${t('pipeline.ipRetryExhausted')})`),
+            requiresRegeneration: false,
+          };
+          addAgentMessage('⚠️', t('pipeline.ipRetryExhausted'));
+        }
+
+        metadata.retries = (metadata.retries ?? 0) + ipAttempt;
+        this.#commitResult(step, artifact, { gateResult, metadata, agentName, revision: feedback != null || ipAttempt > 0, ctx });
+
+        if (gateResult.verdict === QCVerdict.FAIL) throw new StageGateError(gateResult);
+        return data;
+      }
     } finally {
       logStepComplete();
     }
@@ -408,7 +435,10 @@ class Orchestrator {
       addAgentMessage('⚠️', t('pipeline.consistencyWarnings', { stepId, issues: consistencyResult.issues.join('; ') }));
     }
 
-    const ipResult = getIPComplianceAgent().checkStepOutput(stepId, data);
+    const complianceAgent = getIPComplianceAgent();
+    const ipResult = complianceAgent.checkGeneratedOutput
+      ? complianceAgent.checkGeneratedOutput(stepId, data)
+      : complianceAgent.checkStepOutput(stepId, data);
     if (ipResult.verdict === QCVerdict.FAIL) {
       addAgentMessage('🛑', t('pipeline.ipCompliance', { issues: ipResult.issues.join('; ') }));
       return ipResult;
