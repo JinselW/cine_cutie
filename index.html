@@ -323,6 +323,35 @@
         </label>
       </div>
 
+      <div class="modal-divider"></div>
+
+      <!-- Module: Background Music (BGM) -->
+      <div class="modal-section-title" id="lblBgmTitle" data-i18n="settings.bgm.title">Background Music</div>
+
+      <div class="modal-field modal-field-row">
+        <label id="lblBgmEnable" data-i18n="settings.bgm.enable" for="cfgBgmEnabled">Enable BGM</label>
+        <label class="toggle-switch">
+          <input type="checkbox" id="cfgBgmEnabled">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+
+      <div class="modal-field">
+        <label id="lblBgmFile" data-i18n="settings.bgm.select" for="cfgBgmFile">Select MP3 / WAV (&le;20MB)</label>
+        <div class="bgm-file-row">
+          <input type="file" id="cfgBgmFile" accept="audio/mpeg,audio/wav,audio/x-wav,audio/mp4,.mp3,.wav,.m4a,.ogg,.aac,.flac">
+          <span id="bgmFileName" class="bgm-file-name">No file</span>
+          <button id="bgmClearBtn" class="action-btn" type="button" data-i18n="settings.bgm.clear">Clear</button>
+        </div>
+      </div>
+
+      <div class="modal-field">
+        <label id="lblBgmVolume" for="cfgBgmVolume">Volume: <span id="bgmVolumeVal">60%</span></label>
+        <input type="range" id="cfgBgmVolume" min="0" max="100" value="60">
+      </div>
+
+      <p class="settings-hint" id="bgmHint" data-i18n="settings.bgm.hint">Ducks the BGM automatically when the original audio track is loud.</p>
+
       <div class="modal-actions">
         <button id="testConnBtn" class="action-btn" type="button">
           <span id="testConnText">Test Connection</span>

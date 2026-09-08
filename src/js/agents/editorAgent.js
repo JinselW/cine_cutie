@@ -1,6 +1,7 @@
 import { BaseAgent } from './baseAgent.js';
 import { QCAgent, reportScore } from './qcAgent.js';
 import { getActiveProvider } from '../providers/registry.js';
+import { getConfig } from '../providers/llm.js';
 import { createArtifact, ArtifactKind, ArtifactStatus } from '../artifacts/artifactTypes.js';
 import { QCVerdict } from './qcTypes.js';
 import { reportPhase } from '../progressTracker.js';
@@ -90,17 +91,20 @@ export class EditorAgent extends BaseAgent {
       }
 
       const items = valid.map(c => ({ id: c.shot_id, videoPath: c.videoPath, status: c.status }));
+      const bgm = getConfig().bgm;
       const result = await provider.generate({
         items,
         transitions,
         fadeIn: FADE_IO > 0,
         fadeOut: FADE_IO > 0,
+        bgm,
         signal: token?.signal,
       });
       return {
         episodes: (ctx.storyboard?.episodes || []).map(ep => ({ episode: ep.episode })),
         finalVideo: result.finalVideo,
         status: result.status,
+        bgm: bgm?.enabled ? { enabled: true, path: bgm.path || '', volume: bgm.volume ?? 0.6 } : null,
       };
     } catch {
       return null;

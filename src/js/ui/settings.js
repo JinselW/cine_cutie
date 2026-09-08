@@ -9,6 +9,19 @@ const PROVIDER_LIST = ['openai', 'deepseek', 'dashscope', 'ark', 'kling', 'gemin
 const CUSTOM_VALUE = '__custom__';
 const COMFY_MODEL = '__comfyui__';
 
+let bgmPath = '';
+let bgmName = '';
+
+function renderBgmFileUi() {
+  const nameEl = $('#bgmFileName');
+  if (nameEl) {
+    nameEl.textContent = bgmName || (bgmPath ? bgmPath.split('/').pop() : t('settings.bgm.none'));
+    nameEl.classList.toggle('dim', !bgmName && !bgmPath);
+  }
+  const clearBtn = $('#bgmClearBtn');
+  if (clearBtn) clearBtn.disabled = !bgmPath;
+}
+
 // Three side-by-side video model dropdowns, one per generation mode.
 const MODEL_SLOTS = [
   { modeId: 'firstFrame', configKey: 'video', dashKey: 'videoModel', selId: '#cfgVideoModelFirstFrame', wrapId: '#videoModelFirstFrameCustomWrap', customId: '#cfgVideoModelFirstFrameCustom', labelId: '#lblVideoModelFirstFrame' },
@@ -204,6 +217,19 @@ function openModal() {
   $('#cfgJsonMode').checked = cfg.jsonMode !== false;
   $('#cfgProxy').checked = cfg.useProxy === true;
 
+  const bgmCfg = cfg.bgm || {};
+  bgmPath = bgmCfg.path || '';
+  bgmName = bgmCfg.name || '';
+  const bgmEnable = $('#cfgBgmEnabled');
+  if (bgmEnable) bgmEnable.checked = !!bgmCfg.enabled;
+  const bgmVol = $('#cfgBgmVolume');
+  const vol = Number(bgmCfg.volume);
+  const volPct = Number.isFinite(vol) ? Math.round(vol * 100) : 60;
+  if (bgmVol) bgmVol.value = volPct;
+  const volVal = $('#bgmVolumeVal');
+  if (volVal) volVal.textContent = volPct + '%';
+  renderBgmFileUi();
+
   const comfyCfg = loadComfySshConfig();
   $('#comfySshHost').value = comfyCfg.host || '';
   $('#comfySshPort').value = comfyCfg.port || '';
@@ -283,6 +309,8 @@ function handleSave() {
 
   const jsonMode = $('#cfgJsonMode').checked;
   const useProxy = $('#cfgProxy').checked;
+  const bgmVolEl = $('#cfgBgmVolume');
+  const bgmVolPct = Math.max(0, Math.min(100, Number(bgmVolEl?.value ?? 60)));
 
   saveConfig({
     apiProviders,
@@ -297,6 +325,12 @@ function handleSave() {
     videoMode: mode.id,
     jsonMode,
     useProxy,
+    bgm: {
+      enabled: $('#cfgBgmEnabled')?.checked === true,
+      path: bgmPath,
+      name: bgmName,
+      volume: bgmVolPct / 100,
+    },
   });
 
   const dashScopeConfig = {
@@ -473,6 +507,52 @@ export function initSettings() {
   $('#cfgUseComfyVideo')?.addEventListener('change', (event) => {
     applyComfyUiState(event.target.checked);
   });
+
+  const bgmFileInput = $('#cfgBgmFile');
+  if (bgmFileInput) {
+    bgmFileInput.addEventListener('change', async () => {
+      const file = bgmFileInput.files?.[0];
+      if (!file) return;
+      const fd = new FormData();
+      fd.append('file', file);
+      try {
+        const res = await fetch('/api/upload/bgm', { method: 'POST', body: fd });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Upload failed');
+        bgmPath = data.path;
+        bgmName = data.originalName || file.name;
+        renderBgmFileUi();
+        const enable = $('#cfgBgmEnabled');
+        if (enable) enable.checked = true;
+        showStatus(t('settings.bgm.uploaded', { name: bgmName }), true);
+        setTimeout(clearStatus, 4000);
+      } catch (err) {
+        showStatus(t('settings.bgm.uploadError', { reason: err.message || 'unknown' }), false);
+        bgmFileInput.value = '';
+      }
+    });
+  }
+
+  const bgmClearBtn = $('#bgmClearBtn');
+  if (bgmClearBtn) {
+    bgmClearBtn.addEventListener('click', () => {
+      bgmPath = '';
+      bgmName = '';
+      const enable = $('#cfgBgmEnabled');
+      if (enable) enable.checked = false;
+      if (bgmFileInput) bgmFileInput.value = '';
+      renderBgmFileUi();
+      clearStatus();
+    });
+  }
+
+  const bgmVolInput = $('#cfgBgmVolume');
+  if (bgmVolInput) {
+    bgmVolInput.addEventListener('input', () => {
+      const val = $('#bgmVolumeVal');
+      if (val) val.textContent = bgmVolInput.value + '%';
+    });
+  }
 
   const saveBtn = $('#saveSettingsBtn');
   if (saveBtn) saveBtn.addEventListener('click', handleSave);

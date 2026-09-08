@@ -243,3 +243,53 @@ export async function checkFfmpeg() {
     });
   });
 }
+
+export const DEFAULT_BGM_VOLUME = 0.6;
+const BGM_FADE = 0.3;
+
+// Clamp a BGM volume to [0, 1]; NaN / non-finite falls back to the default, oversized values clamp to 1.
+export function sanitizeVolume(value, fallback = DEFAULT_BGM_VOLUME) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(0, Math.min(1, n));
+}
+
+// BGM is looped at input level (`-stream_loop -1`), bounded by atrim to the video duration, then
+// loudness-normalised. When the video carries audio (dialogue), a sidechain compressor ducks the
+// BGM under it so dialogue stays intelligible; otherwise the BGM is used as the only audio track.
+export function buildBgmFilterGraph(inputHasAudio, duration, { bgmVolume = DEFAULT_BGM_VOLUME, fadeIn = 0, fadeOut = 0 } = {}) {
+  const bgm = `aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,atrim=duration=${duration.toFixed(3)},asetpts=PTS-STARTPTS,loudnorm=I=-16:TP=-1.5:LRA=11,volume=${bgmVolume}[bn]`;
+  const stOut = Math.max(0, duration - fadeOut);
+  const fades = `afade=t=in:st=0:d=${fadeIn.toFixed(3)},afade=t=out:st=${stOut.toFixed(3)}:d=${fadeOut.toFixed(3)}`;
+  if (inputHasAudio) {
+    const parts = [
+      `[0:a]aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,asplit=2[mA][mB]`,
+      `[1:a]${bgm}`,
+      `[bn][mA]sidechaincompress=threshold=0.05:ratio=8:attack=200:release=1000[duck]`,
+      `[mB][duck]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[mix]`,
+      `[mix]${fades},aresample=48000,alimiter=limit=0.95[aout]`,
+    ];
+    return { filterComplex: parts.join(';'), audioLabel: 'aout' };
+  }
+  const parts = [
+    `[1:a]${bgm}`,
+    `[bn]${fades},aresample=48000,alimiter=limit=0.95[aout]`,
+  ];
+  return { filterComplex: parts.join(';'), audioLabel: 'aout' };
+}
+
+export async function applyBgm(inputPath, bgmPath, outputPath, { bgmVolume = DEFAULT_BGM_VOLUME, fadeIn = BGM_FADE, fadeOut = BGM_FADE, onProgress, taskId } = {}) {
+  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+  const info = await probeStreams(inputPath);
+  if (!(Number.isFinite(info.duration) && info.duration > 0)) throw new Error('Invalid video for BGM mix');
+  const { filterComplex, audioLabel } = buildBgmFilterGraph(info.hasAudio, info.duration, { bgmVolume: sanitizeVolume(bgmVolume), fadeIn, fadeOut });
+  const cancelCheck = taskId ? () => isTaskCancelled(taskId) : null;
+  const args = [
+    '-y', '-i', inputPath, '-stream_loop', '-1', '-i', bgmPath,
+    '-filter_complex', filterComplex,
+    '-map', '0:v', '-c:v', 'copy',
+    '-map', `[${audioLabel}]`, '-c:a', 'aac', '-b:a', '128k',
+  ];
+  await runFfmpeg([...args, outputPath], { durationSeconds: info.duration, onProgress, cancelCheck });
+  return outputPath;
+}

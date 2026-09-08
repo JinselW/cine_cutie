@@ -66,6 +66,7 @@ let config = {
   videoMode: VIDEO_MODES[0].id,
   jsonMode: true,
   useProxy: false,
+  bgm: { enabled: false, path: '', name: '', volume: 0.6 },
 };
 
 function inferProvider(modelName) {
@@ -140,6 +141,7 @@ function loadConfig() {
         videoMode: parsed.videoMode || inferVideoMode(parsed.models),
         jsonMode: parsed.jsonMode ?? true,
         useProxy: parsed.useProxy ?? false,
+        bgm: { enabled: false, path: '', name: '', volume: 0.6, ...(parsed.bgm || {}) },
       };
       for (const key of Object.keys(PROVIDER_DEFAULTS)) {
         config.apiProviders[key] = { ...PROVIDER_DEFAULTS[key], ...(parsed.apiProviders?.[key] || {}) };
@@ -170,6 +172,7 @@ function saveConfig(cfg) {
   if (cfg.videoMode !== undefined) config.videoMode = cfg.videoMode;
   if (cfg.jsonMode !== undefined) config.jsonMode = cfg.jsonMode;
   if (cfg.useProxy !== undefined) config.useProxy = cfg.useProxy;
+  if (cfg.bgm) config.bgm = { ...config.bgm, ...cfg.bgm };
 
   try {
     localStorage.setItem(SETTINGS_KEY, JSON.stringify({
@@ -178,6 +181,7 @@ function saveConfig(cfg) {
       videoMode: config.videoMode,
       jsonMode: config.jsonMode,
       useProxy: config.useProxy,
+      bgm: config.bgm,
     }));
   } catch {}
 
@@ -200,6 +204,7 @@ function getConfig() {
     videoMode: config.videoMode,
     jsonMode: config.jsonMode,
     useProxy: config.useProxy,
+    bgm: structuredClone(config.bgm),
   };
 }
 

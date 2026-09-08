@@ -451,6 +451,13 @@
 }
 .modal-field-row label:first-child{margin-bottom:0}
 
+.bgm-file-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.bgm-file-row input[type="file"]{flex:1;min-width:0;padding:6px 8px;background:var(--bg);border:1px solid var(--glass-border);border-radius:var(--radius-xs);color:var(--cream2);font-size:0.8rem}
+.bgm-file-name{font-size:0.82rem;color:var(--cream2);opacity:0.85;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:220px}
+.bgm-file-name.dim{opacity:0.5;font-style:italic}
+.modal-field input[type="range"]{width:100%;accent-color:var(--gold);margin-top:4px}
+.settings-hint{font-size:0.75rem;color:var(--cream3);margin:8px 0 0;opacity:0.85}
+
 .comfy-ssh-grid{
   display:grid;grid-template-columns:1fr 1fr;gap:8px 16px;
 }

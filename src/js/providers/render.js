@@ -7,7 +7,7 @@ const renderProvider = {
   name: 'FFmpeg Render',
   capabilities: ['render'],
 
-  async generate({ items, transitions, fadeIn, fadeOut, signal } = {}) {
+  async generate({ items, transitions, fadeIn, fadeOut, bgm, signal } = {}) {
     const validPaths = (items || [])
       .filter(item => item.videoPath && item.status === 'complete')
       .map(item => item.videoPath);
@@ -26,6 +26,12 @@ const renderProvider = {
     }
     if (fadeIn) body.fadeIn = true;
     if (fadeOut) body.fadeOut = true;
+    if (bgm?.enabled && typeof bgm.path === 'string' && bgm.path) {
+      const v = Number(bgm.volume);
+      body.bgm = bgm.path;
+      body.bgmEnabled = true;
+      body.bgmVolume = Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 0.6;
+    }
 
     let taskId = null;
     try {

@@ -6,7 +6,7 @@ import { createMemoryRouter } from './memory.js';
 import { LRUCache } from './cache.js';
 import { submitImageTask, submitImageEditTask, parseImageResultUrl, submitVideoTask, submitVideoTaskV2, pollTask, downloadFile, detectVideoMode, hasVideoUploads, fileToDataUri } from './dashscope.js';
 import { createTask, getTask, updateTask, cancelTask, isTaskCancelled, cleanupTasks } from './tasks.js';
-import { concatVideos, checkFfmpeg, renderWithTransitions, probeStreams } from './render.js';
+import { concatVideos, checkFfmpeg, renderWithTransitions, probeStreams, applyBgm, sanitizeVolume } from './render.js';
 import { submitWorkflow, pollUntilDone, downloadOutput, uploadImageToComfy, checkComfyUIStatus, getComfyMonitorStatus, selectWorkflowMode, cancelPrompt, MAX_COMFY_REFERENCE_IMAGES } from './comfyui.js';
 import { ensureTunnel, closeTunnel, getTunnelStatus, deleteComfyInputFiles, getDgxMetrics } from './ssh-tunnel.js';
 import path from 'path';
@@ -125,6 +125,22 @@ const upload = multer({
 function isV2Model(name) {
   return typeof name === 'string' && name.startsWith('wan2.7');
 }
+
+const bgmUpload = multer({
+  storage: multer.diskStorage({
+    destination: UPLOADS_DIR,
+    filename: (_req, file, cb) => {
+      const ext = path.extname(file.originalname);
+      cb(null, `${Date.now()}_${Math.random().toString(36).slice(2, 8)}${ext || '.mp3'}`);
+    }
+  }),
+  limits: { fileSize: 20 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const ok = /^audio\//.test(file.mimetype) || /\.(mp3|wav|m4a|ogg|aac|flac)$/i.test((file.originalname || ''));
+    if (ok) cb(null, true);
+    else cb(new Error('Only audio files are allowed'));
+  }
+});
 
 // 图生图参考图：只接受同源 /api/media 路径，服务端读本地文件，避免任意文件读取
 function resolveMediaRef(ref) {
@@ -367,6 +383,11 @@ app.post('/api/generate/image', async (req, res) => {
   });
 
   res.json({ taskId: task.id });
+});
+
+app.post('/api/upload/bgm', bgmUpload.single('file'), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+  res.json({ path: `/api/media/uploads/${req.file.filename}`, filename: req.file.filename, originalName: req.file.originalname });
 });
 
 app.post('/api/upload/prompt', promptUpload.single('file'), async (req, res) => {
@@ -619,7 +640,7 @@ app.post('/api/generate/video', async (req, res) => {
 });
 
 app.post('/api/render/final', async (req, res) => {
-  const { videoPaths, transitions, fadeIn, fadeOut } = req.body;
+  const { videoPaths, transitions, fadeIn, fadeOut, bgm, bgmEnabled, bgmVolume } = req.body;
 
   if (!Array.isArray(videoPaths) || videoPaths.length === 0) {
     return res.status(400).json({ error: 'Missing videoPaths array' });
@@ -685,24 +706,51 @@ app.post('/api/render/final', async (req, res) => {
       updateTask(task.id, { phase: 'rendering', progress });
     };
 
-    if (useFx) {
-      await renderWithTransitions(localPaths, transitions, outputPath, {
-        onProgress,
-        fadeIn: !!fadeIn,
-        fadeOut: !!fadeOut,
-        taskId: task.id,
-      });
-    } else {
-      await concatVideos(localPaths, outputPath, { onProgress, taskId: task.id });
-    }
+    let bgmOutput = null;
+    let adopted = false;
+    try {
+      if (useFx) {
+        await renderWithTransitions(localPaths, transitions, outputPath, {
+          onProgress,
+          fadeIn: !!fadeIn,
+          fadeOut: !!fadeOut,
+          taskId: task.id,
+        });
+      } else {
+        await concatVideos(localPaths, outputPath, { onProgress, taskId: task.id });
+      }
 
-    const cancelled = isTaskCancelled(task.id);
-    const finalStatus = cancelled ? 'cancelled' : 'completed';
-    updateTask(task.id, {
-      status: finalStatus,
-      progress: finalStatus === 'completed' ? 100 : (cancelled ? 90 : 0),
-      result: { path: `/api/media/${outputFilename}`, filename: outputFilename }
-    });
+      // BGM is an additive audio mix on top of the assembled video (video stream is copied).
+      const bgmLocal = (bgmEnabled && typeof bgm === 'string') ? safeResolveMediaPath(bgm) : null;
+      if (bgmLocal) {
+        bgmOutput = path.join(MEDIA_DIR, `final_${Date.now()}_bgm.mp4`);
+        updateTask(task.id, { phase: 'rendering', progress: 90 });
+        await applyBgm(outputPath, bgmLocal, bgmOutput, {
+          bgmVolume: sanitizeVolume(bgmVolume),
+          taskId: task.id,
+        });
+        adopted = true;
+      }
+
+      const cancelled = isTaskCancelled(task.id);
+      const finalStatus = cancelled ? 'cancelled' : 'completed';
+      updateTask(task.id, {
+        status: finalStatus,
+        progress: finalStatus === 'completed' ? 100 : (cancelled ? 90 : 0),
+        result: { path: `/api/media/${adopted ? path.basename(bgmOutput) : outputFilename}`, filename: adopted ? path.basename(bgmOutput) : outputFilename }
+      });
+    } catch (err) {
+      const cancelled = isTaskCancelled(task.id);
+      updateTask(task.id, cancelled ? { status: 'cancelled', progress: 90 } : { status: 'failed', error: err.message });
+    } finally {
+      // On success the base concat/transition output is dropped when BGM was adopted; on failure/cancel
+      // both the base and any partial BGM output are removed so media/ is not littered.
+      const done = getTask(task.id)?.status === 'completed';
+      const toRemove = done ? (adopted ? [outputPath] : []) : [outputPath, ...(bgmOutput ? [bgmOutput] : [])];
+      for (const p of toRemove) {
+        try { if (p && fs.existsSync(p)) fs.unlinkSync(p); } catch {}
+      }
+    }
   })().catch(err => {
     const cancelled = isTaskCancelled(task.id);
     updateTask(task.id, cancelled ? { status: 'cancelled', progress: 90 } : { status: 'failed', error: err.message });
