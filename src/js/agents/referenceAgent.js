@@ -2,8 +2,8 @@ import { BaseAgent } from './baseAgent.js';
 import { RetryAgent, ItemRetryStrategy } from './retryAgent.js';
 import { QCAgent, SCORE_THRESHOLD, reportScore, reportRetry } from './qcAgent.js';
 import { getActiveProvider } from '../providers/registry.js';
-import { getConfig } from '../providers/llm.js';
-import { STYLE_HINTS } from '../providers/prompts.js';
+import { getConfig, chat, parseJson } from '../providers/llm.js';
+import { STYLE_HINTS, buildMessages } from '../providers/prompts.js';
 import { createArtifact, ArtifactKind, ArtifactStatus, recordItemAttempt } from '../artifacts/artifactTypes.js';
 import { addAgentMessage } from '../ui/render.js';
 import { t } from '../i18n.js';
@@ -44,7 +44,12 @@ export class ReferenceAgent extends BaseAgent {
     const pairs = this.#extractShots(ctx);
     if (!pairs.length) return this.#emptyResult(ctx, mode);
 
-    const items = this.#buildItems(pairs, ctx, mode);
+    let shotModes = null;
+    if (mode === 'auto') {
+      shotModes = await this.#evaluateShotModes(pairs, ctx, _token?.signal);
+    }
+
+    const items = this.#buildItems(pairs, ctx, mode, shotModes);
     const sourceArtifactIds = [
       ctx.sourceArtifactIds?.script,
       ctx.sourceArtifactIds?.storyboard,
@@ -65,7 +70,7 @@ export class ReferenceAgent extends BaseAgent {
 
       reportPhase(attempt ? 'retrying' : 'generatingImages', { attempt: attempt + 1 });
       const results = await this.#generateItems(items, artifact, ctx, _token);
-      const data = this.#assembleResult(results, pairs, mode, items);
+      const data = this.#assembleResult(results, pairs, mode, items, shotModes);
 
       reportPhase('validating');
       const crit = await this.#qcAgent.process({ data, entities: ctx.entities || {}, ...ctx });
@@ -103,7 +108,30 @@ export class ReferenceAgent extends BaseAgent {
 
   #videoMode() {
     const mode = getConfig().videoMode;
+    if (mode === 'auto') return 'auto';
     return mode === 'firstLastFrame' || mode === 'referenceImage' ? mode : 'firstFrame';
+  }
+
+  async #evaluateShotModes(pairs, ctx, signal) {
+    const messages = buildMessages('autoModeEval', ctx);
+    if (!messages) return pairs.map(p => ({ shot: p.shot, mode: 'firstFrame' }));
+
+    let raw;
+    try {
+      raw = await chat(messages, { signal });
+    } catch {
+      return pairs.map(p => ({ shot: p.shot, mode: 'firstFrame' }));
+    }
+
+    const parsed = parseJson(raw);
+    const assignments = parsed?.assignments || [];
+    const modeMap = new Map(assignments.map(a => [a.shot_id, a.mode]));
+    const validModes = new Set(['firstFrame', 'firstLastFrame', 'referenceImage']);
+
+    return pairs.map(p => ({
+      shot: p.shot,
+      mode: validModes.has(modeMap.get(p.shot.shot_id)) ? modeMap.get(p.shot.shot_id) : 'firstFrame',
+    }));
   }
 
   #extractShots(ctx) {
@@ -136,24 +164,31 @@ export class ReferenceAgent extends BaseAgent {
     return pairs;
   }
 
-  #buildItems(pairs, ctx, mode) {
-    const role = mode === 'referenceImage' ? FrameRole.REFERENCE : FrameRole.FIRST;
-    const items = pairs.map((pair, index) => ({
-      id: pair.shot.shot_id,
-      role,
-      index,
-      ...this.#frameSpec(pair, ctx, role),
-    }));
+  #buildItems(pairs, ctx, mode, shotModes) {
+    const items = [];
 
-    if (mode === 'firstLastFrame') {
-      const lastIndex = pairs.length - 1;
+    pairs.forEach((pair, index) => {
+      const shotMode = shotModes ? shotModes[index].mode
+        : (mode === 'referenceImage' ? 'referenceImage' : mode === 'firstLastFrame' ? 'firstLastFrame' : 'firstFrame');
+      const role = shotMode === 'referenceImage' ? FrameRole.REFERENCE : FrameRole.FIRST;
       items.push({
-        id: `${pairs[lastIndex].shot.shot_id}${LAST_FRAME_SUFFIX}`,
-        role: FrameRole.LAST,
-        index: lastIndex,
-        ...this.#frameSpec(pairs[lastIndex], ctx, FrameRole.LAST),
+        id: pair.shot.shot_id,
+        role,
+        index,
+        shotMode,
+        ...this.#frameSpec(pair, ctx, role),
       });
-    }
+
+      if (shotMode === 'firstLastFrame') {
+        items.push({
+          id: `${pair.shot.shot_id}${LAST_FRAME_SUFFIX}`,
+          role: FrameRole.LAST,
+          index,
+          shotMode,
+          ...this.#frameSpec(pair, ctx, FrameRole.LAST),
+        });
+      }
+    });
 
     return items;
   }
@@ -302,17 +337,19 @@ export class ReferenceAgent extends BaseAgent {
     return [...results.values()];
   }
 
-  #assembleResult(results, pairs, mode, items) {
+  #assembleResult(results, pairs, mode, items, shotModes) {
     const byId = new Map(results.map(r => [r.id, r]));
     const refsById = new Map((items || []).map(it => [it.id, it.refs || []]));
-    const role = mode === 'referenceImage' ? FrameRole.REFERENCE : FrameRole.FIRST;
-    const closingId = pairs.length ? `${pairs[pairs.length - 1].shot.shot_id}${LAST_FRAME_SUFFIX}` : '';
-    const closing = byId.get(closingId) || {};
 
     const shots = pairs.map((pair, i) => {
+      const shotMode = shotModes ? shotModes[i].mode
+        : (mode === 'referenceImage' ? 'referenceImage' : mode === 'firstLastFrame' ? 'firstLastFrame' : 'firstFrame');
+      const role = shotMode === 'referenceImage' ? FrameRole.REFERENCE : FrameRole.FIRST;
       const result = byId.get(pair.shot.shot_id) || {};
+
       const shot = {
         shot_id: pair.shot.shot_id,
+        videoMode: shotMode,
         role,
         imagePath: result.path || '',
         imageUrl: result.imageUrl || '',
@@ -321,37 +358,17 @@ export class ReferenceAgent extends BaseAgent {
         status: result.status || 'failed',
       };
 
-      if (mode === 'firstLastFrame') {
-        const next = pairs[i + 1];
-        if (next) {
-          const nextResult = byId.get(next.shot.shot_id) || {};
-          shot.lastFramePath = nextResult.path || '';
-          shot.lastFrameUrl = nextResult.imageUrl || '';
-          shot.lastFrameFrom = next.shot.shot_id;
-        } else {
-          shot.lastFramePath = closing.path || '';
-          shot.lastFrameUrl = closing.imageUrl || '';
-          shot.lastFrameFrom = 'generated';
-        }
+      if (shotMode === 'firstLastFrame') {
+        const lastId = `${pair.shot.shot_id}${LAST_FRAME_SUFFIX}`;
+        const lastResult = byId.get(lastId) || {};
+        shot.lastFramePath = lastResult.path || '';
+        shot.lastFrameUrl = lastResult.imageUrl || '';
       }
 
       return shot;
     });
 
-    const extraFrames = mode === 'firstLastFrame' && pairs.length
-      ? [{
-        id: closingId,
-        shot_id: pairs[pairs.length - 1].shot.shot_id,
-        role: FrameRole.LAST,
-        imagePath: closing.path || '',
-        imageUrl: closing.imageUrl || '',
-        prompt: closing.prompt || '',
-        refs: refsById.get(closingId) || [],
-        status: closing.status || 'failed',
-      }]
-      : [];
-
-    return { mode, shots, extraFrames };
+    return { mode, shots, extraFrames: [] };
   }
 
   #emptyResult(ctx, mode) {
@@ -370,6 +387,7 @@ export class ReferenceAgent extends BaseAgent {
           mode,
           shots: pairs.map(p => ({
             shot_id: p.shot.shot_id,
+            videoMode: mode === 'auto' ? 'firstFrame' : mode,
             role,
             imagePath: '',
             imageUrl: '',

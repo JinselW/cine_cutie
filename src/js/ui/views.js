@@ -263,7 +263,7 @@ export function renderReferenceImages(data, onAdvance, readOnly = false) {
   const { isConfigured: dsConfigured } = getDashScopeStatus();
 
   const roleLabel = role => t(FRAME_ROLE_KEYS[role] || 'ui.frameFirst');
-  const isChained = data?.mode === 'firstLastFrame';
+  const isChained = data?.mode === 'firstLastFrame' || data?.mode === 'auto';
 
   const frameThumb = (imagePath, alt, status) => (imagePath
     ? `<img src="${mediaUrl(imagePath)}" alt="${escapeHtml(alt)}" style="width:100%;aspect-ratio:16/9;object-fit:cover;border-radius:var(--radius-xs);margin-bottom:4px">`
@@ -276,10 +276,8 @@ export function renderReferenceImages(data, onAdvance, readOnly = false) {
         <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(sh.shot_id)}</span>
         <span style="color:var(--gold);white-space:nowrap">${roleLabel(sh.role)}</span>
       </div>
-      ${isChained ? `<div style="font-size:0.68rem;color:var(--cream3);margin-top:2px;line-height:1.4">
-        ${t('ui.refImagesLastFrameFrom')} <span style="color:var(--gold)">${sh.lastFrameFrom === 'generated'
-          ? t('ui.refImagesLastFrameGenerated')
-          : escapeHtml(t('ui.refImagesLastFrameReuse', { shot: sh.lastFrameFrom || '—' }))}</span>
+      ${sh.videoMode && sh.videoMode !== 'firstFrame' ? `<div style="font-size:0.68rem;color:var(--cream3);margin-top:2px">
+        ${t('settings.videoMode.' + sh.videoMode)}
       </div>` : ''}
     </div>
   `).join('');

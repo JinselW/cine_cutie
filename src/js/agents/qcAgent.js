@@ -110,11 +110,9 @@ function mediaDigest(stepId, data) {
   }
   if (stepId === 'referenceImages') {
     const shots = data?.shots || [];
-    const extras = data?.extraFrames || [];
     const complete = shots.filter(s => s.status === 'complete' || s.imagePath).length;
-    const lines = shots.map((s, i) => `- shot ${s.shot_id || i}: [${s.status}] role=${s.role || 'first_frame'} lastFrame=${s.lastFrameFrom || '-'} ${truncate(s.prompt, 120)}`);
-    lines.push(...extras.map(f => `- extra frame ${f.shot_id || ''}: [${f.status}] role=${f.role || 'last_frame'} ${truncate(f.prompt, 120)}`));
-    return `FRAMES (mode=${data?.mode || 'firstFrame'}, ${complete}/${shots.length} shot frames, ${extras.length} extra closing frame(s)):\n${lines.join('\n')}`;
+    const lines = shots.map((s, i) => `- shot ${s.shot_id || i}: [${s.status}] role=${s.role || 'first_frame'} mode=${s.videoMode || 'firstFrame'} ${truncate(s.prompt, 120)}`);
+    return `FRAMES (mode=${data?.mode || 'firstFrame'}, ${complete}/${shots.length} shot frames):\n${lines.join('\n')}`;
   }
   if (stepId === 'videoGeneration') {
     const clips = data?.clips || [];

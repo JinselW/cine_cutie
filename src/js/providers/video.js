@@ -14,7 +14,79 @@ const DEFAULT_CLIP_DURATION = 5;
 function effectiveVideoMode(uploads) {
   if (uploads?.referenceImages?.length > 0) return 'referenceImage';
   const mode = getConfig().videoMode;
+  if (mode === 'auto') return 'auto';
   return mode === 'firstLastFrame' || mode === 'referenceImage' ? mode : 'firstFrame';
+}
+
+function inferItemMode(item) {
+  if ((item.referenceImages || []).length > 0) return 'referenceImage';
+  if (item.lastFramePath || item.lastFrameUrl) return 'firstLastFrame';
+  if (item.imagePath || item.imageUrl) return 'firstFrame';
+  return 'textToVideo';
+}
+
+function modelForMode(dsConfig, mode) {
+  if (mode === 'referenceImage') return dsConfig.refVideoModel;
+  if (mode === 'firstLastFrame') return dsConfig.lastFrameVideoModel || dsConfig.videoModel;
+  return dsConfig.videoModel;
+}
+
+async function submitBatch(sentClips, bodyPayload, dsConfig, signal) {
+  let taskId = null;
+  try {
+    const res = await fetch('/api/generate/video', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Api-Key': dsConfig.apiKey },
+      signal,
+      body: JSON.stringify(bodyPayload),
+    });
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '');
+      return { error: `HTTP ${res.status}: ${errText.substring(0, 100)}` };
+    }
+    ({ taskId } = await res.json());
+    registerBackendTask(taskId);
+    const startTime = Date.now();
+    const MAX_WAIT = 20 * 60 * 1000;
+    for (let attempt = 0; attempt < 400; attempt++) {
+      if (signal?.aborted) return { error: 'Cancelled' };
+      if (Date.now() - startTime > MAX_WAIT) return { error: 'Timeout' };
+      await new Promise(r => setTimeout(r, 5000));
+      const ctrl = new AbortController();
+      const tid = setTimeout(() => ctrl.abort(), 30000);
+      if (signal) {
+        if (signal.aborted) { ctrl.abort(); clearTimeout(tid); break; }
+        signal.addEventListener('abort', () => ctrl.abort(), { once: true });
+      }
+      let taskData;
+      try {
+        const taskRes = await fetch(`/api/task/${taskId}`, { signal: ctrl.signal });
+        clearTimeout(tid);
+        if (!taskRes.ok) return { error: 'Task not found or server restarted' };
+        taskData = await taskRes.json();
+        reportBatchProgress('generatingVideos', taskData);
+      } catch {
+        clearTimeout(tid);
+        if (signal?.aborted) break;
+        continue;
+      }
+      if (taskData.status === 'completed') {
+        return { clips: taskData.result?.clips || [] };
+      }
+      if (taskData.status === 'failed' || taskData.status === 'cancelled') {
+        return { error: taskData.status === 'cancelled' ? 'Cancelled' : (taskData.error || 'Generation failed') };
+      }
+    }
+    return { error: 'Timeout' };
+  } catch (err) {
+    return { error: err.message };
+  } finally {
+    unregisterBackendTask(taskId);
+  }
+}
+
+function failAll(items, error) {
+  return items.map(item => ({ id: item.id, videoPath: '', status: 'failed', error }));
 }
 
 const videoProvider = {
@@ -26,31 +98,26 @@ const videoProvider = {
     const dsConfig = getImageConfig();
     if (!dsConfig.apiKey || !items?.length) {
       return items.map(item => ({
-        id: item.id,
-        videoPath: '',
-        status: 'failed',
+        id: item.id, videoPath: '', status: 'failed',
         error: !dsConfig.apiKey ? 'Not configured' : 'No items',
       }));
     }
-
-    if (signal?.aborted) {
-      return items.map(item => ({
-        id: item.id, videoPath: '', status: 'failed', error: 'Cancelled',
-      }));
-    }
+    if (signal?.aborted) return failAll(items, 'Cancelled');
 
     const hasUploads = uploads && (uploads.firstFrame || uploads.lastFrame || uploads.referenceImages?.length > 0);
-    const mode = effectiveVideoMode(uploads);
+    let mode = effectiveVideoMode(uploads);
+
+    if (mode === 'auto' && hasUploads) {
+      mode = uploads.lastFrame ? 'firstLastFrame' : 'firstFrame';
+    }
 
     const clips = items.map(item => {
       const overridePrompt = overrides.promptOverrides?.[item.id];
       const overrideRef = overrides.referenceOverrides?.[item.id];
       const overrideSeed = overrides.seed?.[item.id];
-
       return {
         id: item.id,
         prompt: overridePrompt || item.prompt,
-        // 服务端优先用本地文件（远端 URL 24h 后失效），换参考图时必须丢掉旧本地路径
         imagePath: overrideRef ? '' : (item.imagePath || ''),
         imageUrl: overrideRef || item.imageUrl || '',
         lastFramePath: item.lastFramePath || '',
@@ -61,6 +128,73 @@ const videoProvider = {
       };
     });
 
+    if (mode === 'auto') {
+      const groups = new Map();
+      const skippedIds = [];
+
+      for (const clip of clips) {
+        const itemMode = inferItemMode(clip);
+        if (itemMode === 'textToVideo') { skippedIds.push(clip.id); continue; }
+        const model = modelForMode(dsConfig, itemMode);
+        if (!model) { skippedIds.push(clip.id); continue; }
+        if (!groups.has(itemMode)) groups.set(itemMode, { clips: [], model });
+        groups.get(itemMode).clips.push(clip);
+      }
+
+      const allResults = new Map();
+      for (const [groupMode, group] of groups) {
+        if (signal?.aborted) {
+          for (const c of group.clips) allResults.set(c.id, { videoPath: '', status: 'failed', error: 'Cancelled' });
+          continue;
+        }
+        const dsRes = dsVideoResolution(state.resolution || '720P', group.model);
+        const bodyPayload = {
+          clips: group.clips.map(c => ({
+            prompt: c.prompt,
+            imagePath: c.imagePath,
+            imageUrl: c.imageUrl,
+            lastFramePath: c.lastFramePath,
+            lastFrameUrl: c.lastFrameUrl,
+            referenceImages: c.referenceImages,
+            duration: c.duration,
+            seed: c.seed,
+          })),
+          model: group.model,
+          mode: groupMode,
+          duration: DEFAULT_CLIP_DURATION,
+          resolution: dsRes,
+          seed: group.clips[0].seed,
+          audio: true,
+        };
+        const batchResult = await submitBatch(group.clips, bodyPayload, dsConfig, signal);
+        if (batchResult.clips) {
+          for (const r of batchResult.clips) {
+            const clipId = group.clips[r.index]?.id;
+            if (clipId) {
+              allResults.set(clipId, {
+                videoPath: r.path || '',
+                status: r.status === 'ok' ? 'complete' : 'failed',
+                error: r.status === 'ok' ? null : 'Generation failed',
+              });
+            }
+          }
+        } else {
+          for (const c of group.clips) {
+            allResults.set(c.id, { videoPath: '', status: 'failed', error: batchResult.error });
+          }
+        }
+      }
+
+      return items.map(item => {
+        const result = allResults.get(item.id);
+        if (result) return { id: item.id, ...result };
+        if (skippedIds.includes(item.id)) {
+          return { id: item.id, videoPath: '', status: 'skipped', error: 'No image or model not configured' };
+        }
+        return { id: item.id, videoPath: '', status: 'failed', error: 'Incomplete results' };
+      });
+    }
+
     const isUsable = c => (mode === 'referenceImage'
       ? c.referenceImages.length > 0
       : !!(c.imagePath || c.imageUrl));
@@ -68,16 +202,12 @@ const videoProvider = {
 
     if (!hasUploads && !sentClips.length) {
       return items.map(item => ({
-        id: item.id,
-        videoPath: '',
-        status: 'skipped',
+        id: item.id, videoPath: '', status: 'skipped',
         error: mode === 'referenceImage' ? 'No reference image' : 'No first frame image',
       }));
     }
 
-    const chosenModel = mode === 'referenceImage' ? dsConfig.refVideoModel
-      : mode === 'firstLastFrame' ? (dsConfig.lastFrameVideoModel || dsConfig.videoModel)
-      : dsConfig.videoModel;
+    const chosenModel = modelForMode(dsConfig, mode);
     const dsRes = dsVideoResolution(state.resolution || '720P', chosenModel);
 
     const bodyPayload = hasUploads
@@ -114,130 +244,36 @@ const videoProvider = {
           audio: true,
         };
 
-    let taskId = null;
-    try {
-      const res = await fetch('/api/generate/video', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Api-Key': dsConfig.apiKey,
-        },
-        signal,
-        body: JSON.stringify(bodyPayload),
-      });
+    const batchResult = await submitBatch(sentClips, bodyPayload, dsConfig, signal);
 
-      if (!res.ok) {
-        const errText = await res.text().catch(() => '');
-        return items.map(item => ({
-          id: item.id,
-          videoPath: '',
-          status: 'failed',
-          error: `HTTP ${res.status}: ${errText.substring(0, 100)}`,
-        }));
-      }
-
-      ({ taskId } = await res.json());
-      registerBackendTask(taskId);
-      const startTime = Date.now();
-      const MAX_WAIT = 20 * 60 * 1000;
-
-      for (let attempt = 0; attempt < 400; attempt++) {
-        if (signal?.aborted) {
-          return items.map(item => ({
-            id: item.id, videoPath: '', status: 'failed', error: 'Cancelled',
-          }));
-        }
-        if (Date.now() - startTime > MAX_WAIT) {
-          return items.map(item => ({
-            id: item.id,
-            videoPath: '',
-            status: 'failed',
-            error: 'Timeout',
-          }));
-        }
-        await new Promise(r => setTimeout(r, 5000));
-
-        const ctrl = new AbortController();
-        const tid = setTimeout(() => ctrl.abort(), 30000);
-        if (signal) {
-          if (signal.aborted) { ctrl.abort(); clearTimeout(tid); break; }
-          signal.addEventListener('abort', () => ctrl.abort(), { once: true });
-        }
-        let taskData;
-        try {
-          const taskRes = await fetch(`/api/task/${taskId}`, { signal: ctrl.signal });
-          clearTimeout(tid);
-          if (!taskRes.ok) {
-            return items.map(item => ({
-              id: item.id,
-              videoPath: '',
-              status: 'failed',
-              error: 'Task not found or server restarted',
-            }));
-          }
-          taskData = await taskRes.json();
-          reportBatchProgress('generatingVideos', taskData);
-        } catch {
-          clearTimeout(tid);
-          if (signal?.aborted) break;
-          continue;
-        }
-
-        if (taskData.status === 'completed') {
-          const results = taskData.result?.clips || [];
-          const resultMap = new Map();
-          for (const r of results) {
-            const clipId = sentClips[r.index]?.id;
-            if (clipId) {
-              resultMap.set(clipId, {
-                videoPath: r.path || '',
-                status: r.status === 'ok' ? 'complete' : 'failed',
-                error: r.status === 'ok' ? null : 'Generation failed',
-              });
-            }
-          }
-
-          return items.map(item => {
-            const result = resultMap.get(item.id);
-            if (result) return { id: item.id, ...result };
-            const clip = sentClips.find(c => c.id === item.id);
-            if (!clip) {
-              return {
-                id: item.id,
-                videoPath: '',
-                status: 'skipped',
-                error: mode === 'referenceImage' ? 'No reference image' : 'No first frame image',
-              };
-            }
-            return { id: item.id, videoPath: '', status: 'failed', error: 'Incomplete results' };
-          });
-        }
-        if (taskData.status === 'failed' || taskData.status === 'cancelled') {
-          return items.map(item => ({
-            id: item.id,
-            videoPath: '',
-            status: 'failed',
-            error: taskData.status === 'cancelled' ? 'Cancelled' : (taskData.error || 'Generation failed'),
-          }));
-        }
-      }
-
-      return items.map(item => ({
-        id: item.id,
-        videoPath: '',
-        status: 'failed',
-        error: 'Timeout',
-      }));
-    } catch (err) {
-      return items.map(item => ({
-        id: item.id,
-        videoPath: '',
-        status: 'failed',
-        error: err.message,
-      }));
-    } finally {
-      unregisterBackendTask(taskId);
+    if (batchResult.error && !batchResult.clips) {
+      return failAll(items, batchResult.error);
     }
+
+    const resultMap = new Map();
+    for (const r of (batchResult.clips || [])) {
+      const clipId = sentClips[r.index]?.id;
+      if (clipId) {
+        resultMap.set(clipId, {
+          videoPath: r.path || '',
+          status: r.status === 'ok' ? 'complete' : 'failed',
+          error: r.status === 'ok' ? null : 'Generation failed',
+        });
+      }
+    }
+
+    return items.map(item => {
+      const result = resultMap.get(item.id);
+      if (result) return { id: item.id, ...result };
+      const clip = sentClips.find(c => c.id === item.id);
+      if (!clip) {
+        return {
+          id: item.id, videoPath: '', status: 'skipped',
+          error: mode === 'referenceImage' ? 'No reference image' : 'No first frame image',
+        };
+      }
+      return { id: item.id, videoPath: '', status: 'failed', error: 'Incomplete results' };
+    });
   },
 };
 
