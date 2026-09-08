@@ -892,4 +892,21 @@ export function applyLang() {
   if (testConnText) testConnText.textContent = t('settings.test');
   const saveSettingsText = $('#saveSettingsText');
   if (saveSettingsText) saveSettingsText.textContent = t('settings.save');
+
+  const historyDialog = document.querySelector('.history-dialog');
+  if (historyDialog) {
+    const h2 = historyDialog.querySelector('header h2');
+    if (h2) h2.textContent = t('history.title');
+    const closeBtn = historyDialog.querySelector('[data-close]');
+    if (closeBtn) closeBtn.textContent = t('history.close');
+    const note = historyDialog.querySelector(':scope > .history-note');
+    if (note) note.textContent = t('history.note');
+    const search = historyDialog.querySelector('input[type=search]');
+    if (search) {
+      search.placeholder = t('history.search');
+      search.setAttribute('aria-label', t('history.search'));
+    }
+    const refreshBtn = historyDialog.querySelector('[data-refresh]');
+    if (refreshBtn) refreshBtn.textContent = t('history.refresh');
+  }
 }

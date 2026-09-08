@@ -175,24 +175,19 @@ export function initHistory() {
   }
 
   list.onclick = e => { const item = e.target.closest('[data-id]'); if (item) openRecord(item.dataset.id); };
-  button.onclick = () => { dialog.showModal(); refresh(); };
+  button.onclick = () => { dialog.showModal(); refresh(); if (selected) openRecord(selected); };
   dialog.querySelector('[data-close]').onclick = () => dialog.close();
   dialog.addEventListener('close', () => detail.querySelectorAll('video,audio').forEach(m => m.pause()));
   dialog.querySelector('[data-refresh]').onclick = () => { refresh(); if (selected) openRecord(selected); };
   let searchTimer;
   dialog.querySelector('input').oninput = () => { clearTimeout(searchTimer); searchTimer = setTimeout(refresh, 250); };
   window.addEventListener('languagechange', async () => {
-    button.title = t('history.title');
-    button.setAttribute('aria-label', button.title);
-    dialog.setAttribute('aria-label', t('history.title'));
-    dialog.querySelector('header h2').textContent = t('history.title');
-    dialog.querySelector('[data-close]').textContent = t('history.close');
-    dialog.querySelector(':scope > .history-note').textContent = t('history.note');
-    const search = dialog.querySelector('input[type=search]');
-    search.placeholder = t('history.search');
-    search.setAttribute('aria-label', t('history.search'));
-    dialog.querySelector('[data-refresh]').textContent = t('history.refresh');
-    if (!dialog.open) return;
+    // Static dialog chrome (title, note, buttons, search) is refreshed by applyLang().
+    // Here we only resync the dynamic list/detail content.
+    if (!dialog.open) {
+      if (!selected) detail.innerHTML = `<p>${t('history.selectRecord')}</p>`;
+      return;
+    }
     await refresh();
     if (selected) await openRecord(selected);
     else detail.innerHTML = `<p>${t('history.selectRecord')}</p>`;
