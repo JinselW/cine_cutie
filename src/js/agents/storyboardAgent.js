@@ -7,6 +7,7 @@ import { listAllProviders } from '../providers/registry.js';
 import { addAgentMessage } from '../ui/render.js';
 import { t } from '../i18n.js';
 import { createArtifact, ArtifactKind, ArtifactStatus } from '../artifacts/artifactTypes.js';
+import { reportPhase } from '../progressTracker.js';
 
 const MAX_RETRIES = 2;
 
@@ -135,6 +136,7 @@ export class StoryboardAgent extends BaseAgent {
     const signal = token?.signal;
 
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      reportPhase(attempt ? 'retrying' : 'generatingText', { attempt: attempt + 1 });
       const { result: generated, error } = await this.#generate(currentMessages, signal);
       if (error) lastError = error;
       const metrics = consumeStepMetrics();
@@ -148,6 +150,7 @@ export class StoryboardAgent extends BaseAgent {
 
       currentResult = generated;
 
+      reportPhase('validating');
       const critique = await this.#qcAgent.process({ data: currentResult, ...ctx });
       if (!critique) break;
 

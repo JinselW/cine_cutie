@@ -1,79 +1,90 @@
-const STAGE_WEIGHTS = {
-  script: 5,
-  characterDesign: 15,
-  storyboard: 5,
-  referenceImages: 15,
-  videoGeneration: 50,
-  postProduction: 10,
-};
+let runCounter = 0;
+let sequence = 0;
+let snapshot = emptySnapshot();
 
-const TOTAL_WEIGHT = Object.values(STAGE_WEIGHTS).reduce((a, b) => a + b, 0);
-
-const completedStages = new Set();
-let currentStage = null;
-let totalItems = 0;
-let completedItems = 0;
-
-export function initProgressTracker() {
-  completedStages.clear();
-  currentStage = null;
-  totalItems = 0;
-  completedItems = 0;
-}
-
-export function setStageTotal(stageId, items) {
-  currentStage = stageId;
-  totalItems = Math.max(1, items);
-  completedItems = 0;
-  dispatch();
-}
-
-export function addCompleted(count = 1) {
-  if (!currentStage) return;
-  completedItems = Math.min(totalItems, completedItems + count);
-  dispatch();
-}
-
-export function setStageProgress(pct) {
-  if (!currentStage) return;
-  const clamped = Math.min(1, Math.max(0, pct));
-  completedItems = Math.round(clamped * totalItems);
-  dispatch();
-}
-
-export function markStageComplete(stageId) {
-  completedStages.add(stageId);
-  if (currentStage === stageId) {
-    completedItems = totalItems;
-  }
-  dispatch();
-}
-
-export function getProgress() {
-  const stageProgress = currentStage && totalItems > 0
-    ? completedItems / totalItems
-    : 0;
-
-  let weighted = 0;
-  for (const [stageId, weight] of Object.entries(STAGE_WEIGHTS)) {
-    if (completedStages.has(stageId)) {
-      weighted += weight;
-    } else if (stageId === currentStage) {
-      weighted += weight * stageProgress;
-    }
-  }
-
+function emptySnapshot() {
   return {
-    stage: currentStage,
-    totalItems,
-    completedItems,
-    stageProgress,
-    overallProgress: TOTAL_WEIGHT > 0 ? weighted / TOTAL_WEIGHT : 0,
+    runId: runCounter, sequence: 0, stageId: null,
+    phase: 'preparing', mode: 'indeterminate',
+    completed: 0, total: 0, attempt: 1, activeItem: 0,
   };
 }
 
-function dispatch() {
+function emit() {
+  snapshot.sequence = ++sequence;
   if (typeof window !== 'undefined') {
-    window.dispatchEvent(new CustomEvent('pipeline-progress', { detail: getProgress() }));
+    window.dispatchEvent(new CustomEvent('pipeline-progress', { detail: { ...snapshot } }));
   }
+}
+
+export function startProgressRun() {
+  runCounter += 1;
+  sequence = 0;
+  snapshot = emptySnapshot();
+  emit();
+}
+
+export function beginStage(stageId) {
+  if (snapshot.stageId === stageId) return;
+  snapshot = { ...emptySnapshot(), runId: runCounter, stageId };
+  emit();
+}
+
+export function reportPhase(phase, details = {}) {
+  if (!snapshot.stageId) return;
+  const next = {
+    ...snapshot,
+    ...details,
+    phase,
+    mode: details.mode === 'determinate' ? 'determinate' : 'indeterminate',
+  };
+  if (next.mode !== 'determinate' || !(next.total > 0)) {
+    next.mode = 'indeterminate';
+    next.completed = 0;
+    next.total = 0;
+  } else {
+    next.completed = Math.max(0, Math.min(next.total, Number(next.completed) || 0));
+  }
+  snapshot = next;
+  emit();
+}
+
+// Task progress comes from the backend. `progress` counts completed items;
+// `current` identifies the item that is currently running.
+export function reportBatchProgress(phase, task = {}) {
+  if (!snapshot.stageId) return;
+  const total = Math.max(0, Number(task.total) || snapshot.total || 0);
+  if (!total) return reportPhase(phase);
+  const fromPercent = Math.floor((Math.max(0, Number(task.progress) || 0) / 100) * total);
+  const previousCompleted = snapshot.mode === 'determinate'
+    && snapshot.phase === phase && snapshot.total === total
+    ? snapshot.completed : 0;
+  const completed = task.status === 'completed' ? total : Math.max(previousCompleted, fromPercent);
+  reportPhase(phase, {
+    mode: 'determinate', total, completed,
+    activeItem: Math.max(0, Number(task.current) || Math.min(total, completed + 1)),
+  });
+}
+
+export function reportPercentProgress(phase, value) {
+  if (!snapshot.stageId) return;
+  const completed = Math.max(
+    snapshot.mode === 'determinate' && snapshot.phase === phase ? snapshot.completed : 0,
+    Math.min(100, Math.floor(Number(value) || 0)),
+  );
+  reportPhase(phase, { mode: 'determinate', total: 100, completed, unit: 'percent', activeItem: 0 });
+}
+
+export function reportRetry(attempt) {
+  reportPhase('retrying', { mode: 'indeterminate', attempt });
+}
+
+export function finishStage() {
+  if (!snapshot.stageId) return;
+  snapshot = { ...snapshot, phase: 'complete', mode: 'determinate', total: 1, completed: 1, activeItem: 0 };
+  emit();
+}
+
+export function getProgressSnapshot() {
+  return { ...snapshot };
 }

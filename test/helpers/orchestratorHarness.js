@@ -77,7 +77,7 @@ export async function createHarness({ mode = 'auto' } = {}) {
     },
     ArtifactStore, ArtifactStatus, StaleReasonCode, createArtifact,
     ExecutionCheckpoint, RunState, CancellationToken, QCVerdict, Severity,
-    configureMemory: () => {}, beginMemory: async () => {},
+    configureMemory: () => {}, beginMemory: async () => {}, attachMemory: () => {},
     saveMemory: async status => { if (status) calls.memoryStatus = status; },
     recordMemoryMessage: () => {},
     buildWorkflowSnapshot: ({ store, checkpoint, runState }) => ({
@@ -110,6 +110,7 @@ export async function createHarness({ mode = 'auto' } = {}) {
     setPendingAdvance: () => {},
     clearPendingAdvance: () => {},
     getGenAnim: () => ({ stop: () => calls.animStops++ }),
+    finishStage: () => {},
   };
   for (const name of AGENT_EXPORTS) exports[name] = HarnessAgent;
   for (const name of RENDER_EXPORTS) exports[name] = (result, advance) => calls.renders.push({ result, advance });

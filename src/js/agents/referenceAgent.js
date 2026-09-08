@@ -7,6 +7,7 @@ import { STYLE_HINTS } from '../providers/prompts.js';
 import { createArtifact, ArtifactKind, ArtifactStatus, recordItemAttempt } from '../artifacts/artifactTypes.js';
 import { addAgentMessage } from '../ui/render.js';
 import { t } from '../i18n.js';
+import { reportPhase } from '../progressTracker.js';
 
 const MAX_ITEM_ATTEMPTS = 3;
 const MAX_STAGE_RETRIES = 1;
@@ -62,9 +63,11 @@ export class ReferenceAgent extends BaseAgent {
     for (let attempt = 0; attempt <= MAX_STAGE_RETRIES; attempt++) {
       if (_token?.signal?.aborted) break;
 
+      reportPhase(attempt ? 'retrying' : 'generatingImages', { attempt: attempt + 1 });
       const results = await this.#generateItems(items, artifact, ctx, _token);
       const data = this.#assembleResult(results, pairs, mode, items);
 
+      reportPhase('validating');
       const crit = await this.#qcAgent.process({ data, entities: ctx.entities || {}, ...ctx });
       reportScore(crit.score, '🖼️');
       if (crit.score > bestScore) { bestScore = crit.score; bestData = data; bestCrit = crit; }

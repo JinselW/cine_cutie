@@ -7,6 +7,7 @@ import { buildMessages } from '../providers/prompts.js';
 import { createArtifact, ArtifactKind, ArtifactStatus, recordItemAttempt } from '../artifacts/artifactTypes.js';
 import { addAgentMessage } from '../ui/render.js';
 import { t } from '../i18n.js';
+import { reportPhase } from '../progressTracker.js';
 
 const MAX_ITEM_ATTEMPTS = 3;
 const MAX_STAGE_RETRIES = 1;
@@ -45,6 +46,7 @@ export class CharacterAgent extends BaseAgent {
     if (!script) return this.#emptyResult(ctx);
 
     const genre = ctx.genre || script.genre || 'cinematic';
+    reportPhase('writingSpecs');
     const designs = await this.#writeDesignSpecs(ctx, token);
     const tokens = consumeStepMetrics().tokens;
     if (token?.signal?.aborted) return this.#emptyResult(ctx);
@@ -65,9 +67,11 @@ export class CharacterAgent extends BaseAgent {
     for (let attempt = 0; attempt <= MAX_STAGE_RETRIES; attempt++) {
       if (token?.signal?.aborted) break;
 
+      reportPhase(attempt ? 'retrying' : 'generatingImages', { attempt: attempt + 1 });
       const results = await this.#generateItems(items, artifact, ctx, token);
       const data = this.#assembleResult(results, entities);
 
+      reportPhase('validating');
       const crit = await this.#qcAgent.process({ data, entities: ctx.entities || {}, ...ctx });
       reportScore(crit.score, '🎨');
       if (crit.score > bestScore) { bestScore = crit.score; bestData = data; bestCrit = crit; }

@@ -76,6 +76,9 @@ export function recordMemoryMessage(role, text, stepId = null) {
 }
 
 export function activeMemoryId() { return active?.id; }
+export function attachMemory(id, snapshotInput) {
+  active = { id, input: structuredClone(snapshotInput || {}), messages: [], status: 'running' };
+}
 export function retryMemorySave() { return saveMemory(); }
 export function detachMemory(id) {
   if (active?.id === id) { clearTimeout(timer); active = null; pending = null; }

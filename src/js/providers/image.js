@@ -2,6 +2,7 @@ import { registerProvider } from './registry.js';
 import { state } from '../state.js';
 import { computeImageSize, computeImg2ImgSize, DEFAULT_RESOLUTION } from '../utils/resolution.js';
 import { registerBackendTask, unregisterBackendTask } from './activeTasks.js';
+import { reportBatchProgress } from '../progressTracker.js';
 
 const SETTINGS_KEY = 'cine-cutie-settings';
 const OLD_DS_KEY = 'cine-cutie-dashscope';
@@ -179,6 +180,7 @@ async function generateImages(prompts, ids, seeds, refs, externalSignal) {
         const taskRes = await fetch(`/api/task/${taskId}`, { signal: ctrl.signal });
         clearTimeout(tid);
         taskData = await taskRes.json();
+        reportBatchProgress('generatingImages', taskData);
       } catch {
         clearTimeout(tid);
         if (externalSignal?.aborted) break;

@@ -2,6 +2,7 @@ import { registerProvider } from './registry.js';
 import { state } from '../state.js';
 import { tierToMp } from '../utils/resolution.js';
 import { registerBackendTask, unregisterBackendTask } from './activeTasks.js';
+import { reportBatchProgress } from '../progressTracker.js';
 import { selectComfyWorkflow } from './comfyWorkflowMode.js';
 
 const DEFAULT_CLIP_DURATION = 5;
@@ -127,6 +128,7 @@ const comfyUIProvider = {
           const taskRes = await fetch(`/api/task/${taskId}`, { signal: ctrl.signal });
           clearTimeout(tid);
           taskData = await taskRes.json();
+          reportBatchProgress('generatingVideos', taskData);
           if (typeof window !== 'undefined') {
             window.dispatchEvent(new CustomEvent('comfy-task-progress', { detail: taskData }));
           }

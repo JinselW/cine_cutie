@@ -3,6 +3,7 @@ import { QCAgent, reportScore } from './qcAgent.js';
 import { getActiveProvider } from '../providers/registry.js';
 import { createArtifact, ArtifactKind, ArtifactStatus } from '../artifacts/artifactTypes.js';
 import { QCVerdict } from './qcTypes.js';
+import { reportPhase } from '../progressTracker.js';
 
 export class EditorAgent extends BaseAgent {
   #qcAgent;
@@ -13,6 +14,7 @@ export class EditorAgent extends BaseAgent {
   }
 
   async run(ctx, _token) {
+    reportPhase('rendering');
     let result = await this.#callProvider(ctx, _token);
     if (!this.#validateL1(result)) {
       result = { episodes: [], finalVideo: '', status: 'failed' };
@@ -23,6 +25,7 @@ export class EditorAgent extends BaseAgent {
 
     // Post-production concatenation is deterministic — a single unified QC decision,
     // no regeneration. qcAgent.process folds the consistency hard gate into the score.
+    reportPhase('validating');
     const crit = await this.#qcAgent.process({ data: finalData, entities: ctx.entities || {}, ...ctx });
     reportScore(crit.score, '🎬');
 

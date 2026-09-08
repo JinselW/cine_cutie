@@ -567,7 +567,7 @@ app.post('/api/render/final', async (req, res) => {
   const task = createTask('render', { total: videoPaths.length });
 
   (async () => {
-    updateTask(task.id, { status: 'running', progress: 10 });
+    updateTask(task.id, { status: 'running', phase: 'preparing', progress: 0 });
 
     if (isTaskCancelled(task.id)) {
       updateTask(task.id, { status: 'cancelled', progress: 0 });
@@ -594,7 +594,7 @@ app.post('/api/render/final', async (req, res) => {
       }
     }
 
-    updateTask(task.id, { progress: 30 });
+    updateTask(task.id, { phase: 'rendering', progress: 0 });
 
     if (isTaskCancelled(task.id)) {
       updateTask(task.id, { status: 'cancelled', progress: 0 });
@@ -604,7 +604,14 @@ app.post('/api/render/final', async (req, res) => {
     const outputFilename = `final_${Date.now()}.mp4`;
     const outputPath = path.join(MEDIA_DIR, outputFilename);
 
-    await concatVideos(localPaths, outputPath);
+    let lastProgress = 0;
+    await concatVideos(localPaths, outputPath, {
+      onProgress(progress) {
+        if (progress <= lastProgress || isTaskCancelled(task.id)) return;
+        lastProgress = progress;
+        updateTask(task.id, { phase: 'rendering', progress });
+      },
+    });
 
     const finalStatus = isTaskCancelled(task.id) ? 'cancelled' : 'completed';
     updateTask(task.id, {

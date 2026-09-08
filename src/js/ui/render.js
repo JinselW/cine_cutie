@@ -4,11 +4,13 @@ import { state, resetState } from '../state.js';
 import { t } from '../i18n.js';
 import { onNodeClick } from '../navigation.js';
 import { isComfySelected, startComfyMonitor, stopComfyMonitor } from './comfyMonitor.js';
+import { beginStage, getProgressSnapshot } from '../progressTracker.js';
 
 let _genAnim = null;
 let _msgBuffer = [];
 let _allCurrentMsgs = [];
 let _controls = null;
+let _progressHandler = null;
 
 export function setPipelineControls(controls) {
   _controls = controls;
@@ -122,14 +124,16 @@ export function showGenerating(stepIndex) {
   const label = t(step.labelKey);
   let idx = 0;
   const el = $('#stepContent');
+  beginStage(step.id);
   el.innerHTML = `
     <div class="gen-status">
       <div class="msg" id="genMsg">${msgs[0]}</div>
       <div class="sub-msg">${t('ui.agentWorking', { agent })}</div>
       <div class="dots"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>
-      <div class="progress-wrap">
-        <div class="progress-bar"><div class="progress-fill" id="genProgress"></div></div>
-        <div class="progress-label"><span>${label}</span><span id="genPercent">0%</span></div>
+      <div class="progress-wrap" id="genProgressWrap">
+        <div class="progress-bar indeterminate" id="genProgressBar" role="progressbar" aria-label="${label}"><div class="progress-fill" id="genProgress"></div></div>
+        <div class="progress-label"><span id="genPhase">${t('progress.preparing')}</span><span id="genPercent"></span></div>
+        <div class="progress-detail" id="genProgressDetail">${label}</div>
       </div>
       ${step.id === 'videoGeneration' ? '<div id="comfyMonitorStep" class="comfy-monitor comfy-monitor-step hidden" aria-live="polite"></div>' : ''}
       <div style="margin-top:12px;text-align:center">
@@ -151,24 +155,45 @@ export function showGenerating(stepIndex) {
     if (msgEl) msgEl.textContent = msgs[idx];
   }, 2000);
 
-  let progress = 0;
-  const progressInterval = setInterval(() => {
-    progress += Math.random() * 15 + 5;
-    if (progress > 95) progress = 95;
+  const renderProgress = detail => {
     const fill = $('#genProgress');
     const pct = $('#genPercent');
-    if (fill) fill.style.width = progress + '%';
-    if (pct) pct.textContent = Math.round(progress) + '%';
-  }, 400);
+    const bar = $('#genProgressBar');
+    const phase = $('#genPhase');
+    const meta = $('#genProgressDetail');
+    if (!fill || !pct || !bar || !phase || !meta || detail.stageId !== step.id) return;
+    phase.textContent = t(`progress.${detail.phase}`);
+    bar.classList.toggle('indeterminate', detail.mode !== 'determinate');
+    if (detail.mode === 'determinate' && detail.total > 0) {
+      const percent = Math.round((detail.completed / detail.total) * 100);
+      fill.style.width = `${percent}%`;
+      pct.textContent = `${percent}%`;
+      bar.setAttribute('aria-valuemin', '0');
+      bar.setAttribute('aria-valuemax', '100');
+      bar.setAttribute('aria-valuenow', String(percent));
+      meta.textContent = detail.unit === 'percent' || detail.total === 1
+        ? label
+        : t('progress.items', { completed: detail.completed, total: detail.total, current: detail.activeItem });
+    } else {
+      fill.style.width = '';
+      pct.textContent = '';
+      bar.removeAttribute('aria-valuemin');
+      bar.removeAttribute('aria-valuemax');
+      bar.removeAttribute('aria-valuenow');
+      meta.textContent = detail.phase === 'retrying'
+        ? t('progress.attempt', { attempt: detail.attempt })
+        : label;
+    }
+  };
+  _progressHandler = event => renderProgress(event.detail);
+  window.addEventListener('pipeline-progress', _progressHandler);
+  renderProgress(getProgressSnapshot());
 
   const anim = {
     stop() {
       clearInterval(msgInterval);
-      clearInterval(progressInterval);
-      const fill = $('#genProgress');
-      const pct = $('#genPercent');
-      if (fill) fill.style.width = '100%';
-      if (pct) pct.textContent = '100%';
+      if (_progressHandler) window.removeEventListener('pipeline-progress', _progressHandler);
+      _progressHandler = null;
       stopComfyMonitor('comfyMonitorStep');
     }
   };

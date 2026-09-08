@@ -1,5 +1,5 @@
 import { STEPS, dataKeyOf, producerStepOfDataKey } from './config.js';
-import { configureMemory, beginMemory, saveMemory, recordMemoryMessage } from './memory.js';
+import { configureMemory, beginMemory, attachMemory, saveMemory, recordMemoryMessage } from './memory.js';
 import { state, resetState } from './state.js';
 import { t } from './i18n.js';
 import {
@@ -36,6 +36,7 @@ import {
   buildWorkflowSnapshot, clearPersistedWorkflow, loadPersistedWorkflow, persistWorkflowSnapshot,
 } from './orchestrator/workflowSnapshot.js';
 import { cancelAllBackendTasks } from './providers/activeTasks.js';
+import { finishStage } from './progressTracker.js';
 
 const RENDERERS = {
   script: (r, cb) => renderScript(r, cb),
@@ -197,6 +198,7 @@ class Orchestrator {
       return;
     }
 
+    finishStage();
     const currentAnim = getGenAnim();
     if (currentAnim) currentAnim.stop();
     setGenAnim(null);
@@ -464,6 +466,7 @@ class Orchestrator {
     await waitForResume();
     if (state.stopped) return;
 
+    finishStage();
     const currentAnim = getGenAnim();
     if (currentAnim) currentAnim.stop();
     setGenAnim(null);
@@ -612,6 +615,68 @@ class Orchestrator {
     return true;
   }
 
+  async resumeFromMemory(snapshot, memoryId) {
+    this.#store.clear();
+    this.#checkpoint.clear();
+    this.#runState.reset();
+    clearPersistedWorkflow();
+    this.#token = null;
+    resetState();
+
+    this.#store.restore(snapshot.artifacts);
+    this.#store.restoreAccepted(snapshot.acceptedByStep);
+    this.#checkpoint.restoreSnapshot(snapshot.checkpoint);
+    this.#runState.restoreSnapshot(snapshot.runState);
+
+    const input = snapshot.input || {};
+    for (const key of Object.keys(state.data)) state.data[key] = null;
+    for (const step of STEPS) {
+      const accepted = this.#store.getAcceptedByStep(step.id);
+      if (accepted) state.data[dataKeyOf(step)] = accepted.data;
+    }
+    this.#rebuildEntities();
+
+    state.userInput = input.userInput || '';
+    state.genre = input.genre || 'cinematic';
+    state.visualStyle = input.visualStyle || 'cinematic';
+    state.customStyle = input.customStyle || '';
+    state.totalDuration = input.totalDuration || 30;
+    state.aspectRatio = input.aspectRatio || '16:9';
+    state.imageSize = input.imageSize || '1280*720';
+    state.resolution = input.resolution || '720P';
+    state.mode = input.mode || 'auto';
+    if (input.lang) state.lang = input.lang;
+    state.stopped = false;
+    state.paused = false;
+    state.stepRunning = false;
+    state.viewingStep = null;
+
+    attachMemory(memoryId, input);
+    this.#token = new CancellationToken();
+
+    const wasInterrupted = this.#runState.isInterrupted;
+    const stepIndex = this.#runState.currentStepIndex;
+
+    if (wasInterrupted && stepIndex >= 0 && stepIndex < STEPS.length) {
+      state.currentStep = stepIndex;
+    } else {
+      let lastCompleted = -1;
+      for (let i = STEPS.length - 1; i >= 0; i--) {
+        if (this.#store.getAcceptedByStep(STEPS[i].id)) { lastCompleted = i; break; }
+      }
+      state.currentStep = lastCompleted >= 0 ? lastCompleted : 0;
+    }
+
+    this.#refreshPipeline();
+    this.#persistWorkflow();
+
+    if (wasInterrupted && stepIndex >= 0 && stepIndex < STEPS.length) {
+      await this.continuePipeline();
+    }
+
+    return { wasInterrupted, currentStep: state.currentStep };
+  }
+
   async continuePipeline() {
     if (state.currentStep < 0 || state.currentStep >= STEPS.length) return;
     state.stopped = false;
@@ -707,6 +772,10 @@ export function resumePipeline() {
 
 export async function stopPipeline() {
   return getOrchestrator().stopPipeline();
+}
+
+export async function resumeFromHistory(snapshot, memoryId) {
+  return getOrchestrator().resumeFromMemory(snapshot, memoryId);
 }
 
 setPipelineControls({ pause: pausePipeline, resume: resumePipeline, stop: stopPipeline });

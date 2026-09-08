@@ -1,8 +1,11 @@
 import { memoryRequest, recordMemoryMessage, activeMemoryId, detachMemory, retryMemorySave } from '../memory.js';
 import { state } from '../state.js';
 import { STEPS, dataKeyOf } from '../config.js';
-import { escapeHtml } from '../utils.js';
+import { $, escapeHtml } from '../utils.js';
 import { t } from '../i18n.js';
+import { resumeFromHistory } from '../engine.js';
+import { showSection } from './render.js';
+import { showStepReadOnly } from '../navigation.js';
 import '../../css/history.css';
 
 const esc = value => escapeHtml(String(value ?? ''));
@@ -33,6 +36,44 @@ function mediaHtml(value) {
     if (/\.(mp3|wav|ogg)$/i.test(url)) return `<figure><audio controls preload="none" src="${esc(url)}"></audio>${link}</figure>`;
     return link;
   }).join('');
+}
+
+function restoreFormFromSnapshot(snap) {
+  const input = snap.input || {};
+  const userInput = $('#userInput');
+  if (userInput) userInput.value = input.userInput || '';
+  const totalDuration = $('#totalDuration');
+  if (totalDuration) totalDuration.value = String(input.totalDuration || 30);
+  if (input.aspectRatio) {
+    document.querySelectorAll('.aspect-btn').forEach(b => b.classList.remove('active'));
+    const btn = document.querySelector(`.aspect-btn[data-ratio="${input.aspectRatio}"]`);
+    if (btn) btn.classList.add('active');
+  }
+  if (input.resolution) {
+    document.querySelectorAll('.res-btn').forEach(b => b.classList.remove('active'));
+    const btn = document.querySelector(`.res-btn[data-res="${input.resolution}"]`);
+    if (btn) btn.classList.add('active');
+  }
+  if (input.mode) {
+    document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+    const btn = document.querySelector(`.mode-btn[data-mode="${input.mode}"]`);
+    if (btn) btn.classList.add('active');
+  }
+  if (input.visualStyle) {
+    document.querySelectorAll('#styleOptions .style-btn').forEach(b => b.classList.remove('active'));
+    const btn = document.querySelector(`#styleOptions .style-btn[data-style="${input.visualStyle}"]`);
+    if (btn) btn.classList.add('active');
+    const customInput = $('#customStyleInput');
+    if (customInput) {
+      if (input.visualStyle === 'custom') {
+        customInput.classList.remove('hidden');
+        customInput.value = input.customStyle || '';
+      } else {
+        customInput.classList.add('hidden');
+        customInput.value = '';
+      }
+    }
+  }
 }
 
 export function initHistory() {
@@ -81,8 +122,10 @@ export function initHistory() {
       if (number !== detailNumber) return;
       selected = id;
       const snap = record.snapshot || {};
+      const canContinue = ['completed', 'stopped', 'failed', 'running', 'paused'].includes(snap.status);
+      const continueBtnHtml = canContinue ? `<button class="action-btn primary" data-continue>${t('history.continue')}</button>` : '';
       detail.innerHTML = `<h3>${esc(record.title)}</h3><p class="history-note">${esc(time(record.createdAt))} · ${esc(getStatusLabel(snap.status))}</p>
-        <div class="history-tools"><button class="action-btn" data-rename>${t('history.rename')}</button><button class="action-btn" data-export>${t('history.export')}</button><button class="action-btn rose" data-delete>${t('history.delete')}</button></div>
+        <div class="history-tools">${continueBtnHtml}<button class="action-btn" data-rename>${t('history.rename')}</button><button class="action-btn" data-export>${t('history.export')}</button><button class="action-btn rose" data-delete>${t('history.delete')}</button></div>
         <h4>${t('history.userInput')}</h4><p class="history-text">${esc(snap.input?.userInput || t('history.fromPrompt'))}</p>
         <details><summary>${t('history.paramsAndPrompt')}</summary><pre>${esc(JSON.stringify(snap.input, null, 2))}</pre></details>
         ${STEPS.map(step => {
@@ -92,6 +135,21 @@ export function initHistory() {
         }).join('')}
         <details><summary>${t('history.sessionMessages', { count: snap.messages?.length || 0 })}</summary>${(snap.messages || []).map(m => `<p class="history-text"><small>${esc(time(m.at))} · ${esc(m.role)} ${esc(m.stepId || '')}</small><br>${esc(m.text)}</p>`).join('')}</details>
         <details><summary>${t('history.fullSnapshot')}</summary><pre>${esc(JSON.stringify({ configuration: snap.configuration, entities: snap.entities, acceptedByStep: snap.acceptedByStep, artifacts: snap.artifacts, checkpoint: snap.checkpoint, runState: snap.runState }, null, 2))}</pre></details>`;
+      if (canContinue) {
+        detail.querySelector('[data-continue]').onclick = async () => {
+          if (!confirm(t('history.continueConfirm'))) return;
+          dialog.close();
+          restoreFormFromSnapshot(snap);
+          showSection('pipelineSection');
+          $('#stepContent').innerHTML = '';
+          const restoreActions = $('#restoreActions');
+          if (restoreActions) restoreActions.classList.add('hidden');
+          const result = await resumeFromHistory(snap, id);
+          if (!result.wasInterrupted && state.currentStep >= 0 && state.currentStep < STEPS.length) {
+            showStepReadOnly(state.currentStep);
+          }
+        };
+      }
       detail.querySelector('[data-export]').onclick = () => {
         const url = URL.createObjectURL(new Blob([JSON.stringify(record, null, 2)], { type: 'application/json' }));
         const a = document.createElement('a'); a.href = url; a.download = `cine-cutie-${id}.json`; a.click();

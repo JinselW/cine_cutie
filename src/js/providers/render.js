@@ -1,5 +1,6 @@
 import { registerProvider } from './registry.js';
 import { registerBackendTask, unregisterBackendTask } from './activeTasks.js';
+import { reportPercentProgress } from '../progressTracker.js';
 
 const renderProvider = {
   id: 'render',
@@ -58,6 +59,9 @@ const renderProvider = {
           const taskRes = await fetch(`/api/task/${taskId}`, { signal: ctrl.signal });
           clearTimeout(tid);
           taskData = await taskRes.json();
+          if (taskData.phase === 'rendering' || taskData.status === 'completed') {
+            reportPercentProgress('rendering', taskData.progress);
+          }
         } catch {
           clearTimeout(tid);
           if (signal?.aborted) break;

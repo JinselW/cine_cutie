@@ -1,7 +1,7 @@
 .restore-actions{display:flex;justify-content:center;gap:12px;margin-top:16px;animation:fadeUp 0.4s ease both}
 .restore-actions.hidden{display:none}
 
-.pipeline{display:flex;flex-direction:column;align-items:center;gap:8px;margin-bottom:24px}
+.pipeline{display:flex;flex-direction:column;align-items:center;gap:8px;margin-bottom:48px}
 .pipeline-row{display:flex;align-items:flex-start;justify-content:center;gap:8px}
 .pipe-step{display:flex;align-items:center;gap:0}
 .pipe-node{

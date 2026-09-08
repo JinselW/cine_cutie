@@ -15,6 +15,7 @@ import { t, applyLang } from './i18n.js';
 import { initSettings } from './ui/settings.js';
 import { initMascotInteraction } from './mascot-interact.js';
 import { rerenderCurrentView } from './ui/views.js';
+import { startProgressRun } from './progressTracker.js';
 
 const savedTheme = localStorage.getItem('cine-cutie-theme');
 if (savedTheme) {
@@ -279,6 +280,7 @@ $('#startBtn').addEventListener('click', async () => {
   const btn = $('#startBtn');
   btn.disabled = true;
   btn.textContent = t('ui.starting');
+  startProgressRun();
   showSection('pipelineSection');
 
   const genreLabel = state.visualStyle === 'custom'

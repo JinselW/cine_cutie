@@ -370,6 +370,14 @@
   height:100%;background:linear-gradient(90deg,var(--gold),var(--rose));
   border-radius:2px;transition:width 0.5s ease;width:0;
 }
+.progress-bar.indeterminate .progress-fill{
+  width:35%;animation:progressIndeterminate 1.35s ease-in-out infinite;
+}
+.progress-detail{font-size:.72rem;color:var(--cream3);text-align:left;margin-top:5px}
+@keyframes progressIndeterminate{
+  0%{transform:translateX(-120%)}
+  100%{transform:translateX(310%)}
+}
 .progress-label{
   display:flex;justify-content:space-between;font-size:0.75rem;color:var(--cream3);margin-top:4px;
 }

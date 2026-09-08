@@ -4,6 +4,7 @@ import { getConfig } from './llm.js';
 import { state } from '../state.js';
 import { dsVideoResolution } from '../utils/resolution.js';
 import { registerBackendTask, unregisterBackendTask } from './activeTasks.js';
+import { reportBatchProgress } from '../progressTracker.js';
 
 // wan2.7-r2v 最多接受 5 张参考图
 const MAX_REFERENCE_IMAGES = 5;
@@ -165,6 +166,7 @@ const videoProvider = {
           const taskRes = await fetch(`/api/task/${taskId}`, { signal: ctrl.signal });
           clearTimeout(tid);
           taskData = await taskRes.json();
+          reportBatchProgress('generatingVideos', taskData);
         } catch {
           clearTimeout(tid);
           if (signal?.aborted) break;

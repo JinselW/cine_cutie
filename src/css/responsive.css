@@ -1,4 +1,5 @@
 @media(max-width:600px){
+  .pipeline{margin-bottom:34px}
   .title{font-size:1.8rem}
   .section{padding:20px 16px}
   .pipe-line,.pipe-line-sm{width:16px}
