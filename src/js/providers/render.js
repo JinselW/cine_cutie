@@ -7,7 +7,7 @@ const renderProvider = {
   name: 'FFmpeg Render',
   capabilities: ['render'],
 
-  async generate({ items, signal } = {}) {
+  async generate({ items, transitions, fadeIn, fadeOut, signal } = {}) {
     const validPaths = (items || [])
       .filter(item => item.videoPath && item.status === 'complete')
       .map(item => item.videoPath);
@@ -20,13 +20,20 @@ const renderProvider = {
       return { finalVideo: '', status: 'failed', error: 'Cancelled' };
     }
 
+    const body = { videoPaths: validPaths };
+    if (Array.isArray(transitions) && transitions.length === validPaths.length - 1) {
+      body.transitions = transitions;
+    }
+    if (fadeIn) body.fadeIn = true;
+    if (fadeOut) body.fadeOut = true;
+
     let taskId = null;
     try {
       const res = await fetch('/api/render/final', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         signal,
-        body: JSON.stringify({ videoPaths: validPaths }),
+        body: JSON.stringify(body),
       });
 
       if (!res.ok) {

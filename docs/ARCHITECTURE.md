@@ -76,7 +76,7 @@ const RENDERERS = {
 | `StoryboardAgent` | storyboard | 分镜（集/段/镜头）+ 镜头数按总时长封顶 |
 | `ReferenceAgent` | referenceImages | 按设置的视频生成方式规划帧图（首帧 N / 首尾帧 N+1，尾帧复用下镜首帧 / 参考图 N）；提示词融合剧本 beat + 命中角色/场景 visualTag + 分镜 prompt，并把定妆图作图生图参考 |
 | `VideoAgent` | videoGeneration | 读设置的 `videoMode` 后从步骤4结果取素材（首帧 / 首帧+尾帧，尾帧缺失时按"复用下镜首帧"现算 / 参考图列表 ≤5 张），拼运镜 motion prompt，片段时长取分镜为该镜头规划的 `duration`，per-item 重试 |
-| `EditorAgent` | postProduction | ffmpeg 拼接成片（确定性，不重生成） |
+| `EditorAgent` | postProduction | ffmpeg 拼接成片：跨场景 crossfade（画面+音频，无音轨片段注入静音）+ 首尾淡入淡出（视频+音频 afade）；每个片段有可读视频几何时启用，否则回退纯拼接；确定性，不重生成 |
 
 ### 3. 恢复、回滚与控制 (`orchestrator/`)
 
@@ -237,7 +237,7 @@ BLOCK→该步 FAIL，WARN/REVIEW→CONDITIONAL_PASS 并在 UI 提示。
 - `memory.js`: 创作历史档案读写，元数据落 `data/memory/<UUID>.json`（临时文件 + rename 原子写入）
 - `ssh-tunnel.js` + `comfyui.js`: 经 SSH 隧道访问远程 ComfyUI（密码来自 env `COMFY_SSH_PASSWORD`）。不同 SSH/ComfyUI 配置使用独立隧道；步骤 5 将每镜提示词、seed、分镜时长、宽高比和分辨率写入所选 H3 工作流；首帧传 1 张、首尾帧传 2 张、参考图最多传 6 张，媒体先上传到 ComfyUI input，并在任务结束后通过 SFTP 清理。远端 input 目录可用 `COMFYUI_INPUT_DIR` 覆盖。取消和超时会同步删除远端队列项，并在对应任务正在运行时调用 interrupt。只有 `video-comfy` Provider 使用这些模板，其他视频模型仍走各自 API。
 - `comfyMonitor.js`: 仅在已选择 ComfyUI 且监控端点确认连接成功时轮询；设置面板显示 DGX 系统状态，步骤 5 额外显示当前片段、工作流阶段、耗时、队列和整体完成比例。关闭设置或离开生成状态后停止轮询。
-- `render.js`: ffmpeg-static 拼接；先 `-c copy`，混编码失败时回退 libx264/aac 重编码
+- `render.js`: ffmpeg-static 拼接；带 `transitions`/`fadeIn`/`fadeOut` 且每个片段都有可读视频几何时，走 xfade/acrossfade 转场链重编码——每路输入都用 `scale+pad/fps/setsar/format` 统一到首片段的几何与帧率，`setpts+settb=AVTB` 统一时间基，无音轨片段注入 `anullsrc` 静音，转场时长按片段长度限幅；否则回退纯拼接（先 `-c copy`，混编码失败时回退 libx264/aac 重编码）。任务取消会终止 ffmpeg 子进程。
 - 静态托管 `dist/` + SPA catch-all；媒体落盘 `media/`
 
 ## 创作历史 Memory (`memory.js` + `server/memory.js`)

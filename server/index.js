@@ -6,7 +6,7 @@ import { createMemoryRouter } from './memory.js';
 import { LRUCache } from './cache.js';
 import { submitImageTask, submitImageEditTask, parseImageResultUrl, submitVideoTask, submitVideoTaskV2, pollTask, downloadFile, detectVideoMode, hasVideoUploads, fileToDataUri } from './dashscope.js';
 import { createTask, getTask, updateTask, cancelTask, isTaskCancelled, cleanupTasks } from './tasks.js';
-import { concatVideos, checkFfmpeg } from './render.js';
+import { concatVideos, checkFfmpeg, renderWithTransitions, probeStreams } from './render.js';
 import { submitWorkflow, pollUntilDone, downloadOutput, uploadImageToComfy, checkComfyUIStatus, getComfyMonitorStatus, selectWorkflowMode, cancelPrompt, MAX_COMFY_REFERENCE_IMAGES } from './comfyui.js';
 import { ensureTunnel, closeTunnel, getTunnelStatus, deleteComfyInputFiles, getDgxMetrics } from './ssh-tunnel.js';
 import path from 'path';
@@ -619,7 +619,7 @@ app.post('/api/generate/video', async (req, res) => {
 });
 
 app.post('/api/render/final', async (req, res) => {
-  const { videoPaths } = req.body;
+  const { videoPaths, transitions, fadeIn, fadeOut } = req.body;
 
   if (!Array.isArray(videoPaths) || videoPaths.length === 0) {
     return res.status(400).json({ error: 'Missing videoPaths array' });
@@ -670,14 +670,31 @@ app.post('/api/render/final', async (req, res) => {
     const outputFilename = `final_${Date.now()}.mp4`;
     const outputPath = path.join(MEDIA_DIR, outputFilename);
 
+    const wantsFx = !!(fadeIn || fadeOut)
+      || (Array.isArray(transitions) && transitions.some(t => t && t.type === 'crossfade'));
+    const transitionsAligned = Array.isArray(transitions) && transitions.length === localPaths.length - 1;
+    // transition chain needs every clip to have a readable video geometry + a valid positive duration; audio-less clips get silence injected
+    const streams = wantsFx ? await Promise.all(localPaths.map(probeStreams)) : null;
+    const geometryOk = !!streams && streams.every(s => s.hasVideo && s.width > 0 && s.height > 0 && Number.isFinite(s.duration) && s.duration > 0);
+    const useFx = wantsFx && localPaths.length >= 1 && geometryOk && (!Array.isArray(transitions) || transitionsAligned);
+
     let lastProgress = 0;
-    await concatVideos(localPaths, outputPath, {
-      onProgress(progress) {
-        if (progress <= lastProgress || isTaskCancelled(task.id)) return;
-        lastProgress = progress;
-        updateTask(task.id, { phase: 'rendering', progress });
-      },
-    });
+    const onProgress = (progress) => {
+      if (progress <= lastProgress || isTaskCancelled(task.id)) return;
+      lastProgress = progress;
+      updateTask(task.id, { phase: 'rendering', progress });
+    };
+
+    if (useFx) {
+      await renderWithTransitions(localPaths, transitions, outputPath, {
+        onProgress,
+        fadeIn: !!fadeIn,
+        fadeOut: !!fadeOut,
+        taskId: task.id,
+      });
+    } else {
+      await concatVideos(localPaths, outputPath, { onProgress, taskId: task.id });
+    }
 
     const cancelled = isTaskCancelled(task.id);
     const finalStatus = cancelled ? 'cancelled' : 'completed';
@@ -687,7 +704,8 @@ app.post('/api/render/final', async (req, res) => {
       result: { path: `/api/media/${outputFilename}`, filename: outputFilename }
     });
   })().catch(err => {
-    updateTask(task.id, { status: 'failed', error: err.message });
+    const cancelled = isTaskCancelled(task.id);
+    updateTask(task.id, cancelled ? { status: 'cancelled', progress: 90 } : { status: 'failed', error: err.message });
   });
 
   res.json({ taskId: task.id });

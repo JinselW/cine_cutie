@@ -5,6 +5,26 @@ import { createArtifact, ArtifactKind, ArtifactStatus } from '../artifacts/artif
 import { QCVerdict } from './qcTypes.js';
 import { reportPhase } from '../progressTracker.js';
 
+const SCENE_TRANSITION = 0.5;
+const FADE_IO = 0.5;
+
+// Storyboard segments have no id, so key each shot by its episode/segment indices.
+function buildSceneMap(storyboard) {
+  const map = new Map();
+  let epIdx = 0;
+  for (const ep of (storyboard?.episodes || [])) {
+    let segIdx = 0;
+    for (const seg of (ep.segments || [])) {
+      for (const shot of (seg.shots || [])) {
+        if (shot.shot_id != null) map.set(String(shot.shot_id), `${epIdx}-${segIdx}`);
+      }
+      segIdx++;
+    }
+    epIdx++;
+  }
+  return map;
+}
+
 export class EditorAgent extends BaseAgent {
   #qcAgent;
 
@@ -57,12 +77,26 @@ export class EditorAgent extends BaseAgent {
     const provider = getActiveProvider('render');
     if (!provider) return null;
     try {
-      const items = (ctx.videoClips?.clips || []).map(c => ({
-        id: c.shot_id,
-        videoPath: c.videoPath,
-        status: c.status,
-      }));
-      const result = await provider.generate({ items, signal: token?.signal });
+      const clips = (ctx.videoClips?.clips || []);
+      const sceneMap = buildSceneMap(ctx.storyboard);
+      const valid = clips.filter(c => c.videoPath && c.status === 'complete');
+
+      const transitions = [];
+      for (let i = 1; i < valid.length; i++) {
+        const prev = sceneMap.get(String(valid[i - 1].shot_id));
+        const cur = sceneMap.get(String(valid[i].shot_id));
+        const sceneChange = prev != null && cur != null && prev !== cur;
+        transitions.push(sceneChange ? { type: 'crossfade', duration: SCENE_TRANSITION } : { type: 'cut', duration: 0 });
+      }
+
+      const items = valid.map(c => ({ id: c.shot_id, videoPath: c.videoPath, status: c.status }));
+      const result = await provider.generate({
+        items,
+        transitions,
+        fadeIn: FADE_IO > 0,
+        fadeOut: FADE_IO > 0,
+        signal: token?.signal,
+      });
       return {
         episodes: (ctx.storyboard?.episodes || []).map(ep => ({ episode: ep.episode })),
         finalVideo: result.finalVideo,
