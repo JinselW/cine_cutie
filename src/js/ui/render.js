@@ -11,6 +11,7 @@ let _msgBuffer = [];
 let _allCurrentMsgs = [];
 let _controls = null;
 let _progressHandler = null;
+let _pipelineFailureIssues = [];
 
 export function setPipelineControls(controls) {
   _controls = controls;
@@ -88,15 +89,20 @@ export function updatePipeline(step, status) {
 }
 
 export function showPipelineFailure(issues) {
+  _pipelineFailureIssues = Array.isArray(issues) ? [...issues] : [];
   $('#stepContent').innerHTML = `
-    <div class="gen-status" style="text-align:center">
+    <div class="gen-status pipeline-failure">
       <div class="msg">${t('ui.stageBlocked')}</div>
-      <ul>${issues.map(issue => `<li>${escapeHtml(issue)}</li>`).join('')}</ul>
+      <ul class="pipeline-failure-issues">${_pipelineFailureIssues.map(issue => `<li>${escapeHtml(issue)}</li>`).join('')}</ul>
       <button class="action-btn primary" id="failedBackBtn">${t('ui.backToInput')}</button>
     </div>`;
   $('#failedBackBtn').addEventListener('click', stopGeneration);
   setMascotCompact(false);
   setMascot(null);
+}
+
+export function restorePipelineFailure() {
+  showPipelineFailure(_pipelineFailureIssues);
 }
 
 export function setMascot(mood) {

@@ -139,3 +139,23 @@ test('an IP retry during a user revision preserves both the user feedback and th
   assert.match(h.calls.runs.at(-1).feedback, /make the protagonist wear a red coat/);
   assert.match(h.calls.runs.at(-1).feedback, /Replace the protected character with an original one/);
 });
+
+test('IP compliance is not applied after the script stage', async () => {
+  const h = await createHarness();
+  await h.api.startPipeline();
+  h.plan('characterDesign', [{
+    gate: {
+      verdict: QCVerdict.FAIL,
+      severity: Severity.CRITICAL,
+      issues: ['IP BLOCK'],
+      requiresRegeneration: true,
+      regenerationPrompt: 'Rewrite',
+    },
+  }]);
+
+  await h.advance();
+
+  assert.equal(h.calls.runs.filter(run => run.stepId === 'characterDesign').length, 1);
+  assert.ok(h.accepted('characterDesign'));
+  assert.equal(h.calls.failures.length, 0);
+});

@@ -448,18 +448,24 @@ class Orchestrator {
       addAgentMessage('⚠️', t('pipeline.consistencyWarnings', { stepId, issues: consistencyResult.issues.join('; ') }));
     }
 
-    const complianceAgent = getIPComplianceAgent();
-    const ipResult = complianceAgent.checkGeneratedOutput
-      ? complianceAgent.checkGeneratedOutput(stepId, data)
-      : complianceAgent.checkStepOutput(stepId, data);
-    if (ipResult.verdict === QCVerdict.FAIL) {
-      addAgentMessage('🛑', t('pipeline.ipCompliance', { issues: ipResult.issues.join('; ') }));
-      return ipResult;
-    }
-    if (ipResult.verdict === QCVerdict.CONDITIONAL_PASS) {
-      addAgentMessage('⚠️', t('pipeline.ipCompliance', { issues: ipResult.issues.join('; ') }));
-      if (consistencyResult.verdict === QCVerdict.PASS) {
+    // IP is checked at the prompt boundary and once more on the generated
+    // script. Later production stages are evaluated for output quality only;
+    // rescanning derived prompts and media metadata creates duplicate and
+    // misleading IP failures after the creative direction is already approved.
+    if (stepId === 'script') {
+      const complianceAgent = getIPComplianceAgent();
+      const ipResult = complianceAgent.checkGeneratedOutput
+        ? complianceAgent.checkGeneratedOutput(stepId, data)
+        : complianceAgent.checkStepOutput(stepId, data);
+      if (ipResult.verdict === QCVerdict.FAIL) {
+        addAgentMessage('🛑', t('pipeline.ipCompliance', { issues: ipResult.issues.join('; ') }));
         return ipResult;
+      }
+      if (ipResult.verdict === QCVerdict.CONDITIONAL_PASS) {
+        addAgentMessage('⚠️', t('pipeline.ipCompliance', { issues: ipResult.issues.join('; ') }));
+        if (consistencyResult.verdict === QCVerdict.PASS) {
+          return ipResult;
+        }
       }
     }
 

@@ -3,7 +3,7 @@ import { STEPS, dataKeyOf } from './config.js';
 import { state } from './state.js';
 import {
   showGenerating, getGenAnim, flushBufferedMessages,
-  renderCurrentMessages
+  renderCurrentMessages, restorePipelineFailure
 } from './ui/render.js';
 import {
   renderScript, renderCharacterDesign, renderStoryboard,
@@ -14,7 +14,7 @@ import {
 export function onNodeClick(index) {
   const node = $(`#pipe${index}`);
   if (!node) return;
-  if (state.paused || state.stopped) return;
+  if (state.paused) return;
 
   const isDone = node.classList.contains('done');
   const isCurrentReturn = index === state.currentStep && state.viewingStep !== null;
@@ -60,6 +60,10 @@ export function showStepReadOnly(index) {
 }
 
 function restoreCurrentView() {
+  if (state.stopped) {
+    restorePipelineFailure();
+    return;
+  }
   if (isPipelineComplete()) {
     showCompletion();
     return;
