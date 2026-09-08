@@ -38,8 +38,19 @@ function videoModeById(id) {
 }
 
 function inferVideoMode(models) {
-  if (models?.video?.name === 'wan2.7-i2v') return 'firstLastFrame';
-  return VIDEO_MODES[0].id;
+  const modelName = models?.video?.name;
+  if (!modelName) return VIDEO_MODES[0].id;
+
+  const matches = VIDEO_MODES.filter(m => m.presets.includes(modelName));
+  if (matches.length === 0) return VIDEO_MODES[0].id;
+  if (matches.length === 1) return matches[0].id;
+
+  const priority = ['referenceImage', 'firstLastFrame', 'firstFrame'];
+  for (const id of priority) {
+    const match = matches.find(m => m.id === id);
+    if (match) return match.id;
+  }
+  return matches[0].id;
 }
 
 let config = {

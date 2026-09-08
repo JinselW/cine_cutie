@@ -55,16 +55,24 @@ export async function concatVideos(inputPaths, outputPath, { onProgress } = {}) 
   fs.mkdirSync(dir, { recursive: true });
 
   const listFile = outputPath + '.list';
-  const content = inputPaths.map(p => `file '${p.replace(/'/g, "'\\''")}'`).join('\n');
+  // ffmpeg concat demuxer 使用 '' 转义单引号，而非 shell 的 '\''
+  const content = inputPaths.map(p => `file '${p.replace(/'/g, "''")}'`).join('\n');
   fs.writeFileSync(listFile, content);
   const durations = await Promise.all(inputPaths.map(probeDuration));
   const durationSeconds = durations.reduce((sum, value) => sum + value, 0);
 
   const concat = ['-y', '-f', 'concat', '-safe', '0', '-i', listFile];
   try {
+    let copySucceeded = false;
     try {
       await runFfmpeg([...concat, '-c', 'copy', outputPath], { durationSeconds, onProgress });
+      const stat = fs.statSync(outputPath);
+      copySucceeded = stat.size > 0;
     } catch {
+      copySucceeded = false;
+    }
+
+    if (!copySucceeded) {
       onProgress?.(0);
       await runFfmpeg([...concat,
         '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23', '-pix_fmt', 'yuv420p',

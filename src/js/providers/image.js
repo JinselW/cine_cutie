@@ -125,7 +125,7 @@ async function generateImages(prompts, ids, seeds, refs, externalSignal) {
         prompts,
         model: config.imageModel,
         size: computeImageSize(state.aspectRatio, tier),
-        seed: seeds[0] || 42,
+        seed: seeds[0] ?? 42,
         seeds,
         ...(canEdit && {
           refs,
@@ -179,6 +179,15 @@ async function generateImages(prompts, ids, seeds, refs, externalSignal) {
       try {
         const taskRes = await fetch(`/api/task/${taskId}`, { signal: ctrl.signal });
         clearTimeout(tid);
+        if (!taskRes.ok) {
+          return prompts.map((_, i) => ({
+            id: ids[i],
+            path: '',
+            imageUrl: '',
+            status: 'failed',
+            error: `Task not found or server restarted`,
+          }));
+        }
         taskData = await taskRes.json();
         reportBatchProgress('generatingImages', taskData);
       } catch {

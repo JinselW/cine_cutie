@@ -237,6 +237,7 @@ class Orchestrator {
       }
 
       const result = await agent.process(ctx, this.#token);
+      await this.#token.throwIfCancelled();
       const artifact = result.artifacts?.[0] ?? null;
       const data = artifact?.data ?? null;
       const metadata = result.metadata ?? {};

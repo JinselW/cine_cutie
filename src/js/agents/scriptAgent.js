@@ -8,6 +8,7 @@ import { addAgentMessage } from '../ui/render.js';
 import { t } from '../i18n.js';
 import { createArtifact, ArtifactKind, ArtifactStatus } from '../artifacts/artifactTypes.js';
 import { reportPhase } from '../progressTracker.js';
+import { CancellationTokenError } from '../orchestrator/cancellationToken.js';
 
 const MAX_RETRIES = 2;
 
@@ -141,6 +142,9 @@ export class ScriptAgent extends BaseAgent {
     const finalResult = bestResult || currentResult;
 
     if (!finalResult) {
+      if (signal?.aborted) {
+        throw new CancellationTokenError('Operation cancelled');
+      }
       const fb = this.#fallback(ctx, true, lastError);
       fallbackUsed = true;
       return fb;
