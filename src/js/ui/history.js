@@ -135,6 +135,7 @@ export function initHistory() {
         }).join('')}
         <details><summary>${t('history.sessionMessages', { count: snap.messages?.length || 0 })}</summary>${(snap.messages || []).map(m => `<p class="history-text"><small>${esc(time(m.at))} · ${esc(m.role)} ${esc(m.stepId || '')}</small><br>${esc(m.text)}</p>`).join('')}</details>
         <details><summary>${t('history.fullSnapshot')}</summary><pre>${esc(JSON.stringify({ configuration: snap.configuration, entities: snap.entities, acceptedByStep: snap.acceptedByStep, artifacts: snap.artifacts, checkpoint: snap.checkpoint, runState: snap.runState }, null, 2))}</pre></details>`;
+      detail.scrollTop = 0;
       if (canContinue) {
         detail.querySelector('[data-continue]').onclick = async () => {
           if (!confirm(t('history.continueConfirm'))) return;
