@@ -1,8 +1,8 @@
 import './providers/template.js';
 import { initHistory } from './ui/history.js';
 import './providers/llm.js';
-import './providers/image.js';
-import './providers/video.js';
+import { getDefaultVideoDuration } from './providers/video.js';
+import { getConfig as getDashScopeConfig } from './providers/image.js';
 import './providers/videoComfy.js';
 import './providers/render.js';
 import { $, $$, escapeHtml } from './utils.js';
@@ -212,8 +212,10 @@ initPromptFileSlot();
 renderPromptSlot();
 
 function updateDurationHint() {
-  const val = Math.max(5, parseInt($('#totalDuration').value) || 30);
-  const clips = Math.ceil(val / 5);
+  const dsConfig = getDashScopeConfig();
+  const secPerClip = getDefaultVideoDuration(dsConfig.videoModel);
+  const val = Math.max(secPerClip, parseInt($('#totalDuration').value) || 30);
+  const clips = Math.ceil(val / secPerClip);
   $('#durationHint').textContent = t('ui.durationInputHint', { count: clips });
 }
 $('#totalDuration').addEventListener('input', updateDurationHint);

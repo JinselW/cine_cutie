@@ -5,7 +5,7 @@ import mammoth from 'mammoth';
 import { createMemoryRouter } from './memory.js';
 import { LRUCache } from './cache.js';
 import { submitImageTask, submitImageEditTask, parseImageResultUrl, submitVideoTask, submitVideoTaskV2, pollTask, downloadFile, detectVideoMode, fileToDataUri } from './dashscope.js';
-import { createTask, getTask, updateTask, cancelTask, isTaskCancelled } from './tasks.js';
+import { createTask, getTask, updateTask, cancelTask, isTaskCancelled, cleanupTasks } from './tasks.js';
 import { concatVideos, checkFfmpeg } from './render.js';
 import { submitWorkflow, pollUntilDone, downloadOutput, uploadImageToComfy, checkComfyUIStatus, getComfyMonitorStatus, selectWorkflowMode, cancelPrompt, MAX_COMFY_REFERENCE_IMAGES } from './comfyui.js';
 import { ensureTunnel, closeTunnel, getTunnelStatus, deleteComfyInputFiles, getDgxMetrics } from './ssh-tunnel.js';
@@ -23,6 +23,38 @@ fs.mkdirSync(MEDIA_DIR, { recursive: true });
 
 const UPLOADS_DIR = path.join(MEDIA_DIR, 'uploads');
 fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+
+const MEDIA_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+
+function cleanupMedia() {
+  const now = Date.now();
+  let cleaned = 0;
+  for (const dir of [MEDIA_DIR, UPLOADS_DIR]) {
+    try {
+      const files = fs.readdirSync(dir);
+      for (const file of files) {
+        const filePath = path.join(dir, file);
+        try {
+          const stat = fs.statSync(filePath);
+          if (stat.isFile() && now - stat.mtimeMs > MEDIA_MAX_AGE_MS) {
+            fs.unlinkSync(filePath);
+            cleaned++;
+          }
+        } catch {}
+      }
+    } catch {}
+  }
+  if (cleaned > 0) {
+    console.log(`[MediaCleanup] removed ${cleaned} file(s) older than 7 days`);
+  }
+}
+
+// Run cleanup on startup and every 24 hours
+cleanupMedia();
+setInterval(cleanupMedia, 24 * 60 * 60 * 1000);
+
+// Clean up completed tasks older than 1 hour, every 10 minutes
+setInterval(() => cleanupTasks(3600000), 10 * 60 * 1000);
 
 function isPathWithinDir(filePath, allowedDir) {
   if (typeof filePath !== 'string' || !filePath) return false;
@@ -50,12 +82,28 @@ function buildSshConfig(partial) {
   if (!password) {
     return null;
   }
+  const serverHost = process.env.COMFY_SSH_HOST;
+  const serverPort = process.env.COMFY_SSH_PORT;
+  const serverUser = process.env.COMFY_SSH_USER;
+  const serverComfyPort = process.env.COMFY_SSH_COMFY_PORT;
+
+  // 优先使用服务器端配置，防止 SSRF 攻击
+  const host = serverHost || partial?.host;
+  const port = serverPort || partial?.port || 6078;
+  const user = serverUser || partial?.user || 'Developer';
+  const comfyPort = serverComfyPort || partial?.comfyPort || 8188;
+
+  // 如果服务器端未配置 host，则拒绝客户端输入（生产环境）
+  if (!serverHost && !partial?.host) {
+    return null;
+  }
+
   return {
-    host: partial?.host,
-    port: partial?.port || 6078,
-    user: partial?.user || 'Developer',
+    host,
+    port,
+    user,
     password,
-    comfyPort: partial?.comfyPort || 8188,
+    comfyPort,
   };
 }
 
@@ -222,6 +270,11 @@ app.post('/api/generate/image', async (req, res) => {
     return res.status(400).json({ error: 'Missing prompts array' });
   }
 
+  const MAX_PROMPTS = 50;
+  if (prompts.length > MAX_PROMPTS) {
+    return res.status(400).json({ error: `Too many prompts (max ${MAX_PROMPTS})` });
+  }
+
   const task = createTask('image', { total: prompts.length });
 
   (async () => {
@@ -300,11 +353,12 @@ app.post('/api/generate/image', async (req, res) => {
     }
 
     const successCount = results.filter(r => r.status === 'ok').length;
-    const finalStatus = isTaskCancelled(task.id) ? 'cancelled' : 'completed';
+    const cancelled = isTaskCancelled(task.id);
+    const finalStatus = cancelled ? 'cancelled' : 'completed';
     console.log(`[ImageBatch] task=${task.id} ${finalStatus}: ${successCount}/${prompts.length} succeeded`);
     updateTask(task.id, {
       status: finalStatus,
-      progress: finalStatus === 'completed' ? 100 : 0,
+      progress: cancelled ? Math.round((successCount / prompts.length) * 100) : 100,
       result: { images: results, total: prompts.length, success: successCount }
     });
   })().catch(err => {
@@ -313,19 +367,6 @@ app.post('/api/generate/image', async (req, res) => {
   });
 
   res.json({ taskId: task.id });
-});
-
-app.post('/api/upload', upload.array('files', 10), (req, res) => {
-  if (!req.files || req.files.length === 0) {
-    return res.status(400).json({ error: 'No files uploaded' });
-  }
-  const files = req.files.map(f => ({
-    name: f.filename,
-    path: `/api/media/uploads/${f.filename}`,
-    localPath: f.path,
-  }));
-  console.log(`[Upload] ${files.length} file(s) uploaded`);
-  res.json({ files });
 });
 
 app.post('/api/upload/prompt', promptUpload.single('file'), async (req, res) => {
@@ -358,6 +399,11 @@ app.post('/api/generate/video', async (req, res) => {
 
   if (!Array.isArray(clips) || clips.length === 0) {
     return res.status(400).json({ error: 'Missing clips array' });
+  }
+
+  const MAX_CLIPS = 30;
+  if (clips.length > MAX_CLIPS) {
+    return res.status(400).json({ error: `Too many clips (max ${MAX_CLIPS})` });
   }
 
   // Validate upload paths to prevent path traversal
@@ -537,11 +583,12 @@ app.post('/api/generate/video', async (req, res) => {
     }
 
     const successCount = results.filter(r => r.status === 'ok').length;
-    const finalStatus = isTaskCancelled(task.id) ? 'cancelled' : 'completed';
+    const cancelled = isTaskCancelled(task.id);
+    const finalStatus = cancelled ? 'cancelled' : 'completed';
     console.log(`[VideoBatch] task=${task.id} ${finalStatus}: ${successCount}/${clips.length} succeeded`);
     updateTask(task.id, {
       status: finalStatus,
-      progress: finalStatus === 'completed' ? 100 : 0,
+      progress: cancelled ? Math.round((successCount / clips.length) * 100) : 100,
       result: { clips: results, total: clips.length, success: successCount }
     });
   })().catch(err => {
@@ -613,10 +660,11 @@ app.post('/api/render/final', async (req, res) => {
       },
     });
 
-    const finalStatus = isTaskCancelled(task.id) ? 'cancelled' : 'completed';
+    const cancelled = isTaskCancelled(task.id);
+    const finalStatus = cancelled ? 'cancelled' : 'completed';
     updateTask(task.id, {
       status: finalStatus,
-      progress: finalStatus === 'completed' ? 100 : 0,
+      progress: finalStatus === 'completed' ? 100 : (cancelled ? 90 : 0),
       result: { path: `/api/media/${outputFilename}`, filename: outputFilename }
     });
   })().catch(err => {
@@ -642,6 +690,11 @@ app.post('/api/generate/video-comfy', async (req, res) => {
     return res.status(400).json({ error: 'Missing clips array' });
   }
 
+  const MAX_CLIPS = 30;
+  if (clips.length > MAX_CLIPS) {
+    return res.status(400).json({ error: `Too many clips (max ${MAX_CLIPS})` });
+  }
+
   // Validate upload paths to prevent path traversal
   if (uploads?.referenceImages?.length > 0) {
     for (const ref of uploads.referenceImages) {
@@ -653,6 +706,7 @@ app.post('/api/generate/video-comfy', async (req, res) => {
 
   const task = createTask('video-comfy', { total: clips.length });
   const remoteImageCache = new Map();
+  let tunnelEstablished = false;
 
   (async () => {
     const results = [];
@@ -666,6 +720,7 @@ app.post('/api/generate/video-comfy', async (req, res) => {
 
     try {
       const tunnel = await ensureTunnel(sshConfig);
+      tunnelEstablished = true;
       console.log(`[ComfyUI] tunnel ready at localhost:${tunnel.port}`);
     } catch (err) {
       updateTask(task.id, { status: 'failed', phase: 'failed', error: `SSH tunnel failed: ${err.message}` });
@@ -789,19 +844,21 @@ app.post('/api/generate/video-comfy', async (req, res) => {
     }
 
     const successCount = results.filter(r => r.status === 'ok').length;
-    const finalStatus = isTaskCancelled(task.id) ? 'cancelled' : 'completed';
+    const cancelled = isTaskCancelled(task.id);
+    const finalStatus = cancelled ? 'cancelled' : 'completed';
     console.log(`[ComfyUI] task=${task.id} ${finalStatus}: ${successCount}/${clips.length} succeeded`);
     updateTask(task.id, {
       status: finalStatus,
       phase: finalStatus,
       promptId: null,
-      progress: finalStatus === 'completed' ? 100 : 0,
+      progress: cancelled ? Math.round((successCount / clips.length) * 100) : 100,
       result: { clips: results, total: clips.length, success: successCount }
     });
   })().catch(err => {
     console.error(`[ComfyUI] task=${task.id} FATAL: ${err.message}`);
     updateTask(task.id, { status: 'failed', phase: 'failed', promptId: null, error: err.message });
   }).finally(async () => {
+    if (!tunnelEstablished) return;
     try {
       await deleteComfyInputFiles(sshConfig, [...remoteImageCache.values()]);
     } catch (err) {
@@ -817,7 +874,12 @@ app.post('/api/upload/comfy', upload.array('files', 10), async (req, res) => {
     return res.status(400).json({ error: 'No files uploaded' });
   }
 
-  const clientSsh = req.body.sshConfig ? JSON.parse(req.body.sshConfig) : null;
+  let clientSsh;
+  try {
+    clientSsh = req.body.sshConfig ? JSON.parse(req.body.sshConfig) : null;
+  } catch {
+    return res.status(400).json({ error: 'Invalid sshConfig JSON' });
+  }
   if (!clientSsh?.host) {
     return res.status(400).json({ error: 'Missing sshConfig in form data' });
   }
@@ -927,17 +989,6 @@ app.get('/api/media/:filename', (req, res) => {
   res.sendFile(filePath);
 });
 
-app.get('/api/cache/stats', (req, res) => {
-  res.json(cache.stats());
-});
-
-app.post('/api/cache/clear', (req, res) => {
-  cache.cache.clear();
-  cache.hits = 0;
-  cache.misses = 0;
-  res.json({ ok: true, message: 'Cache cleared' });
-});
-
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', cache: cache.stats() });
 });
@@ -947,11 +998,14 @@ app.use(express.static(path.join(__dirname, '..', 'dist')));
 app.get('*', (req, res) => {
   if (!req.path.startsWith('/api/')) {
     res.sendFile(path.join(__dirname, '..', 'dist', 'index.html'));
+  } else {
+    res.status(404).json({ error: 'API endpoint not found' });
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`Cine-Cutie server running at http://localhost:${PORT}`);
+const HOST = process.env.HOST || '127.0.0.1';
+app.listen(PORT, HOST, () => {
+  console.log(`Cine-Cutie server running at http://${HOST}:${PORT}`);
   console.log(`Serving static files from dist/`);
   console.log(`Media files in ${MEDIA_DIR}`);
   console.log(`Cache: LRU, max ${cache.maxSize} entries`);

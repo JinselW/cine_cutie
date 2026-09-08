@@ -58,6 +58,9 @@ const renderProvider = {
         try {
           const taskRes = await fetch(`/api/task/${taskId}`, { signal: ctrl.signal });
           clearTimeout(tid);
+          if (!taskRes.ok) {
+            return { finalVideo: '', status: 'failed', error: 'Task not found or server restarted' };
+          }
           taskData = await taskRes.json();
           if (taskData.phase === 'rendering' || taskData.status === 'completed') {
             reportPercentProgress('rendering', taskData.progress);

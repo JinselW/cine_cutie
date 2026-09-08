@@ -127,6 +127,11 @@ const comfyUIProvider = {
         try {
           const taskRes = await fetch(`/api/task/${taskId}`, { signal: ctrl.signal });
           clearTimeout(tid);
+          if (!taskRes.ok) {
+            return items.map(item => ({
+              id: item.id, videoPath: '', status: 'failed', error: 'Task not found or server restarted',
+            }));
+          }
           taskData = await taskRes.json();
           reportBatchProgress('generatingVideos', taskData);
           if (typeof window !== 'undefined') {

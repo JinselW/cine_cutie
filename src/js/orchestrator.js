@@ -239,6 +239,7 @@ class Orchestrator {
 
       for (let ipAttempt = 0; ; ipAttempt++) {
         const result = await agent.process(ctx, this.#token);
+        await this.#token.throwIfCancelled();
         const artifact = result.artifacts?.[0] ?? null;
         const data = artifact?.data ?? null;
         const metadata = result.metadata ?? {};
@@ -462,6 +463,9 @@ class Orchestrator {
     if (state.stopped) return;
     const stepIndex = STEPS.findIndex(s => s.id === stepId);
     if (stepIndex < 0) return;
+    // A restored session has no live token, and a previous failed run may have
+    // cancelled its token. A user-initiated revision is a fresh operation.
+    if (!this.#token || this.#token.isCancelled) this.#token = new CancellationToken();
     recordMemoryMessage('user', feedback, stepId);
 
     updatePipeline(stepIndex, 'active');

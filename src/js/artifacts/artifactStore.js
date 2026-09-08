@@ -49,6 +49,16 @@ export class ArtifactStore {
     return items.length > 0 ? items[items.length - 1] : null;
   }
 
+  getLatestValidByStep(stepId) {
+    const items = this.getByStep(stepId);
+    for (let i = items.length - 1; i >= 0; i--) {
+      if (!TERMINAL_ARTIFACT_STATUSES.includes(items[i].status)) {
+        return items[i];
+      }
+    }
+    return null;
+  }
+
   lineageHead(stepId) {
     let head = null;
     for (const artifact of this.getByStep(stepId)) {
