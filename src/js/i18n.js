@@ -356,7 +356,7 @@ const en = {
   'settings.useComfyVideoHint': 'Configure all three video models with ComfyUI in one click',
 
   'llm.notConfiguredFallback': 'LLM not configured, using templates...',
-  'llm.fellBack': 'LLM unavailable ({reason}), using templates instead — process continues normally',
+  'llm.fellBack': 'LLM request did not succeed ({reason}), falling back to templates — generation continues normally',
   'llm.errAuth': 'Authentication failed',
   'llm.errRateLimit': 'Rate limit exceeded',
   'llm.errNetwork': 'Network error (check CORS/endpoint)',
@@ -763,7 +763,7 @@ const zh = {
   'settings.useComfyVideoHint': '一键将下方三个视频模型统一配置为 ComfyUI',
 
   'llm.notConfiguredFallback': 'LLM 未配置，使用模板...',
-  'llm.fellBack': 'LLM 不可用（{reason}），改用模板继续生成',
+  'llm.fellBack': 'LLM 未能正常响应（{reason}），暂用模板继续生成',
   'llm.errAuth': '认证失败',
   'llm.errRateLimit': '请求频率超限',
   'llm.errNetwork': '网络错误（检查 CORS/端点）',

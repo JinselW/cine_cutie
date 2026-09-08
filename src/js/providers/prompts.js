@@ -150,9 +150,13 @@ Requirements:
     buildUser(ctx) {
       const script = ctx.script;
       const totalDuration = ctx.totalDuration || 30;
-      const maxClips = Math.ceil(totalDuration / 5);
-      const maxSegmentsPerEp = maxClips <= 2 ? 1 : maxClips <= 6 ? 2 : 4;
-      const maxShotsPerSeg = maxClips <= 2 ? 2 : maxClips <= 6 ? 2 : 4;
+      const minClip = ctx.minClip || 3;
+      const maxClip = ctx.maxClip || 10;
+      const nominalClip = ctx.nominalClip || 5;
+      const maxShots = Math.max(1, Math.floor(totalDuration / minClip));
+      const minShots = Math.max(1, Math.ceil(totalDuration / maxClip));
+      const maxSegmentsPerEp = maxShots <= 2 ? 1 : maxShots <= 6 ? 2 : 4;
+      const maxShotsPerSeg = maxShots <= 2 ? 2 : maxShots <= 6 ? 2 : 4;
 
       const scriptSummary = script
         ? `Title: ${script.title}\nCharacters: ${(script.characters || []).map(c => `${c.name} (${c.enName || c.name}) — ${c.appearance}`).join('; ')}\nSettings: ${(script.settings || []).map(s => `${s.name} — ${s.desc}`).join('; ')}\nEpisodes: ${(script.episodes || []).map(ep => `Ep${ep.episode}: ${ep.title} — ${ep.summary}`).join('\n')}`
@@ -160,7 +164,7 @@ Requirements:
 
       return `Create a shot-by-shot storyboard from this script.
 
-TARGET DURATION: ${totalDuration} seconds total (~${maxClips} video clips at 5s each)
+TARGET DURATION: ${totalDuration} seconds total. Each clip is generated at ${minClip}-${maxClip}s (typical ~${nominalClip}s), so use between ${minShots} and ${maxShots} shots.
 
 SCRIPT:
 ${scriptSummary}
@@ -176,7 +180,7 @@ OUTPUT JSON SCHEMA:
             {
               "shot_id": "string — unique id like 'ep1_s1_sh1'",
               "type": "string — shot type: 'wide', 'medium', 'close-up', 'extreme-close-up', 'aerial', 'low-angle'",
-              "duration": "number — suggested duration in seconds (3-10)",
+              "duration": "number — integer clip length in seconds, ${minClip}-${maxClip}",
               "description": "string — what happens in this shot",
               "camera": "string — camera movement: 'static', 'pan-left', 'pan-right', 'zoom-in', 'zoom-out', 'tracking', 'tilt-up'",
               "prompt": "string — detailed English image generation prompt describing this exact frame, including characters, setting, lighting, mood, and camera angle",
@@ -190,7 +194,7 @@ OUTPUT JSON SCHEMA:
 }
 
 Requirements:
-- Total shots across ALL episodes MUST NOT exceed ${maxClips} (based on ${totalDuration}s total duration, ~5s per clip)
+- Choose a shot count that follows the script's beats, between ${minShots} and ${maxShots} — every script segment should get at least one shot, and no shot is filler
 - Each episode should have 1-${maxSegmentsPerEp} segments
 - Each segment should have 1-${maxShotsPerSeg} shots
 - Shot prompts must be in English, detailed enough for image generation
@@ -198,7 +202,7 @@ Requirements:
 - Include character appearance details in prompts when characters are present
 - Include setting details in prompts
 - Specify lighting and mood in each prompt
-- Duration is the ACTUAL generated clip length in seconds (3-10 per shot), and the durations of ALL shots across ALL episodes MUST add up to roughly ${totalDuration}s — the final film is exactly the sum of the clips
+- Duration is the ACTUAL generated clip length in whole seconds (${minClip}-${maxClip} each); the durations of ALL shots across ALL episodes MUST add up to roughly ${totalDuration}s — the final film is exactly the sum of the clips, and the pipeline will rescale toward this target, so make longer beats (action, dialogue) outweigh quick cuts
 - For each shot, provide audio_description in English: include all dialogue (who says what), sound effects (footsteps, doors, objects), ambient sounds (weather, crowd, traffic), and any music mood. Infer sounds from the visual context even if not explicitly stated — rain needs rain sounds, office needs keyboard/phone sounds, forest needs birds/wind, etc.
 
 SHOT-TO-SHOT CONTINUITY — CRITICAL:

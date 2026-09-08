@@ -2,6 +2,8 @@ import { BaseAgent } from './baseAgent.js';
 import { QCAgent, SCORE_THRESHOLD, reportScore, reportRetry, buildRetryFeedback } from './qcAgent.js';
 import { RetryAgent } from './retryAgent.js';
 import { chat, isConfigured, consumeStepMetrics } from '../providers/llm.js';
+import { getConfig } from '../providers/image.js';
+import { getVideoDurationRange } from '../providers/video.js';
 import { buildMessages } from '../providers/prompts.js';
 import { listAllProviders } from '../providers/registry.js';
 import { addAgentMessage } from '../ui/render.js';
@@ -20,34 +22,75 @@ function validateStoryboard(data) {
     && data.episodes[0].segments[0].shots.length >= 1;
 }
 
-function capShotsByDuration(parsed, totalDuration) {
-  if (!totalDuration) return parsed;
-  const maxClips = Math.ceil(totalDuration / 5);
-  let totalShots = 0;
+function iterateShots(parsed) {
+  const shots = [];
   for (const ep of (parsed.episodes || [])) {
     for (const seg of (ep.segments || [])) {
-      totalShots += (seg.shots || []).length;
+      for (const shot of (seg.shots || [])) shots.push(shot);
     }
   }
-  if (totalShots > maxClips) {
-    let remaining = maxClips;
-    outer: for (const ep of (parsed.episodes || [])) {
+  return shots;
+}
+
+// The finished film is the sum of its clips, so the storyboard must honour the
+// user's total duration instead of trusting the model to add up. Shot count is
+// trimmed so every clip stays ≥ the model's minimum, then durations are rescaled
+// toward the target and nudged to whole seconds within the model's tiers.
+function reconcileStoryboardTiming(parsed, totalDuration) {
+  if (!totalDuration || !Array.isArray(parsed.episodes)) return parsed;
+  const { min: minClip, max: maxClip, fallback } = getVideoDurationRange(getConfig().videoModel);
+
+  const maxShots = Math.max(1, Math.floor(totalDuration / minClip));
+  if (iterateShots(parsed).length > maxShots) {
+    let remaining = maxShots;
+    outer: for (const ep of parsed.episodes) {
       for (const seg of (ep.segments || [])) {
-        if (seg.shots && seg.shots.length > remaining) {
-          seg.shots = seg.shots.slice(0, remaining);
-        }
+        const shots = seg.shots || [];
+        if (shots.length > remaining) seg.shots = shots.slice(0, remaining);
         remaining -= (seg.shots || []).length;
-        if (remaining <= 0) {
-          seg.shots = seg.shots || [];
-          break outer;
-        }
+        if (remaining <= 0) break outer;
       }
     }
-    for (const ep of (parsed.episodes || [])) {
+    for (const ep of parsed.episodes) {
       ep.segments = (ep.segments || []).filter(seg => (seg.shots || []).length > 0);
     }
-    parsed.episodes = (parsed.episodes || []).filter(ep => (ep.segments || []).length > 0);
+    parsed.episodes = parsed.episodes.filter(ep => (ep.segments || []).length > 0);
   }
+
+  const shots = iterateShots(parsed);
+  if (!shots.length) return parsed;
+
+  for (const s of shots) {
+    const seconds = Math.round(Number(s.duration));
+    s.duration = Number.isFinite(seconds) && seconds > 0
+      ? Math.min(maxClip, Math.max(minClip, seconds)) : fallback;
+  }
+
+  const sum = shots.reduce((acc, s) => acc + s.duration, 0);
+  if (sum > 0) {
+    const scale = totalDuration / sum;
+    for (const s of shots) {
+      s.duration = Math.min(maxClip, Math.max(minClip, Math.round(s.duration * scale)));
+    }
+  }
+
+  // Nudge whole seconds toward the target so rounding doesn't leave the film
+  // short/long; stop early once no shot has headroom left within the tiers.
+  let diff = totalDuration - shots.reduce((acc, s) => acc + s.duration, 0);
+  while (diff !== 0) {
+    const wantMore = diff > 0;
+    const candidates = shots.filter(s => wantMore
+      ? s.duration < maxClip
+      : s.duration > minClip);
+    if (!candidates.length) break;
+    candidates.sort((a, b) => wantMore
+      ? (maxClip - a.duration) - (maxClip - b.duration)
+      : (a.duration - minClip) - (b.duration - minClip));
+    const pick = candidates[candidates.length - 1];
+    pick.duration += wantMore ? 1 : -1;
+    diff += wantMore ? -1 : 1;
+  }
+
   return parsed;
 }
 
@@ -121,7 +164,8 @@ export class StoryboardAgent extends BaseAgent {
       return this.#fallback(ctx, false);
     }
 
-    const messages = buildMessages('storyboard', ctx);
+    const { min, max, fallback } = getVideoDurationRange(getConfig().videoModel);
+    const messages = buildMessages('storyboard', { ...ctx, minClip: min, maxClip: max, nominalClip: fallback });
     if (!messages) {
       return this.#fallback(ctx, false);
     }
@@ -185,7 +229,7 @@ export class StoryboardAgent extends BaseAgent {
     }
 
     if (ctx.totalDuration) {
-      finalResult = capShotsByDuration({ ...finalResult }, ctx.totalDuration);
+      finalResult = reconcileStoryboardTiming({ ...finalResult }, ctx.totalDuration);
     }
 
     const sourceArtifactIds = ctx.sourceArtifactIds?.script ? [ctx.sourceArtifactIds.script] : [];

@@ -1,3 +1,5 @@
+import { state } from '../state.js';
+
 const STORAGE_KEY = 'cine-cutie-workflow';
 const LEGACY_CHECKPOINT_KEY = 'cine-cutie-checkpoint';
 const LEGACY_RUNSTATE_KEY = 'cine-cutie-runstate';
@@ -10,6 +12,7 @@ export function buildWorkflowSnapshot({ store, checkpoint, runState }) {
   return {
     schemaVersion: WORKFLOW_SCHEMA_VERSION,
     savedAt: Date.now(),
+    mode: state.mode,
     artifacts: store.snapshot(),
     acceptedByStep: store.snapshotAccepted(),
     checkpoint: checkpoint.snapshot(),
@@ -27,6 +30,7 @@ export function normalizeWorkflowSnapshot(raw) {
   return {
     schemaVersion: WORKFLOW_SCHEMA_VERSION,
     savedAt: raw.savedAt ?? null,
+    mode: raw.mode ?? 'auto',
     artifacts: raw.artifacts ?? {},
     acceptedByStep: raw.acceptedByStep ?? {},
     checkpoint: raw.checkpoint ?? {},

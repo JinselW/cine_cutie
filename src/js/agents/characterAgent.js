@@ -113,36 +113,45 @@ export class CharacterAgent extends BaseAgent {
     const messages = buildMessages('characterDesign', ctx);
     if (!messages) return this.#templateDesigns(ctx);
 
-    let raw = null;
-    try {
-      raw = await chat(messages, { signal });
-    } catch (err) {
+    const MAX_LLM_RETRIES = 2;
+    let lastError = null;
+
+    for (let attempt = 0; attempt <= MAX_LLM_RETRIES; attempt++) {
       if (signal?.aborted) return null;
-      const reason = err?.i18nKey || 'llm.errNetwork';
-      addAgentMessage('⚠️', t('llm.fellBack', { reason: t(reason) }));
-      return this.#templateDesigns(ctx);
-    }
+      if (attempt > 0) reportPhase('retrying', { attempt: attempt + 1 });
 
-    let parsed = parseJson(raw);
-    if (!parsed) {
+      let raw = null;
       try {
-        const repairMessages = [
-          ...messages,
-          { role: 'assistant', content: raw || '' },
-          { role: 'user', content: JSON_REPAIR_PROMPT },
-        ];
-        parsed = parseJson(await chat(repairMessages, { signal }));
-      } catch {
-        parsed = null;
+        raw = await chat(messages, { signal });
+      } catch (err) {
+        lastError = err;
+        continue;
       }
+
+      let parsed = parseJson(raw);
+      if (!parsed) {
+        try {
+          const repairMessages = [
+            ...messages,
+            { role: 'assistant', content: raw || '' },
+            { role: 'user', content: JSON_REPAIR_PROMPT },
+          ];
+          parsed = parseJson(await chat(repairMessages, { signal }));
+        } catch {
+          parsed = null;
+        }
+      }
+
+      if (parsed) return parsed;
+      lastError = new Error('parse');
+      lastError.i18nKey = 'llm.errParse';
     }
 
-    if (!parsed) {
-      addAgentMessage('⚠️', t('llm.fellBack', { reason: t('llm.errParse') }));
-      return this.#templateDesigns(ctx);
+    if (!signal?.aborted) {
+      const reason = lastError?.i18nKey || 'llm.errNetwork';
+      addAgentMessage('⚠️', t('llm.fellBack', { reason: t(reason) }));
     }
-
-    return parsed;
+    return this.#templateDesigns(ctx);
   }
 
   #templateDesigns(ctx) {

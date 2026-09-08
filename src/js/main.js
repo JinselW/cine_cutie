@@ -10,7 +10,7 @@ import { state } from './state.js';
 import { STEPS, dataKeyOf } from './config.js';
 import { buildPipelineBar, showSection, setMascot, addAgentMessage, updatePipeline, refreshRunningLanguage } from './ui/render.js';
 import { showStepReadOnly } from './navigation.js';
-import { startPipeline, restoreSession, continuePipeline, clearSession, stopPipeline } from './engine.js';
+import { startPipeline, restoreSession, continuePipeline, clearSession, stopPipeline, persistWorkflow } from './engine.js';
 import { t, applyLang } from './i18n.js';
 import { initSettings } from './ui/settings.js';
 import { initComfyStatus } from './ui/comfyMonitor.js';
@@ -58,6 +58,11 @@ buildPipelineBar();
 initMascotInteraction();
 
 const restored = restoreSession();
+if (restored) {
+  $$('.mode-btn').forEach(b => b.classList.remove('active'));
+  const restoredModeBtn = $(`.mode-btn[data-mode="${state.mode}"]`);
+  if (restoredModeBtn) restoredModeBtn.classList.add('active');
+}
 const hasData = Object.values(state.data).some(v => v != null);
 if (restored && hasData) {
   showSection('pipelineSection');
@@ -245,6 +250,7 @@ $$('.mode-btn').forEach(btn => {
     $$('.mode-btn').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
     state.mode = btn.dataset.mode;
+    persistWorkflow();
   });
 });
 

@@ -4,7 +4,7 @@ import { getConfig } from './llm.js';
 import { state } from '../state.js';
 import { dsVideoResolution } from '../utils/resolution.js';
 import { registerBackendTask, unregisterBackendTask } from './activeTasks.js';
-import { reportBatchProgress } from '../progressTracker.js';
+import { reportBatchProgress, reportPhase } from '../progressTracker.js';
 import { videoClipPayloadForMode } from '../videoModePlanning.js';
 
 // wan2.7-r2v 最多接受 5 张参考图
@@ -33,7 +33,7 @@ function modelForMode(dsConfig, mode) {
   return dsConfig.videoModel;
 }
 
-async function submitBatch(sentClips, bodyPayload, dsConfig, signal) {
+async function submitBatch(sentClips, bodyPayload, dsConfig, signal, onProgress) {
   let taskId = null;
   try {
     const res = await fetch('/api/generate/video', {
@@ -66,7 +66,8 @@ async function submitBatch(sentClips, bodyPayload, dsConfig, signal) {
         clearTimeout(tid);
         if (!taskRes.ok) return { error: 'Task not found or server restarted' };
         taskData = await taskRes.json();
-        reportBatchProgress('generatingVideos', taskData);
+        if (onProgress) onProgress(taskData);
+        else reportBatchProgress('generatingVideos', taskData);
       } catch {
         clearTimeout(tid);
         if (signal?.aborted) break;
@@ -145,6 +146,8 @@ const videoProvider = {
       }
 
       const allResults = new Map();
+      const overallTotal = [...groups.values()].reduce((sum, g) => sum + g.clips.length, 0);
+      let completedBefore = 0;
       for (const [groupMode, group] of groups) {
         if (signal?.aborted) {
           for (const c of group.clips) allResults.set(c.id, { videoPath: '', status: 'failed', error: 'Cancelled' });
@@ -160,18 +163,35 @@ const videoProvider = {
           seed: group.clips[0].seed,
           audio: true,
         };
-        const batchResult = await submitBatch(group.clips, bodyPayload, dsConfig, signal);
+        const onProgress = (taskData) => {
+          const groupTotal = Math.max(0, Number(taskData.total) || 0);
+          const fromPercent = groupTotal
+            ? Math.floor((Math.max(0, Number(taskData.progress) || 0) / 100) * groupTotal)
+            : 0;
+          const completed = taskData.status === 'completed'
+            ? completedBefore + groupTotal
+            : completedBefore + fromPercent;
+          reportPhase('generatingVideos', {
+            mode: 'determinate', total: overallTotal, completed,
+            activeItem: Math.min(overallTotal, completed + 1),
+          });
+        };
+        const batchResult = await submitBatch(group.clips, bodyPayload, dsConfig, signal, onProgress);
         if (batchResult.clips) {
+          let groupOk = 0;
           for (const r of batchResult.clips) {
             const clipId = group.clips[r.index]?.id;
             if (clipId) {
+              const ok = r.status === 'ok';
+              if (ok) groupOk++;
               allResults.set(clipId, {
                 videoPath: r.path || '',
-                status: r.status === 'ok' ? 'complete' : 'failed',
-                error: r.status === 'ok' ? null : (r.error || 'Generation failed'),
+                status: ok ? 'complete' : 'failed',
+                error: ok ? null : (r.error || 'Generation failed'),
               });
             }
           }
+          completedBefore += groupOk;
         } else {
           for (const c of group.clips) {
             allResults.set(c.id, { videoPath: '', status: 'failed', error: batchResult.error });
@@ -287,4 +307,14 @@ export function getDefaultVideoDuration(modelName) {
   if (!rule) return 5;
   if (rule.values) return rule.values[Math.floor(rule.values.length / 2)];
   return Math.round((rule.range[0] + rule.range[1]) / 2);
+}
+
+// Supported clip lengths for a model, so downstream timing follows the real
+// API tiers instead of a hardcoded 5s.
+export function getVideoDurationRange(modelName) {
+  const rule = DURATION_RULES.find(r => r.pattern.test(modelName || ''));
+  const fallback = getDefaultVideoDuration(modelName);
+  if (!rule) return { min: 3, max: 10, fallback };
+  if (rule.values) return { min: rule.values[0], max: rule.values[rule.values.length - 1], fallback };
+  return { min: rule.range[0], max: rule.range[1], fallback };
 }

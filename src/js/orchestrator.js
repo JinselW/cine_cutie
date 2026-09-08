@@ -597,6 +597,7 @@ class Orchestrator {
     this.#store.restoreAccepted(snapshot.acceptedByStep);
     this.#checkpoint.restoreSnapshot(snapshot.checkpoint);
     this.#runState.restoreSnapshot(snapshot.runState);
+    state.mode = snapshot.mode || 'auto';
     const migrated = this.#migrateLegacyCheckpoints();
 
     for (const key of Object.keys(state.data)) state.data[key] = null;
@@ -770,6 +771,10 @@ class Orchestrator {
       runState: this.#runState,
     }));
   }
+
+  persistWorkflow() {
+    return this.#persistWorkflow();
+  }
 }
 
 let _orchestrator = null;
@@ -803,6 +808,10 @@ export async function continuePipeline() {
 
 export function clearSession() {
   return getOrchestrator().clearSession();
+}
+
+export function persistWorkflow() {
+  return getOrchestrator().persistWorkflow();
 }
 
 export function pausePipeline() {

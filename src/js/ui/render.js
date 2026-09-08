@@ -138,15 +138,12 @@ export function clearCurrentMessages() {
 
 export function showGenerating(stepIndex) {
   const step = STEPS[stepIndex];
-  const msgs = step.genKeys.map(key => t(key));
   const agent = t(step.agentKey);
   const label = t(step.labelKey);
-  let idx = 0;
   const el = $('#stepContent');
   beginStage(step.id);
   el.innerHTML = `
     <div class="gen-status">
-      <div class="msg" id="genMsg">${msgs[0]}</div>
       <div class="sub-msg">${t('ui.agentWorking', { agent })}</div>
       <div class="dots"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>
       <div class="progress-wrap" id="genProgressWrap">
@@ -167,12 +164,6 @@ export function showGenerating(stepIndex) {
   if (step.id === 'videoGeneration' && isComfySelected()) {
     startComfyMonitor('comfyMonitorStep', { showTaskProgress: true });
   }
-
-  const msgInterval = setInterval(() => {
-    idx = (idx + 1) % msgs.length;
-    const msgEl = $('#genMsg');
-    if (msgEl) msgEl.textContent = msgs[idx];
-  }, 2000);
 
   const renderProgress = detail => {
     const fill = $('#genProgress');
@@ -210,7 +201,6 @@ export function showGenerating(stepIndex) {
 
   const anim = {
     stop() {
-      clearInterval(msgInterval);
       if (_progressHandler) window.removeEventListener('pipeline-progress', _progressHandler);
       _progressHandler = null;
       stopComfyMonitor('comfyMonitorStep');
