@@ -1,4 +1,5 @@
 import { QCVerdict, Severity } from './qcTypes.js';
+import { t } from '../i18n.js';
 
 export function extractEntities(stepId, data) {
   const entities = {};
@@ -118,9 +119,10 @@ export function buildConsistencyConstraints(entities) {
 
 export function checkConsistency(stepId, data, entities) {
   const issues = [];
+  let hasFatal = false;
 
   if (!data) {
-    return { verdict: QCVerdict.FAIL, issues: ['No data produced'], severity: Severity.CRITICAL };
+    return { verdict: QCVerdict.FAIL, issues: [t('pipeline.noDataProduced')], severity: Severity.CRITICAL };
   }
 
   switch (stepId) {
@@ -176,7 +178,10 @@ export function checkConsistency(stepId, data, entities) {
       }
       const failed = (data.clips || []).filter(c => c.status === 'failed');
       if (failed.length > actualClips * 0.5 && actualClips > 0) {
-        issues.push(`${failed.length}/${actualClips} video clips failed to generate`);
+        issues.push(failed.length === actualClips
+          ? t('pipeline.allVideoClipsFailed', { count: actualClips })
+          : t('pipeline.videoClipsFailed', { failed: failed.length, total: actualClips }));
+        hasFatal = true;
       }
       const plannedMode = entities?.refVideoMode;
       if (plannedMode && plannedMode !== 'auto' && data.mode && plannedMode !== data.mode) {
@@ -193,6 +198,7 @@ export function checkConsistency(stepId, data, entities) {
       }
       if (data.status === 'failed') {
         issues.push('Post-production render failed');
+        hasFatal = true;
       }
       break;
     }
@@ -201,10 +207,6 @@ export function checkConsistency(stepId, data, entities) {
   if (issues.length === 0) {
     return { verdict: QCVerdict.PASS, issues: [], severity: null };
   }
-
-  const hasFatal = issues.some(i =>
-    i.includes('No data') || i.includes('CRITICAL') || i.includes('failed')
-  );
 
   return {
     verdict: hasFatal ? QCVerdict.FAIL : QCVerdict.CONDITIONAL_PASS,

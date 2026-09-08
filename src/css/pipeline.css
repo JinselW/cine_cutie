@@ -62,6 +62,7 @@
 .pipeline-failure .msg{margin:0 0 10px}
 .pipeline-failure-issues{list-style:none;margin:0 0 26px;padding:0;text-align:center;color:var(--cream);line-height:1.5}
 .pipeline-failure-issues li+li{margin-top:6px}
+.pipeline-failure-actions{display:flex;justify-content:center;gap:12px;flex-wrap:wrap}
 
 .char-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:14px}
 .char-card{

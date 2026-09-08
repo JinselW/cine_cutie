@@ -31,16 +31,16 @@ for (const mode of ['auto', 'interactive']) {
     assert.notEqual(h.orchestrator.runState.status, 'interrupted');
   });
 
-  test(`${mode}: exhausted generated IP rewrites continue with a warning`, async () => {
+  test(`${mode}: exhausted generated IP rewrites stop at the script stage`, async () => {
     const h = await createHarness({ mode });
     const blocked = { verdict: QCVerdict.FAIL, severity: Severity.CRITICAL, issues: ['IP BLOCK'], requiresRegeneration: true, regenerationPrompt: 'Rewrite' };
     h.plan('script', [{ gate: blocked }, { gate: blocked }, { gate: blocked }]);
     await h.api.startPipeline();
 
     assert.equal(h.calls.runs.length, 3);
-    assert.ok(h.accepted('script'));
-    assert.equal(h.calls.failures.length, 0);
-    assert.notEqual(h.orchestrator.runState.status, 'interrupted');
+    assert.equal(h.accepted('script'), null);
+    assert.equal(h.calls.failures.length, 1);
+    assert.equal(h.orchestrator.runState.status, 'interrupted');
   });
 
   for (const scenario of REJECT_SCENARIOS) {
@@ -158,4 +158,25 @@ test('IP compliance is not applied after the script stage', async () => {
   assert.equal(h.calls.runs.filter(run => run.stepId === 'characterDesign').length, 1);
   assert.ok(h.accepted('characterDesign'));
   assert.equal(h.calls.failures.length, 0);
+});
+
+test('a failed stage can be retried without discarding accepted upstream results', async () => {
+  const h = await createHarness();
+  await h.runPipeline(4);
+  const upstreamIds = ['script', 'characterDesign', 'storyboard', 'referenceImages']
+    .map(stepId => h.accepted(stepId).id);
+  h.plan('videoGeneration', [{ metadata: { verdict: QCVerdict.FAIL, consistencyIssues: ['video generation failed'] } }]);
+
+  await h.advance();
+  assert.equal(h.orchestrator.runState.status, 'interrupted');
+
+  h.plan('videoGeneration', [{}]);
+  await h.api.continuePipeline();
+
+  assert.equal(h.orchestrator.runState.status, 'running');
+  assert.ok(h.accepted('videoGeneration'));
+  assert.deepEqual(
+    ['script', 'characterDesign', 'storyboard', 'referenceImages'].map(stepId => h.accepted(stepId).id),
+    upstreamIds,
+  );
 });

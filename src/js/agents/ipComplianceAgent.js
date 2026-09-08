@@ -24,6 +24,7 @@
 import { scanText, scanTexts, MatchType, IPStatus } from '../compliance/ipMatcher.js';
 import { getDatabase } from '../compliance/ipDatabase.js';
 import { QCVerdict, Severity } from './qcTypes.js';
+import { t } from '../i18n.js';
 
 // ---------------------------------------------------------------------------
 // Text extraction from step outputs
@@ -46,6 +47,21 @@ function extractTextFromStep(stepId, data) {
       for (const s of (data.settings || [])) {
         if (s.name) texts.push(s.name);
         if (s.desc) texts.push(s.desc);
+      }
+      for (const episode of (data.episodes || [])) {
+        if (episode.title) texts.push(episode.title);
+        if (episode.summary) texts.push(episode.summary);
+        for (const segment of (episode.segments || [])) {
+          if (segment.title) texts.push(segment.title);
+          if (segment.description) texts.push(segment.description);
+          if (segment.dialogue) texts.push(segment.dialogue);
+          if (segment.narration) texts.push(segment.narration);
+          for (const shot of (segment.shots || [])) {
+            if (shot.description) texts.push(shot.description);
+            if (shot.dialogue) texts.push(shot.dialogue);
+            if (shot.narration) texts.push(shot.narration);
+          }
+        }
       }
       break;
     }
@@ -122,6 +138,14 @@ function computeRisk(matchType, confidence) {
 
 const ACTION_ORDER = ['ALLOW', 'REVIEW', 'WARN', 'BLOCK'];
 
+// These short terms are ordinary words or common given names as well as IP
+// aliases. A standalone occurrence is useful review evidence, but is not
+// strong enough to block a creation without the full canonical name.
+const AMBIGUOUS_STANDALONE_TERMS = new Set([
+  'apple', 'buzz', 'cap', 'donald', 'goofy', 'incredible', 'judy', 'link',
+  'mike', 'nemo', 'piglet', 'po', 'sonic', 'winnie', 'woody',
+]);
+
 function riskToAction(risk) {
   switch (risk) {
     case 'CRITICAL':
@@ -156,6 +180,10 @@ function evaluateEvidence(evidence) {
     let action = riskToAction(risk);
 
     if (matchType === MatchType.KEYWORD) {
+      action = capAction(action, 'WARN');
+    }
+    if ((matchType === MatchType.EXACT || matchType === MatchType.ALIAS)
+      && AMBIGUOUS_STANDALONE_TERMS.has(String(matchedText).toLowerCase())) {
       action = capAction(action, 'WARN');
     }
     action = capAction(action, maxAction);
@@ -241,8 +269,11 @@ function buildResult(findings) {
   const issues = findings
     .filter(f => f.verdict !== QCVerdict.PASS)
     .map(f => {
-      const prefix = f.verdict === QCVerdict.FAIL ? 'IP BLOCK' : 'IP WARN';
-      return `${prefix}: "${f.matched}" → ${f.candidateIp} (${f.candidateOwner || f.candidateType}) via ${f.matchType} [${f.risk}]`;
+      return t(f.verdict === QCVerdict.FAIL ? 'pipeline.ipBlockedFinding' : 'pipeline.ipWarningFinding', {
+        matched: f.matched,
+        candidate: f.candidateIp,
+        owner: f.candidateOwner || f.candidateType,
+      });
     });
 
   return {
@@ -260,7 +291,7 @@ function buildRegenerationPrompt(result) {
     .filter(f => f.verdict === QCVerdict.FAIL)
     .map(f => f.candidateIp))];
   return [
-    'The generated output introduced protected IP references that were not required by the user.',
+    'The generated script contains protected IP references.',
     `Regenerate this step and replace these references with fully original names, designs, settings, and descriptions: ${names.join(', ')}.`,
     'Do not mention, imitate, paraphrase, or visually evoke those properties. Preserve the story intent and required output structure.',
   ].join(' ');
@@ -302,6 +333,20 @@ export class IPComplianceAgent {
    * agent to rewrite its own output instead of terminating the whole pipeline.
    */
   checkGeneratedOutput(stepId, data) {
+    if (stepId !== 'script') {
+      return {
+        verdict: QCVerdict.PASS,
+        severity: null,
+        ipStatus: IPStatus.SAFE,
+        risk: 'NONE',
+        issues: [],
+        findings: [],
+        source: 'generated',
+        skipped: true,
+        requiresRegeneration: false,
+        regenerationPrompt: null,
+      };
+    }
     const result = this.checkStepOutput(stepId, data);
     return {
       ...result,

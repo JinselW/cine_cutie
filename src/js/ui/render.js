@@ -94,8 +94,21 @@ export function showPipelineFailure(issues) {
     <div class="gen-status pipeline-failure">
       <div class="msg">${t('ui.stageBlocked')}</div>
       <ul class="pipeline-failure-issues">${_pipelineFailureIssues.map(issue => `<li>${escapeHtml(issue)}</li>`).join('')}</ul>
-      <button class="action-btn primary" id="failedBackBtn">${t('ui.backToInput')}</button>
+      <div class="pipeline-failure-actions">
+        <button class="action-btn primary" id="failedRetryBtn">${t('ui.retryCurrentStep')}</button>
+        <button class="action-btn" id="failedBackBtn">${t('ui.backToInput')}</button>
+      </div>
     </div>`;
+  $('#failedRetryBtn').addEventListener('click', async () => {
+    const buttons = document.querySelectorAll('#failedRetryBtn, #failedBackBtn');
+    buttons.forEach(button => { button.disabled = true; });
+    try {
+      await _controls?.retry();
+    } catch (error) {
+      buttons.forEach(button => { button.disabled = false; });
+      console.error('[pipeline] failed to retry current step', error);
+    }
+  });
   $('#failedBackBtn').addEventListener('click', stopGeneration);
   setMascotCompact(false);
   setMascot(null);

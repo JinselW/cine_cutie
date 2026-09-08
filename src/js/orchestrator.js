@@ -258,18 +258,9 @@ class Orchestrator {
           continue;
         }
 
-        // Generated text must not kill an otherwise viable movie run. If the
-        // producing agent cannot remove the reference after bounded rewrites,
-        // retain a prominent warning and let the user revise that step later.
         if (gateResult.requiresRegeneration === true) {
-          gateResult = {
-            ...gateResult,
-            verdict: QCVerdict.CONDITIONAL_PASS,
-            severity: Severity.HIGH,
-            issues: gateResult.issues.map(issue => `${issue} (${t('pipeline.ipRetryExhausted')})`),
-            requiresRegeneration: false,
-          };
-          addAgentMessage('⚠️', t('pipeline.ipRetryExhausted'));
+          gateResult = { ...gateResult, requiresRegeneration: false };
+          addAgentMessage('🛑', t('pipeline.ipRetryExhaustedBlocked'));
         }
 
         metadata.retries = (metadata.retries ?? 0) + ipAttempt;
@@ -830,4 +821,4 @@ export async function resumeFromHistory(snapshot, memoryId) {
   return getOrchestrator().resumeFromMemory(snapshot, memoryId);
 }
 
-setPipelineControls({ pause: pausePipeline, resume: resumePipeline, stop: stopPipeline });
+setPipelineControls({ pause: pausePipeline, resume: resumePipeline, stop: stopPipeline, retry: continuePipeline });

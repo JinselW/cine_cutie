@@ -250,10 +250,26 @@ test('"tall" vs "wall-e" → no match (min word length 5)', () => {
   assert.equal(wallEFindings.length, 0);
 });
 
-test('"cap" alone → no Captain America match', () => {
+test('ambiguous alias "cap" is review-only rather than a blocking match', () => {
   const r = agent.checkText('she wore a blue cap');
-  const capFindings = r.findings.filter(f => f.candidateIp === 'Captain America' && f.matchType === MatchType.FUZZY);
-  assert.equal(capFindings.length, 0);
+  const finding = r.findings.find(f => f.candidateIp === 'Captain America');
+  assert.ok(finding);
+  assert.equal(finding.action, 'WARN');
+  assert.equal(r.verdict, QCVerdict.CONDITIONAL_PASS);
+});
+
+test('ambiguous common words and names never block on their own', () => {
+  for (const text of ['he ate an apple', 'send me a link', 'a man named Mike', 'a sonic boom', 'a loud buzz']) {
+    const r = agent.checkText(text);
+    assert.notEqual(r.verdict, QCVerdict.FAIL, `should not block: ${text}`);
+  }
+});
+
+test('full canonical names still block when an ambiguous short alias exists', () => {
+  for (const text of ['Captain America enters', 'Sonic The Hedgehog runs', 'Mike Wazowski waves', 'Buzz Lightyear flies']) {
+    const r = agent.checkText(text);
+    assert.equal(r.verdict, QCVerdict.FAIL, `should block: ${text}`);
+  }
 });
 
 // =========================================================================
@@ -351,6 +367,36 @@ test('generated blocking match requests regeneration instead of terminal failure
   assert.equal(r.source, 'generated');
   assert.equal(r.requiresRegeneration, true);
   assert.match(r.regenerationPrompt, /Spider-Man/);
+});
+
+test('script scanning includes episode, segment, dialogue, narration, and shot text', () => {
+  const r = agent.checkGeneratedOutput('script', {
+    title: 'Original Story',
+    episodes: [{
+      title: 'Chapter One',
+      summary: 'An original beginning',
+      segments: [{
+        title: 'Arrival',
+        description: 'A traveler enters town',
+        dialogue: 'Someone whispers: Spider-Man is here',
+        narration: 'Night falls',
+        shots: [{ description: 'A quiet street', dialogue: 'Hello', narration: 'Batman watches' }],
+      }],
+    }],
+  });
+  assert.equal(r.verdict, QCVerdict.FAIL);
+  assert.ok(r.findings.some(f => f.candidateIp === 'Spider-Man'));
+  assert.ok(r.findings.some(f => f.candidateIp === 'Batman'));
+});
+
+test('generated IP scanning is explicitly skipped outside the script stage', () => {
+  const r = agent.checkGeneratedOutput('videoGeneration', {
+    clips: [{ prompt: 'Spider-Man swings through Gotham' }],
+  });
+  assert.equal(r.verdict, QCVerdict.PASS);
+  assert.equal(r.skipped, true);
+  assert.equal(r.findings.length, 0);
+  assert.equal(r.requiresRegeneration, false);
 });
 
 test('user input remains strict and is identified as user-authored', () => {

@@ -318,5 +318,10 @@ $('#startBtn').addEventListener('click', async () => {
 $('#userInput').addEventListener('keydown', e => {
   if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
     $('#startBtn').click();
+  } else if (e.key === 'Tab') {
+    e.preventDefault();
+    const ta = e.currentTarget;
+    ta.setRangeText(t('ui.example'), ta.selectionStart, ta.selectionEnd, 'end');
+    ta.dispatchEvent(new Event('input', { bubbles: true }));
   }
 });
