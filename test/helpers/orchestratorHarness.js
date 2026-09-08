@@ -62,7 +62,7 @@ export async function createHarness({ mode = 'auto' } = {}) {
           data: 'data' in config ? config.data : structuredClone(STEP_DATA[stepId]),
           status: config.status ?? ArtifactStatus.COMPLETE,
         })],
-        metadata: config.metadata ?? {},
+        metadata: { feedbackSatisfied: true, ...(config.metadata ?? {}) },
       };
     }
   }

@@ -1,4 +1,5 @@
 import { FailureType } from './qcTypes.js';
+import { appendFeedback, appendPromptGuidance } from '../feedback.js';
 
 export const ItemRetryStrategy = Object.freeze({
   RETRY_SAME: 'RETRY_SAME',
@@ -44,7 +45,11 @@ export class RetryAgent {
       switch (strategy) {
         case ItemRetryStrategy.REWRITE_PROMPT:
           overrides.promptOverrides = {
-            [item.itemId]: feedback || `Regenerate with improved prompt for ${item.itemId}`,
+            [item.itemId]: feedback
+              ? appendFeedback(lastAttempt?.prompt, feedback)
+              : appendPromptGuidance(lastAttempt?.prompt, {
+                suggestions: [`Regenerate with an improved prompt for ${item.itemId}`],
+              }),
           };
           overrides.seed = baseSeed + 1;
           break;

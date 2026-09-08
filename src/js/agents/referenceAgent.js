@@ -9,6 +9,7 @@ import { addAgentMessage } from '../ui/render.js';
 import { t } from '../i18n.js';
 import { reportPhase } from '../progressTracker.js';
 import { normalizeShotModeAssignments } from '../videoModePlanning.js';
+import { appendFeedback, appendPromptGuidance } from '../feedback.js';
 
 const MAX_ITEM_ATTEMPTS = 3;
 const MAX_STAGE_RETRIES = 1;
@@ -22,11 +23,12 @@ export const FrameRole = Object.freeze({
 });
 
 function applyVisualRetryFeedback(items, critique, userFeedback) {
-  const note = (critique.suggestions || []).join('; ');
-  const feedback = userFeedback ? `\nUser feedback: ${userFeedback}` : '';
   for (const item of items) {
     item.seed = (item.seed ?? 42) + 7;
-    if (note || feedback) item.prompt = `${item.prompt}${note}${feedback}`;
+    item.prompt = appendPromptGuidance(item.prompt, {
+      feedback: userFeedback,
+      suggestions: critique.suggestions || [],
+    });
   }
 }
 
@@ -102,6 +104,7 @@ export class ReferenceAgent extends BaseAgent {
         qualityScore: bestCrit?.score ?? 0,
         consistencyIssues: bestCrit?.consistency?.issues || [],
         verdict: bestCrit?.verdict ?? null,
+        feedbackSatisfied: bestCrit?.feedbackSatisfied ?? !ctx.feedback,
         comfyTextFallback,
       },
     };
@@ -193,7 +196,7 @@ export class ReferenceAgent extends BaseAgent {
     const matched = this.#matchEntities(pair, ctx);
     const refs = this.#collectRefs(matched);
     return {
-      prompt: this.#buildFramePrompt(pair, matched, { styleHint, refs, role }),
+      prompt: appendFeedback(this.#buildFramePrompt(pair, matched, { styleHint, refs, role }), ctx.feedback),
       refs,
       seed: 42,
     };
@@ -307,7 +310,7 @@ export class ReferenceAgent extends BaseAgent {
         for (const item of items) {
           lineage[item.id] = artifact.itemLineage[item.id];
         }
-        const plans = this.#retryAgent.planItemRetry(failedItems, lineage, {});
+        const plans = this.#retryAgent.planItemRetry(failedItems, lineage, { feedback: ctx.feedback });
 
         for (const plan of plans) {
           if (plan.strategy === ItemRetryStrategy.GIVE_UP) continue;

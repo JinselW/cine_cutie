@@ -243,13 +243,17 @@ class Orchestrator {
         const artifact = result.artifacts?.[0] ?? null;
         const data = artifact?.data ?? null;
         const metadata = result.metadata ?? {};
-        let gateResult = this.#postGate(step.id, data, metadata, artifact?.status);
+        let gateResult = this.#postGate(step.id, data, metadata, artifact?.status, {
+          feedbackRequired: Boolean(ctx.feedback?.trim?.()),
+        });
         const retryIp = gateResult.requiresRegeneration === true && ipAttempt < MAX_IP_REGENERATIONS;
 
         if (retryIp) {
           this.#commitResult(step, artifact, { gateResult, metadata, agentName, revision: true, ctx });
           addAgentMessage('🔄', t('pipeline.ipRegenerating', { current: ipAttempt + 1, max: MAX_IP_REGENERATIONS }));
-          ctx.feedback = gateResult.regenerationPrompt;
+          ctx.feedback = [ctx.feedback, gateResult.regenerationPrompt]
+            .filter(Boolean)
+            .join('\n\nADDITIONAL REQUIRED CORRECTION:\n');
           ctx.previousResult = data;
           continue;
         }
@@ -406,7 +410,7 @@ class Orchestrator {
     showPipelineFailure(error.issues);
   }
 
-  #postGate(stepId, data, metadata, artifactStatus) {
+  #postGate(stepId, data, metadata, artifactStatus, { feedbackRequired = false } = {}) {
     const validator = POST_VALIDATORS[stepId];
     if (validator && data != null) {
       const valid = validator(data);
@@ -418,6 +422,14 @@ class Orchestrator {
 
     if (data == null) {
       return { verdict: QCVerdict.FAIL, issues: [t('pipeline.noDataProduced')], severity: Severity.CRITICAL };
+    }
+
+    if (feedbackRequired && metadata.feedbackSatisfied !== true) {
+      return {
+        verdict: QCVerdict.FAIL,
+        issues: [t('pipeline.feedbackNotSatisfied')],
+        severity: Severity.HIGH,
+      };
     }
 
     if (metadata.verdict === QCVerdict.FAIL || artifactStatus === ArtifactStatus.FAILED) {

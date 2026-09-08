@@ -98,6 +98,7 @@ export class ScriptAgent extends BaseAgent {
     let currentResult = null;
     let bestResult = null;
     let bestScore = -1;
+    let bestCritique = null;
     let totalTokens = { prompt: 0, completion: 0 };
     let retries = 0;
     let fallbackUsed = false;
@@ -128,6 +129,7 @@ export class ScriptAgent extends BaseAgent {
       if (critique.score > bestScore) {
         bestScore = critique.score;
         bestResult = currentResult;
+        bestCritique = critique;
       }
 
       if (critique.score >= SCORE_THRESHOLD || attempt === MAX_RETRIES) break;
@@ -162,6 +164,9 @@ export class ScriptAgent extends BaseAgent {
         retries,
         qualityScore: bestScore >= 0 ? bestScore : null,
         fallbackUsed,
+        verdict: bestCritique?.verdict ?? null,
+        consistencyIssues: bestCritique?.issues || [],
+        feedbackSatisfied: bestCritique?.feedbackSatisfied ?? !ctx.feedback,
       },
     };
   }
@@ -181,7 +186,13 @@ export class ScriptAgent extends BaseAgent {
           data: result,
           status: ArtifactStatus.COMPLETE,
         })],
-        metadata: { fallbackUsed: true, tokens: { prompt: 0, completion: 0 }, retries: 0, qualityScore: null },
+        metadata: {
+          fallbackUsed: true,
+          tokens: { prompt: 0, completion: 0 },
+          retries: 0,
+          qualityScore: null,
+          feedbackSatisfied: !ctx.feedback,
+        },
       };
     }
     return { artifacts: [], metadata: { fallbackUsed: true, tokens: { prompt: 0, completion: 0 }, retries: 0, qualityScore: null } };
