@@ -13,6 +13,7 @@ import { showStepReadOnly } from './navigation.js';
 import { startPipeline, restoreSession, continuePipeline, clearSession, stopPipeline } from './engine.js';
 import { t, applyLang } from './i18n.js';
 import { initSettings } from './ui/settings.js';
+import { initComfyStatus } from './ui/comfyMonitor.js';
 import { initMascotInteraction } from './mascot-interact.js';
 import { rerenderCurrentView } from './ui/views.js';
 import { startProgressRun } from './progressTracker.js';
@@ -30,6 +31,7 @@ const savedLang = localStorage.getItem('cine-cutie-lang');
 if (savedLang) state.lang = savedLang;
 applyLang();
 initSettings();
+initComfyStatus();
 initHistory();
 
 $('#themeToggle').addEventListener('click', () => {

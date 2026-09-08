@@ -79,6 +79,10 @@ const en = {
   'progress.items': 'Completed {completed}/{total} · processing item {current}',
   'progress.attempt': 'Attempt {attempt}',
   'monitor.connected': 'Connected',
+  'monitor.statusTitle': 'ComfyUI status',
+  'monitor.notConfigured': 'SSH connection is not configured. Add it in Settings → API & Connections.',
+  'monitor.connecting': 'Connecting to ComfyUI…',
+  'monitor.offline': 'Connection unavailable',
   'monitor.gpu': 'GPU utilization',
   'monitor.vram': 'GPU memory',
   'monitor.memory': 'System memory',
@@ -210,6 +214,10 @@ const en = {
   'ui.unknown': 'Unknown',
 
   'settings.apiSettings': 'API Settings',
+  'settings.nav.api': 'API & Connections',
+  'settings.nav.models': 'Models & Generation',
+  'settings.nav.preferences': 'Preferences & Audio',
+  'settings.preferencesTitle': 'General Preferences',
   'settings.modelSelection': 'Model Selection',
   'settings.textModel': 'Text & Evaluation Model',
   'settings.textModelHint': '(for script, storyboard & media scoring — vision model recommended for images/video)',
@@ -338,6 +346,7 @@ const en = {
 
   'settings.comfyUIOption': 'ComfyUI (DGX Spark / H3)',
   'settings.useComfyVideo': 'Use ComfyUI to generate video',
+  'settings.useComfyVideoHint': 'Configure all three video models with ComfyUI in one click',
 
   'llm.notConfiguredFallback': 'LLM not configured, using templates...',
   'llm.fellBack': 'LLM unavailable ({reason}), using templates instead — process continues normally',
@@ -470,6 +479,10 @@ const zh = {
   'progress.items': '已完成 {completed}/{total} · 正在处理第 {current} 项',
   'progress.attempt': '第 {attempt} 次尝试',
   'monitor.connected': '已连接',
+  'monitor.statusTitle': 'ComfyUI 运行状态',
+  'monitor.notConfigured': '尚未配置 SSH 连接，请前往“设置 → API 与连接”填写。',
+  'monitor.connecting': '正在连接 ComfyUI…',
+  'monitor.offline': '连接不可用',
   'monitor.gpu': 'GPU 利用率',
   'monitor.vram': '显存',
   'monitor.memory': '系统内存',
@@ -601,6 +614,10 @@ const zh = {
   'ui.unknown': '未知',
 
   'settings.apiSettings': 'API 设置',
+  'settings.nav.api': 'API 与连接',
+  'settings.nav.models': '模型与生成',
+  'settings.nav.preferences': '偏好与音频',
+  'settings.preferencesTitle': '通用偏好',
   'settings.modelSelection': '模型选择',
   'settings.textModel': '文本及评估模型',
   'settings.textModelHint': '（用于剧本、分镜与图片/视频评分；图片/视频建议选视觉模型，如 qwen-vl-max / gpt-4o）',
@@ -729,6 +746,7 @@ const zh = {
 
   'settings.comfyUIOption': 'ComfyUI (DGX Spark / H3)',
   'settings.useComfyVideo': '是否使用 ComfyUI 生成视频',
+  'settings.useComfyVideoHint': '一键将下方三个视频模型统一配置为 ComfyUI',
 
   'llm.notConfiguredFallback': 'LLM 未配置，使用模板...',
   'llm.fellBack': 'LLM 不可用（{reason}），改用模板继续生成',

@@ -3,7 +3,6 @@ import { t } from '../i18n.js';
 import { saveConfig, getConfig, isConfigured, testConnection, inferProvider, MODEL_PRESETS, IMAGE_PRESETS, IMG2IMG_PRESETS, VIDEO_MODES, videoModeById, PROVIDER_DEFAULTS } from '../providers/llm.js';
 import { saveConfig as saveDashScopeConfig } from '../providers/image.js';
 import { setActiveProvider } from '../providers/registry.js';
-import { startComfyMonitor, stopComfyMonitor } from './comfyMonitor.js';
 
 const PROVIDER_LIST = ['openai', 'deepseek', 'dashscope', 'ark', 'kling', 'gemini'];
 const CUSTOM_VALUE = '__custom__';
@@ -140,9 +139,6 @@ function applyComfyUiState(on) {
     }
   }
 
-  const ssh = loadComfySshConfig();
-  if (on && ssh.host) startComfyMonitor('comfyMonitorSettings', { force: true });
-  else stopComfyMonitor('comfyMonitorSettings');
 }
 
 function openModal() {
@@ -242,13 +238,29 @@ function openModal() {
   applyComfyUiState(comfyActive);
 
   clearStatus();
+  activateSettingsTab('api');
   modal.classList.remove('hidden');
+}
+
+function activateSettingsTab(tabId) {
+  const modal = $('#settingsModal');
+  if (!modal) return;
+  modal.querySelectorAll('[data-settings-tab]').forEach((button) => {
+    const active = button.dataset.settingsTab === tabId;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-selected', String(active));
+  });
+  modal.querySelectorAll('[data-settings-panel]').forEach((panel) => {
+    const active = panel.dataset.settingsPanel === tabId;
+    panel.hidden = !active;
+    panel.classList.toggle('active', active);
+    if (active) panel.scrollTop = 0;
+  });
 }
 
 function closeModal() {
   const modal = $('#settingsModal');
   if (modal) modal.classList.add('hidden');
-  stopComfyMonitor('comfyMonitorSettings');
 }
 
 function handleSave() {
@@ -350,9 +362,6 @@ function handleSave() {
   if (useComfy) saveComfySshConfig();
 
   setActiveProvider('video', useComfy ? 'video-comfy' : 'video');
-  if (useComfy) startComfyMonitor('comfyMonitorSettings', { force: true });
-  else stopComfyMonitor('comfyMonitorSettings');
-
   updateIndicator();
   showStatus(t('settings.saved'), true);
   setTimeout(closeModal, 1200);
@@ -421,7 +430,6 @@ async function handleTest() {
         if (data.comfyui?.online) {
           const gpuInfo = data.comfyui.gpu?.map(g => `${g.name} (${g.vram_free}/${g.vram_total}MB)`).join(', ') || 'OK';
           comfyLine = { ok: true, msg: t('settings.comfyConnected', { gpu: gpuInfo }) };
-          startComfyMonitor('comfyMonitorSettings', { force: true });
         } else {
           comfyLine = { ok: false, msg: t('settings.comfyOffline', { reason: data.comfyui?.error || t('ui.na') }) };
         }
@@ -489,6 +497,10 @@ export function initSettings() {
       if (e.target === modal) closeModal();
     });
   }
+
+  modal?.querySelectorAll('[data-settings-tab]').forEach((button) => {
+    button.addEventListener('click', () => activateSettingsTab(button.dataset.settingsTab));
+  });
 
   modal?.addEventListener('click', (e) => {
     const btn = e.target.closest('.toggle-vis-btn');

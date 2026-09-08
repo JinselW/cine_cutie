@@ -5,6 +5,19 @@ const monitors = new Map();
 let latestTask = null;
 let latestMetrics = null;
 
+function setHeaderState(state, message = '') {
+  const dot = $('#comfyStatusDot');
+  const button = $('#comfyStatusBtn');
+  if (dot) dot.className = `comfy-status-dot ${state}`;
+  if (button) button.title = message || t('monitor.statusTitle');
+}
+
+function renderUnavailable(target, state, message) {
+  target.classList.remove('hidden');
+  target.innerHTML = `<div class="comfy-monitor-unavailable"><strong>ComfyUI</strong><br>${escapeHtml(message)}</div>`;
+  setHeaderState(state, message);
+}
+
 function getSshConfig() {
   try { return JSON.parse(localStorage.getItem('cine-cutie-comfy-ssh') || 'null'); } catch { return null; }
 }
@@ -55,6 +68,7 @@ function render(target, data, showTaskProgress) {
   const phaseKey = `monitor.phase.${task?.phase || 'waiting'}`;
 
   target.classList.remove('hidden');
+  if (target.id === 'comfyMonitorHeader') setHeaderState('online', t('monitor.connected'));
   target.innerHTML = `
     <div class="comfy-monitor-head">
       <div><span class="comfy-live-dot"></span><strong>DGX Spark</strong> · ${escapeHtml(gpu?.name || t('monitor.connected'))}</div>
@@ -82,10 +96,16 @@ function render(target, data, showTaskProgress) {
 async function refresh(targetId, showTaskProgress, force) {
   const target = $(`#${targetId}`);
   const cfg = getSshConfig();
-  if (!target || (!force && !isComfySelected()) || !cfg?.host) {
+  if (!target || (!force && !isComfySelected())) {
     target?.classList.add('hidden');
     return;
   }
+  if (!cfg?.host) {
+    if (targetId === 'comfyMonitorHeader') renderUnavailable(target, 'idle', t('monitor.notConfigured'));
+    else target.classList.add('hidden');
+    return;
+  }
+  if (targetId === 'comfyMonitorHeader') setHeaderState('connecting', t('monitor.connecting'));
   try {
     const ctrl = new AbortController();
     const timeout = setTimeout(() => ctrl.abort(), 12000);
@@ -103,9 +123,28 @@ async function refresh(targetId, showTaskProgress, force) {
     if (!data.comfyui?.online) throw new Error(data.comfyui?.error || 'ComfyUI offline');
     latestMetrics = data;
     render(target, data, showTaskProgress);
-  } catch {
-    target.classList.add('hidden');
+  } catch (error) {
+    if (targetId === 'comfyMonitorHeader') renderUnavailable(target, 'offline', `${t('monitor.offline')}: ${error.message || ''}`);
+    else target.classList.add('hidden');
   }
+}
+
+export function initComfyStatus() {
+  const button = $('#comfyStatusBtn');
+  const popover = $('#comfyStatusPopover');
+  if (!button || !popover) return;
+  button.addEventListener('click', (event) => {
+    event.stopPropagation();
+    const opening = popover.classList.contains('hidden');
+    popover.classList.toggle('hidden', !opening);
+    button.setAttribute('aria-expanded', String(opening));
+  });
+  popover.addEventListener('click', event => event.stopPropagation());
+  document.addEventListener('click', () => {
+    popover.classList.add('hidden');
+    button.setAttribute('aria-expanded', 'false');
+  });
+  startComfyMonitor('comfyMonitorHeader', { showTaskProgress: true, force: true });
 }
 
 export function startComfyMonitor(targetId, { showTaskProgress = false, force = false } = {}) {

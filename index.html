@@ -15,6 +15,14 @@
   <!-- Header -->
   <header class="header">
     <div class="header-controls">
+      <div class="comfy-status-wrap">
+        <button id="comfyStatusBtn" class="icon-btn comfy-status-btn" type="button" title="ComfyUI Status" aria-expanded="false" aria-controls="comfyStatusPopover">
+          <span class="comfy-status-mark">C</span><span id="comfyStatusDot" class="comfy-status-dot idle"></span>
+        </button>
+        <div id="comfyStatusPopover" class="comfy-status-popover hidden">
+          <div id="comfyMonitorHeader" class="comfy-monitor comfy-monitor-header" aria-live="polite"></div>
+        </div>
+      </div>
       <button id="settingsBtn" class="icon-btn" title="AI Settings">⚙️<span class="llm-dot" id="llmDot"></span></button>
       <button id="themeToggle" class="icon-btn" title="Toggle theme">🌙</button>
       <button id="langToggle" class="icon-btn" title="Switch language">中</button>
@@ -143,12 +151,30 @@
 
   <!-- Settings Modal -->
   <div id="settingsModal" class="modal-overlay hidden">
-    <div class="modal-card modal-card-wide">
+    <div class="modal-card modal-card-wide settings-dialog">
       <div class="modal-header">
         <h2 id="settingsTitle">AI Model Settings</h2>
         <button id="settingsClose" class="modal-close">&times;</button>
       </div>
 
+      <div class="settings-layout">
+        <nav class="settings-nav" aria-label="Settings sections">
+          <button class="settings-nav-item active" type="button" data-settings-tab="api" aria-selected="true">
+            <span class="settings-nav-icon">⌁</span>
+            <span data-i18n="settings.nav.api">API &amp; Connections</span>
+          </button>
+          <button class="settings-nav-item" type="button" data-settings-tab="models" aria-selected="false">
+            <span class="settings-nav-icon">✦</span>
+            <span data-i18n="settings.nav.models">Models &amp; Generation</span>
+          </button>
+          <button class="settings-nav-item" type="button" data-settings-tab="preferences" aria-selected="false">
+            <span class="settings-nav-icon">♫</span>
+            <span data-i18n="settings.nav.preferences">Preferences &amp; Audio</span>
+          </button>
+        </nav>
+
+        <div class="settings-panels">
+      <section class="settings-panel active" data-settings-panel="api">
       <!-- Module 1: API Settings -->
       <div class="modal-section-title" id="apiSettingsTitle">API Settings</div>
 
@@ -206,50 +232,9 @@
         </div>
       </div>
 
-      <div class="modal-field modal-field-row">
-        <label id="lblUseComfyVideo" data-i18n="settings.useComfyVideo">Use ComfyUI to generate video</label>
-        <label class="toggle-switch">
-          <input type="checkbox" id="cfgUseComfyVideo">
-          <span class="toggle-slider"></span>
-        </label>
-      </div>
+      </section>
 
-      <div id="comfySettingsBlock" class="hidden">
-      <div class="modal-divider"></div>
-
-      <!-- Module: ComfyUI SSH Connection -->
-      <div class="modal-section-title">ComfyUI (DGX Spark)</div>
-
-      <div class="comfy-ssh-grid">
-        <div class="modal-field">
-          <label data-i18n="settings.comfySshHost">SSH Host</label>
-          <input type="text" id="comfySshHost" placeholder="106.13.186.155">
-        </div>
-        <div class="modal-field">
-          <label data-i18n="settings.comfySshPort">SSH Port</label>
-          <input type="number" id="comfySshPort" placeholder="6078">
-        </div>
-        <div class="modal-field">
-          <label data-i18n="settings.comfySshUser">Username</label>
-          <input type="text" id="comfySshUser" placeholder="Developer">
-        </div>
-        <div class="modal-field">
-          <label data-i18n="settings.comfyPort">ComfyUI Port</label>
-          <input type="number" id="comfySshComfyPort" placeholder="8188">
-        </div>
-      </div>
-      <div class="modal-field modal-field-row">
-        <label data-i18n="settings.comfyLightning">Enable Lightning LoRA (faster, fewer steps)</label>
-        <label class="toggle-switch">
-          <input type="checkbox" id="comfyEnableLightning">
-          <span class="toggle-slider"></span>
-        </label>
-      </div>
-      <div id="comfyMonitorSettings" class="comfy-monitor hidden" aria-live="polite"></div>
-      </div>
-
-      <div class="modal-divider"></div>
-
+      <section class="settings-panel" data-settings-panel="models" hidden>
       <!-- Module 2: Model Selection -->
       <div class="modal-section-title" id="modelSelectionTitle">Model Selection</div>
 
@@ -274,6 +259,46 @@
         <select id="cfgImg2ImgModel" class="model-select"></select>
         <div class="model-custom-wrap hidden" id="img2imgModelCustomWrap">
           <input type="text" id="cfgImg2ImgModelCustom" class="model-custom-input" placeholder="Model name...">
+        </div>
+      </div>
+
+      <div class="comfy-model-toggle">
+        <div>
+          <strong id="lblUseComfyVideo" data-i18n="settings.useComfyVideo">Use ComfyUI to generate video</strong>
+          <small data-i18n="settings.useComfyVideoHint">Configure all three video models with ComfyUI in one click</small>
+        </div>
+        <label class="toggle-switch">
+          <input type="checkbox" id="cfgUseComfyVideo">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+
+      <div id="comfySettingsBlock" class="comfy-inline-settings hidden">
+        <div class="modal-section-title">ComfyUI (DGX Spark)</div>
+        <div class="comfy-ssh-grid">
+          <div class="modal-field">
+            <label data-i18n="settings.comfySshHost">SSH Host</label>
+            <input type="text" id="comfySshHost" placeholder="106.13.186.155">
+          </div>
+          <div class="modal-field">
+            <label data-i18n="settings.comfySshPort">SSH Port</label>
+            <input type="number" id="comfySshPort" placeholder="6078">
+          </div>
+          <div class="modal-field">
+            <label data-i18n="settings.comfySshUser">Username</label>
+            <input type="text" id="comfySshUser" placeholder="Developer">
+          </div>
+          <div class="modal-field">
+            <label data-i18n="settings.comfyPort">ComfyUI Port</label>
+            <input type="number" id="comfySshComfyPort" placeholder="8188">
+          </div>
+        </div>
+        <div class="modal-field modal-field-row">
+          <label data-i18n="settings.comfyLightning">Enable Lightning LoRA (faster, fewer steps)</label>
+          <label class="toggle-switch">
+            <input type="checkbox" id="comfyEnableLightning">
+            <span class="toggle-slider"></span>
+          </label>
         </div>
       </div>
 
@@ -305,9 +330,10 @@
           </div>
         </div>
       </div>
+      </section>
 
-      <div class="modal-divider"></div>
-
+      <section class="settings-panel" data-settings-panel="preferences" hidden>
+      <div class="modal-section-title" data-i18n="settings.preferencesTitle">General Preferences</div>
       <div class="modal-field modal-field-row">
         <label id="lblJsonMode">JSON Mode</label>
         <label class="toggle-switch">
@@ -351,16 +377,21 @@
       </div>
 
       <p class="settings-hint" id="bgmHint" data-i18n="settings.bgm.hint">Ducks the BGM automatically when the original audio track is loud.</p>
-
-      <div class="modal-actions">
-        <button id="testConnBtn" class="action-btn" type="button">
-          <span id="testConnText">Test Connection</span>
-        </button>
-        <button id="saveSettingsBtn" class="action-btn primary" type="button">
-          <span id="saveSettingsText">Save</span>
-        </button>
+      </section>
+        </div>
       </div>
-      <div id="settingsStatus" class="settings-status"></div>
+
+      <div class="settings-footer">
+        <div id="settingsStatus" class="settings-status"></div>
+        <div class="modal-actions">
+          <button id="testConnBtn" class="action-btn" type="button">
+            <span id="testConnText">Test Connection</span>
+          </button>
+          <button id="saveSettingsBtn" class="action-btn primary" type="button">
+            <span id="saveSettingsText">Save</span>
+          </button>
+        </div>
+      </div>
     </div>
   </div>
 </div>

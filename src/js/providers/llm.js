@@ -4,6 +4,7 @@ import { t } from '../i18n.js';
 import { addAgentMessage } from '../ui/render.js';
 
 const SETTINGS_KEY = 'cine-cutie-settings';
+const SETTINGS_VERSION = 3;
 const OLD_LLM_KEY = 'cine-cutie-llm';
 const OLD_DS_KEY = 'cine-cutie-dashscope';
 
@@ -28,7 +29,7 @@ const IMAGE_PRESETS = ['wanx2.1-t2i-turbo', 'wanx2.1-t2i-plus'];
 const IMG2IMG_PRESETS = ['wan2.6-image'];
 
 const VIDEO_MODES = [
-  { id: 'firstFrame', presets: ['wanx2.1-i2v-plus', 'wan2.7-i2v', 'wan2.5-i2v-preview'], defaultModel: 'wanx2.1-i2v-plus', configKey: 'video' },
+  { id: 'firstFrame', presets: ['wan2.7-i2v', 'wanx2.1-i2v-plus', 'wan2.5-i2v-preview'], defaultModel: 'wan2.7-i2v', configKey: 'video' },
   { id: 'firstLastFrame', presets: ['wan2.7-i2v', 'wanx2.1-i2v-plus'], defaultModel: 'wan2.7-i2v', configKey: 'video' },
   { id: 'referenceImage', presets: ['wan2.7-r2v'], defaultModel: 'wan2.7-r2v', configKey: 'refVideo' },
   { id: 'auto', presets: [], defaultModel: '', configKey: null },
@@ -55,12 +56,13 @@ function inferVideoMode(models) {
 }
 
 let config = {
+  settingsVersion: SETTINGS_VERSION,
   apiProviders: structuredClone(PROVIDER_DEFAULTS),
   models: {
     text: { provider: 'dashscope', name: 'qwen-plus' },
     image: { name: 'wanx2.1-t2i-turbo' },
     img2img: { name: 'wan2.6-image' },
-    video: { name: 'wanx2.1-i2v-plus' },
+    video: { name: 'wan2.7-i2v' },
     lastFrameVideo: { name: 'wan2.7-i2v' },
     refVideo: { name: 'wan2.7-r2v' },
   },
@@ -86,12 +88,13 @@ function migrateOldConfig() {
   if (!oldLlm && !oldDs) return null;
 
   const newCfg = {
+    settingsVersion: SETTINGS_VERSION,
     apiProviders: structuredClone(PROVIDER_DEFAULTS),
     models: {
       text: { provider: 'dashscope', name: '' },
       image: { name: 'wanx2.1-t2i-turbo' },
       img2img: { name: 'wan2.6-image' },
-      video: { name: 'wanx2.1-i2v-plus' },
+      video: { name: 'wan2.7-i2v' },
       lastFrameVideo: { name: 'wan2.7-i2v' },
       refVideo: { name: 'wan2.7-r2v' },
     },
@@ -129,14 +132,23 @@ function loadConfig() {
     const saved = localStorage.getItem(SETTINGS_KEY);
     if (saved) {
       const parsed = JSON.parse(saved);
+      const savedVersion = Number(parsed.settingsVersion || 0);
+      const upgradeFirstFrameDefault = savedVersion < 2
+        && ['wan2.5-i2v-preview', 'wanx2.1-i2v-plus'].includes(parsed.models?.video?.name?.trim());
+      const savedLastFrameName = parsed.models?.lastFrameVideo?.name?.trim();
+      const upgradeFirstLastFrameDefault = savedVersion < 3
+        && ['wan2.5-i2v-preview', 'wanx2.1-i2v-plus'].includes(savedLastFrameName);
       config = {
+        settingsVersion: SETTINGS_VERSION,
         apiProviders: { ...structuredClone(PROVIDER_DEFAULTS), ...parsed.apiProviders },
         models: {
           text: parsed.models?.text || { provider: 'dashscope', name: '' },
           image: parsed.models?.image || { name: 'wanx2.1-t2i-turbo' },
           img2img: parsed.models?.img2img || { name: 'wan2.6-image' },
-          video: parsed.models?.video || { name: 'wanx2.1-i2v-plus' },
-          lastFrameVideo: { name: parsed.models?.lastFrameVideo?.name || parsed.models?.video?.name || 'wan2.7-i2v' },
+          video: upgradeFirstFrameDefault ? { name: 'wan2.7-i2v' } : (parsed.models?.video || { name: 'wan2.7-i2v' }),
+          lastFrameVideo: upgradeFirstLastFrameDefault
+            ? { name: 'wan2.7-i2v' }
+            : { name: savedLastFrameName || parsed.models?.video?.name || 'wan2.7-i2v' },
           refVideo: parsed.models?.refVideo || { name: 'wan2.7-r2v' },
         },
         videoMode: parsed.videoMode || inferVideoMode(parsed.models),
@@ -147,6 +159,7 @@ function loadConfig() {
       for (const key of Object.keys(PROVIDER_DEFAULTS)) {
         config.apiProviders[key] = { ...PROVIDER_DEFAULTS[key], ...(parsed.apiProviders?.[key] || {}) };
       }
+      if (upgradeFirstFrameDefault || upgradeFirstLastFrameDefault || savedVersion < SETTINGS_VERSION) saveConfig(config);
     } else {
       const migrated = migrateOldConfig();
       if (migrated) {
@@ -177,6 +190,7 @@ function saveConfig(cfg) {
 
   try {
     localStorage.setItem(SETTINGS_KEY, JSON.stringify({
+      settingsVersion: SETTINGS_VERSION,
       apiProviders: config.apiProviders,
       models: config.models,
       videoMode: config.videoMode,
