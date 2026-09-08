@@ -86,7 +86,12 @@ const renderProvider = {
 
         if (taskData.status === 'completed') {
           const finalPath = taskData.result?.path || '';
-          return { finalVideo: finalPath, status: finalPath ? 'complete' : 'failed', error: finalPath ? null : 'No output' };
+          return {
+            finalVideo: finalPath,
+            status: finalPath ? 'complete' : 'failed',
+            error: finalPath ? null : 'No output',
+            qcBaseline: taskData.result?.qcBaseline || null,
+          };
         }
         if (taskData.status === 'failed' || taskData.status === 'cancelled') {
           return { finalVideo: '', status: 'failed', error: taskData.status === 'cancelled' ? 'Cancelled' : (taskData.error || 'Render failed') };

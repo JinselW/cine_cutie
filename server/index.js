@@ -6,7 +6,7 @@ import { createMemoryRouter } from './memory.js';
 import { LRUCache } from './cache.js';
 import { submitImageTask, submitImageEditTask, parseImageResultUrl, submitVideoTask, submitVideoTaskV2, pollTask, downloadFile, detectVideoMode, hasVideoUploads, fileToDataUri } from './dashscope.js';
 import { createTask, getTask, updateTask, cancelTask, isTaskCancelled, cleanupTasks } from './tasks.js';
-import { concatVideos, checkFfmpeg, renderWithTransitions, probeStreams, applyBgm, sanitizeVolume } from './render.js';
+import { concatVideos, checkFfmpeg, renderWithTransitions, probeStreams, probeAudioQuality, applyBgm, sanitizeVolume } from './render.js';
 import { submitWorkflow, pollUntilDone, downloadOutput, uploadImageToComfy, checkComfyUIStatus, getComfyMonitorStatus, selectWorkflowMode, cancelPrompt, MAX_COMFY_REFERENCE_IMAGES } from './comfyui.js';
 import { ensureTunnel, closeTunnel, getTunnelStatus, deleteComfyInputFiles, getDgxMetrics } from './ssh-tunnel.js';
 import path from 'path';
@@ -734,10 +734,30 @@ app.post('/api/render/final', async (req, res) => {
 
       const cancelled = isTaskCancelled(task.id);
       const finalStatus = cancelled ? 'cancelled' : 'completed';
+      const finalOutput = adopted ? bgmOutput : outputPath;
+      const media = await probeStreams(finalOutput);
+      const audioQuality = media.hasAudio ? await probeAudioQuality(finalOutput) : { integratedLufs: null, truePeakDbfs: null };
       updateTask(task.id, {
         status: finalStatus,
         progress: finalStatus === 'completed' ? 100 : (cancelled ? 90 : 0),
-        result: { path: `/api/media/${adopted ? path.basename(bgmOutput) : outputFilename}`, filename: adopted ? path.basename(bgmOutput) : outputFilename }
+        result: {
+          path: `/api/media/${path.basename(finalOutput)}`,
+          filename: path.basename(finalOutput),
+          qcBaseline: {
+            durationSeconds: media.duration,
+            hasAudio: media.hasAudio,
+            integratedLufs: audioQuality.integratedLufs,
+            truePeakDbfs: audioQuality.truePeakDbfs,
+            width: media.width,
+            height: media.height,
+            fps: media.fps,
+            clipCount: localPaths.length,
+            transitionCount: useFx && Array.isArray(transitions)
+              ? transitions.filter(t => t?.type === 'crossfade').length : 0,
+            bgmApplied: adopted,
+            renderMode: useFx ? 'transitions' : 'concat',
+          },
+        }
       });
     } catch (err) {
       const cancelled = isTaskCancelled(task.id);

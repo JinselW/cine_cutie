@@ -65,6 +65,13 @@ export class EditorAgent extends BaseAgent {
         renderStatus: finalData.status || 'failed',
         qualityScore: crit.score,
         consistencyIssues: crit.consistency?.issues || [],
+        qcBaseline: {
+          ...(finalData.qcBaseline || {}),
+          overallQuality: crit.score,
+          narrativeFaithfulness: crit.llm?.scores?.criterion2 ?? null,
+          visualConsistency: crit.llm?.scores?.criterion3 ?? null,
+          failureReasons: [...(crit.consistency?.issues || []), ...(crit.llm?.issues || [])],
+        },
         verdict: crit.verdict ?? (hasFinal ? null : QCVerdict.FAIL),
       },
     };
@@ -105,6 +112,7 @@ export class EditorAgent extends BaseAgent {
         finalVideo: result.finalVideo,
         status: result.status,
         bgm: bgm?.enabled ? { enabled: true, path: bgm.path || '', volume: bgm.volume ?? 0.6 } : null,
+        qcBaseline: result.qcBaseline || null,
       };
     } catch {
       return null;

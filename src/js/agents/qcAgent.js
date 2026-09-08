@@ -266,6 +266,7 @@ export class QCAgent {
 
     return {
       score: Math.round(parsed.overallScore * 10) / 10,
+      scores: parsed.scores && typeof parsed.scores === 'object' ? parsed.scores : {},
       issues: Array.isArray(parsed.issues) ? parsed.issues : [],
       suggestions: Array.isArray(parsed.suggestions) ? parsed.suggestions : [],
     };

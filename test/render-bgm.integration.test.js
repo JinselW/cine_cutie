@@ -5,7 +5,7 @@ import os from 'os';
 import path from 'path';
 import fs from 'fs';
 import { createRequire } from 'module';
-import { applyBgm, probeStreams } from '../server/render.js';
+import { applyBgm, probeStreams, probeAudioQuality } from '../server/render.js';
 import { createTask, cancelTask } from '../server/tasks.js';
 
 const FF = createRequire(import.meta.url)('ffmpeg-static');
@@ -43,6 +43,9 @@ test('mixes BGM under dialogue and preserves the video stream', async () => {
   assert.ok(info.hasVideo);
   assert.ok(info.hasAudio);
   assert.ok(Math.abs(info.duration - 3.0) < 0.2, `duration ${info.duration} ~ 3.0`);
+  const quality = await probeAudioQuality(out);
+  assert.ok(Number.isFinite(quality.integratedLufs));
+  assert.ok(Number.isFinite(quality.truePeakDbfs));
 });
 
 test('trims an over-long BGM to the video duration', async () => {

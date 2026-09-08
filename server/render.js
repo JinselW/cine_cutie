@@ -124,6 +124,18 @@ export function probeStreams(inputPath) {
   });
 }
 
+export function probeAudioQuality(inputPath) {
+  return new Promise(resolve => {
+    execFile(ffmpegPath, ['-hide_banner', '-i', inputPath, '-filter_complex', 'ebur128=peak=true', '-f', 'null', '-'], (_err, _stdout, stderr) => {
+      const text = String(stderr || '');
+      const summary = text.slice(text.lastIndexOf('Summary:'));
+      const integrated = summary.match(/I:\s*(-?\d+(?:\.\d+)?)\s*LUFS/);
+      const peak = summary.match(/Peak:\s*(-?\d+(?:\.\d+)?)\s*dBFS/);
+      resolve({ integratedLufs: integrated ? Number(integrated[1]) : null, truePeakDbfs: peak ? Number(peak[1]) : null });
+    });
+  });
+}
+
 function pickTarget(streams) {
   const first = streams[0] || {};
   const width = first.width || 1280;
