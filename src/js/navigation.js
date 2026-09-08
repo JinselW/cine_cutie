@@ -23,7 +23,13 @@ export function onNodeClick(index) {
 
   cancelAutoAdvance();
 
-  if (isCurrentReturn || isViewingToggle) {
+  // When the pipeline is finished, the completion screen is the "current view"
+  // and holds all follow-up actions. Clicking the last step should land there
+  // directly instead of showing the read-only post-production view (download
+  // only) first and requiring a second click.
+  const isLastStepWhenComplete = isPipelineComplete() && index === STEPS.length - 1;
+
+  if (isCurrentReturn || isViewingToggle || isLastStepWhenComplete) {
     state.viewingStep = null;
     restoreCurrentView();
     updatePipelineClickable();
