@@ -5,6 +5,9 @@ import { setMascot } from './render.js';
 import { t } from '../i18n.js';
 import { getExecutionLog, getTotalTokens, getAverageQuality } from '../observability.js';
 import { getConfig as getDashScopeConfig } from '../providers/image.js';
+import { bindImageLightbox } from './lightbox.js';
+
+bindImageLightbox();
 
 let currentViewRerender = null;
 
@@ -166,7 +169,7 @@ export function renderCharacterDesign(data, onAdvance, readOnly = false) {
     <div class="char-card">
       <div class="char-name">${escapeHtml(c.name)}</div>
       ${sheet
-        ? `<img src="${mediaUrl(sheet)}" alt="${escapeHtml(c.name)}" style="width:100%;aspect-ratio:16/9;object-fit:contain;background:var(--bg2);border-radius:var(--radius-xs);margin:8px 0">`
+        ? `<img src="${mediaUrl(sheet)}" alt="${escapeHtml(c.name)}" class="media-thumb" data-src="${mediaUrl(sheet)}" style="width:100%;aspect-ratio:16/9;object-fit:contain;background:var(--bg2);border-radius:var(--radius-xs);margin:8px 0">`
         : `<div style="width:100%;aspect-ratio:16/9;background:var(--bg3);border-radius:var(--radius-xs);display:flex;align-items:center;justify-content:center;margin:8px 0;color:var(--cream3);font-size:0.75rem">${t('ui.charDesignNoImage')}</div>`}
       ${caption ? `<div style="font-size:0.7rem;color:var(--gold);margin-bottom:8px">${caption}</div>` : ''}
       <div class="char-desc" style="max-height:6em;overflow:auto">${escapeHtml(c.design || c.desc)}</div>
@@ -177,7 +180,7 @@ export function renderCharacterDesign(data, onAdvance, readOnly = false) {
   const settingCards = (data.settings || []).map(s => `
     <div style="text-align:center">
       ${s.imagePath
-        ? `<img src="${mediaUrl(s.imagePath)}" alt="${escapeHtml(s.name)}" style="width:100%;aspect-ratio:16/9;object-fit:cover;border-radius:var(--radius-xs);margin-bottom:8px">`
+        ? `<img src="${mediaUrl(s.imagePath)}" alt="${escapeHtml(s.name)}" class="media-thumb" data-src="${mediaUrl(s.imagePath)}" style="width:100%;aspect-ratio:16/9;object-fit:cover;border-radius:var(--radius-xs);margin-bottom:8px">`
         : `<div style="width:100%;aspect-ratio:16/9;background:var(--bg3);border-radius:var(--radius-xs);display:flex;align-items:center;justify-content:center;color:var(--cream3);font-size:0.75rem">${t('ui.charDesignNoImage')}</div>`}
       <div style="font-size:0.85rem;color:var(--cream);font-weight:600">${escapeHtml(s.name)}</div>
       <div class="char-desc" style="max-height:6em;overflow:auto;text-align:left">${escapeHtml(s.design || s.desc)}</div>
@@ -266,7 +269,7 @@ export function renderReferenceImages(data, onAdvance, readOnly = false) {
   const isChained = data?.mode === 'firstLastFrame' || data?.mode === 'auto';
 
   const frameThumb = (imagePath, alt, status) => (imagePath
-    ? `<img src="${mediaUrl(imagePath)}" alt="${escapeHtml(alt)}" style="width:100%;aspect-ratio:16/9;object-fit:cover;border-radius:var(--radius-xs);margin-bottom:4px">`
+    ? `<img src="${mediaUrl(imagePath)}" alt="${escapeHtml(alt)}" class="media-thumb" data-src="${mediaUrl(imagePath)}" style="width:100%;aspect-ratio:16/9;object-fit:cover;border-radius:var(--radius-xs);margin-bottom:4px">`
     : `<div style="width:100%;aspect-ratio:16/9;background:var(--bg3);border-radius:var(--radius-xs);display:flex;align-items:center;justify-content:center;color:var(--cream3);font-size:0.7rem;margin-bottom:4px">${status === 'pending' ? t('ui.refImagesPending') : '—'}</div>`);
 
   const shots = (data.shots || []).map(sh => `

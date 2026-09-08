@@ -441,6 +441,13 @@
 }
 .modal-close:hover{background:var(--glass2);border-color:var(--rose);color:var(--rose)}
 
+.lightbox-card{padding:12px;max-width:min(1200px,94vw);width:auto;display:block;position:relative;text-align:center;background:var(--bg);border-radius:var(--radius-sm)}
+.lightbox-close{position:absolute;top:10px;right:10px;z-index:2}
+.lightbox-card img{max-width:calc(min(1200px,94vw) - 24px);max-height:86vh;border-radius:var(--radius-xs);display:block;margin:0 auto}
+
+.media-thumb{cursor:pointer;transition:transform 0.15s ease,filter 0.15s ease}
+.media-thumb:hover{transform:scale(1.015);filter:brightness(1.06)}
+
 .modal-field{margin-bottom:16px}
 .modal-field label{
   display:block;font-size:0.82rem;font-weight:600;color:var(--cream2);margin-bottom:6px;
