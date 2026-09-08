@@ -10,6 +10,7 @@ import { t } from '../i18n.js';
 import { reportPhase } from '../progressTracker.js';
 import { buildVideoModeCandidates, isVideoModelUnavailableError } from '../videoModePlanning.js';
 import { escapeHtml } from '../utils.js';
+import { appendFeedback, appendPromptGuidance } from '../feedback.js';
 
 const MAX_ITEM_ATTEMPTS = 3;
 const MAX_STAGE_RETRIES = 1;
@@ -19,11 +20,12 @@ const MAX_REFERENCE_IMAGES = 5;
 const DEFAULT_CLIP_DURATION = 5;
 
 function applyVisualRetryFeedback(items, critique, userFeedback) {
-  const note = (critique.suggestions || []).join('; ');
-  const feedback = userFeedback ? `\nUser feedback: ${userFeedback}` : '';
   for (const item of items) {
     item.seed = (item.seed ?? 42) + 13;
-    if (note || feedback) item.prompt = `${item.prompt}${note}${feedback}`;
+    item.prompt = appendPromptGuidance(item.prompt, {
+      feedback: userFeedback,
+      suggestions: critique.suggestions || [],
+    });
   }
 }
 
@@ -119,6 +121,7 @@ export class VideoAgent extends BaseAgent {
         qualityScore: bestCrit?.score ?? 0,
         consistencyIssues: bestCrit?.consistency?.issues || [],
         verdict: bestCrit?.verdict ?? null,
+        feedbackSatisfied: bestCrit?.feedbackSatisfied ?? !ctx.feedback,
       },
     };
   }
@@ -138,7 +141,7 @@ export class VideoAgent extends BaseAgent {
       const audio = sbShot?.audio_description || '';
       const parts = [prompt, motion];
       if (audio) parts.push(audio);
-      const videoPrompt = parts.join(', ');
+      const videoPrompt = appendFeedback(parts.join(', '), ctx.feedback);
 
       items.push({
         id: `upload_clip_${i}`,
@@ -212,6 +215,7 @@ export class VideoAgent extends BaseAgent {
         qualityScore: bestCrit?.score ?? 0,
         consistencyIssues: bestCrit?.consistency?.issues || [],
         verdict: bestCrit?.verdict ?? null,
+        feedbackSatisfied: bestCrit?.feedbackSatisfied ?? !ctx.feedback,
       },
     };
   }
@@ -302,7 +306,7 @@ export class VideoAgent extends BaseAgent {
       if (shotMode !== preferredMode) this.#reportModeFallback(shot.shot_id, preferredMode, shotMode);
       const base = {
         id: shot.shot_id,
-        prompt: this.#buildVideoPrompt(shot, sbShot),
+        prompt: appendFeedback(this.#buildVideoPrompt(shot, sbShot), ctx.feedback),
         duration: this.#clipDuration(sbShot),
         seed: 42,
         plannedVideoMode: preferredMode,
@@ -431,7 +435,10 @@ export class VideoAgent extends BaseAgent {
         }
 
         const availableReferences = this.#getAvailableReferences(ctx);
-        const plans = this.#retryAgent.planItemRetry(failedItems, lineage, { availableReferences });
+        const plans = this.#retryAgent.planItemRetry(failedItems, lineage, {
+          availableReferences,
+          feedback: ctx.feedback,
+        });
 
         for (const plan of plans) {
           if (plan.strategy === ItemRetryStrategy.GIVE_UP) continue;

@@ -8,6 +8,7 @@ import { createArtifact, ArtifactKind, ArtifactStatus, recordItemAttempt } from 
 import { addAgentMessage } from '../ui/render.js';
 import { t } from '../i18n.js';
 import { reportPhase } from '../progressTracker.js';
+import { appendFeedback, appendPromptGuidance } from '../feedback.js';
 
 const MAX_ITEM_ATTEMPTS = 3;
 const MAX_STAGE_RETRIES = 1;
@@ -16,11 +17,12 @@ const FRONT_SUFFIX = '__front';
 const JSON_REPAIR_PROMPT = 'Your last reply was not valid JSON. Please reply again with ONLY the JSON object. No markdown, no code fences, no commentary.';
 
 function applyVisualRetryFeedback(items, critique, userFeedback) {
-  const note = (critique.suggestions || []).join('; ');
-  const feedback = userFeedback ? `\nUser feedback: ${userFeedback}` : '';
   for (const item of items) {
     item.seed = (item.seed ?? 42) + 7;
-    if (note || feedback) item.prompt = `${item.prompt}${note}${feedback}`;
+    item.prompt = appendPromptGuidance(item.prompt, {
+      feedback: userFeedback,
+      suggestions: critique.suggestions || [],
+    });
   }
 }
 
@@ -52,7 +54,7 @@ export class CharacterAgent extends BaseAgent {
     if (token?.signal?.aborted) return this.#emptyResult(ctx);
 
     const entities = this.#mergeDesigns(script, designs);
-    const items = this.#buildItems(entities, genre);
+    const items = this.#buildItems(entities, genre, ctx.feedback);
     const sourceArtifactIds = ctx.sourceArtifactIds?.script ? [ctx.sourceArtifactIds.script] : [];
     const artifact = createArtifact({
       kind: ArtifactKind.CHARACTER_DESIGN,
@@ -97,6 +99,7 @@ export class CharacterAgent extends BaseAgent {
         qualityScore: bestCrit?.score ?? 0,
         consistencyIssues: bestCrit?.consistency?.issues || [],
         verdict: bestCrit?.verdict ?? null,
+        feedbackSatisfied: bestCrit?.feedbackSatisfied ?? !ctx.feedback,
       },
     };
   }
@@ -175,18 +178,18 @@ export class CharacterAgent extends BaseAgent {
     return { characters, settings };
   }
 
-  #buildItems(entities, genre) {
+  #buildItems(entities, genre, feedback) {
     const items = [];
 
     for (const char of entities.characters) {
       items.push({
         id: `${char.id}${SHEET_SUFFIX}`,
-        prompt: this.#buildSheetPrompt(char, genre),
+        prompt: appendFeedback(this.#buildSheetPrompt(char, genre), feedback),
         seed: 42,
       });
       items.push({
         id: `${char.id}${FRONT_SUFFIX}`,
-        prompt: this.#buildFrontPrompt(char, genre),
+        prompt: appendFeedback(this.#buildFrontPrompt(char, genre), feedback),
         seed: 42,
       });
     }
@@ -194,7 +197,7 @@ export class CharacterAgent extends BaseAgent {
     for (const setting of entities.settings) {
       items.push({
         id: setting.id,
-        prompt: this.#buildSettingPrompt(setting, genre),
+        prompt: appendFeedback(this.#buildSettingPrompt(setting, genre), feedback),
         seed: 42,
       });
     }
@@ -260,7 +263,7 @@ export class CharacterAgent extends BaseAgent {
         for (const item of items) {
           lineage[item.id] = artifact.itemLineage[item.id];
         }
-        const plans = this.#retryAgent.planItemRetry(failedItems, lineage, {});
+        const plans = this.#retryAgent.planItemRetry(failedItems, lineage, { feedback: ctx.feedback });
 
         for (const plan of plans) {
           if (plan.strategy === ItemRetryStrategy.GIVE_UP) continue;

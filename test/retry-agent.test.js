@@ -7,12 +7,13 @@ test('first real prompt failure produces an addressable prompt rewrite', () => {
   const agent = new RetryAgent();
   const [plan] = agent.planItemRetry(
     [{ itemId: 'shot-1', error: 'prompt quality rejected' }],
-    { 'shot-1': { attempts: [{ status: 'failed', error: 'prompt quality rejected', seed: 10 }] } },
+    { 'shot-1': { attempts: [{ status: 'failed', error: 'prompt quality rejected', seed: 10, prompt: 'A wide shot of the station' }] } },
     { feedback: 'Use a clearer action prompt' },
   );
 
   assert.equal(plan.strategy, ItemRetryStrategy.REWRITE_PROMPT);
-  assert.equal(plan.overrides.promptOverrides['shot-1'], 'Use a clearer action prompt');
+  assert.match(plan.overrides.promptOverrides['shot-1'], /A wide shot of the station/);
+  assert.match(plan.overrides.promptOverrides['shot-1'], /USER REVISION REQUIREMENT.*Use a clearer action prompt/);
   assert.equal(plan.overrides.seed, 11);
 });
 

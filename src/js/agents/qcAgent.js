@@ -6,6 +6,7 @@ import { t } from '../i18n.js';
 import { imageParts, videoParts } from '../utils/visionMedia.js';
 import { checkConsistency } from './qcConsistency.js';
 import { QCVerdict, Severity } from './qcTypes.js';
+import { feedbackDirective, normalizeFeedback } from '../feedback.js';
 
 const CRITIQUE_SYSTEM = 'You are a film production quality reviewer. You evaluate the output of AI film agents for quality, coherence, and creativity. Reply ONLY with valid JSON. No markdown, no commentary, no code fences.';
 
@@ -55,6 +56,7 @@ const MULTIMODAL_STEPS = new Set(['characterDesign', 'referenceImages', 'videoGe
 function buildCritiqueMessages(stepId, data, context) {
   const criteria = CRITERIA[stepId] || CRITERIA.script;
   const dataStr = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
+  const revision = feedbackDirective(context.feedback);
 
   let contextStr = '';
   if (context.script?.title) {
@@ -76,6 +78,7 @@ ${contextStr}
 
 OUTPUT TO EVALUATE:
 ${dataStr.substring(0, 3000)}
+${revision ? `\n${revision}\nTreat satisfaction of this requirement as mandatory. Judge the actual output, not the prompt's intent.` : ''}
 
 OUTPUT JSON SCHEMA:
 {
@@ -83,6 +86,8 @@ OUTPUT JSON SCHEMA:
     ${criteria.map((c, i) => `"criterion${i + 1}": number // ${c}`).join(',\n    ')}
   },
   "overallScore": number,
+  "feedbackSatisfied": ${revision ? 'boolean' : 'null'},
+  "feedbackIssues": ["string — unmet part of the user revision requirement"],
   "issues": ["string — specific issue 1", "string — specific issue 2"],
   "suggestions": ["string — improvement suggestion 1", "string — improvement suggestion 2"]
 }
@@ -90,6 +95,8 @@ OUTPUT JSON SCHEMA:
 Requirements:
 - Each criterion score: 1-10
 - overallScore: average of all criterion scores, rounded to 1 decimal
+- feedbackSatisfied: ${revision ? 'true only when the output clearly satisfies every part of the user revision requirement' : 'null because this is not a revision'}
+- feedbackIssues: specific unmet revision requirements; empty only when feedbackSatisfied is true or null
 - issues: 1-3 specific problems (only if score < 8)
 - suggestions: 1-3 actionable improvements (only if score < 8)` },
   ];
@@ -138,6 +145,7 @@ async function buildMediaCritiqueMessages(stepId, data, context) {
     ? await videoParts(data, stepId)
     : await imageParts(data, stepId, { maxImages: 6 - anchors.length });
   const parts = [...anchors, ...generated];
+  const revision = feedbackDirective(context.feedback);
   if (!parts.length) return null;
 
   const anchorNote = anchors.length
@@ -151,6 +159,7 @@ ${criteria.map((c, i) => `${i + 1}. ${c}`).join('\n')}
 
 TEXTUAL SUMMARY (context only):
 ${mediaDigest(stepId, data)}
+${revision ? `\n${revision}\nTreat satisfaction of this requirement as mandatory. Verify it from the actual attached output.` : ''}
 
 OUTPUT JSON SCHEMA:
 {
@@ -158,6 +167,8 @@ OUTPUT JSON SCHEMA:
     ${criteria.map((c, i) => `"criterion${i + 1}": number // ${c}`).join(',\n    ')}
   },
   "overallScore": number,
+  "feedbackSatisfied": ${revision ? 'boolean' : 'null'},
+  "feedbackIssues": ["string — unmet part of the user revision requirement"],
   "issues": ["string — specific issue 1", "string — specific issue 2"],
   "suggestions": ["string — improvement suggestion 1", "string — improvement suggestion 2"]
 }
@@ -165,6 +176,8 @@ OUTPUT JSON SCHEMA:
 Requirements:
 - Each criterion score: 1-10
 - overallScore: average of all criterion scores, rounded to 1 decimal
+- feedbackSatisfied: ${revision ? 'true only when the actual output clearly satisfies every part of the user revision requirement' : 'null because this is not a revision'}
+- feedbackIssues: specific unmet revision requirements; empty only when feedbackSatisfied is true or null
 - issues: 1-3 specific problems (only if score < 8)
 - suggestions: 1-3 actionable improvements (only if score < 8)`;
 
@@ -195,13 +208,18 @@ function structuralScoreOf(verdict) {
 // Unified QC decision: the deterministic consistency check is a HARD GATE, and the
 // final score is the LOWER of the LLM score and the structural score. This removes the
 // "LLM says 8.2 pass but consistency is FAIL" dual-truth problem.
-function combineVerdict(consistency, llm) {
+export function combineVerdict(consistency, llm, { feedbackRequired = false } = {}) {
   const structuralScore = structuralScoreOf(consistency.verdict);
   const llmScore = llm?.score ?? null;
-  const score = llmScore != null ? Math.min(llmScore, structuralScore) : structuralScore;
+  const feedbackSatisfied = feedbackRequired ? llm?.feedbackSatisfied === true : null;
+  const score = feedbackRequired && !feedbackSatisfied
+    ? 0
+    : llmScore != null ? Math.min(llmScore, structuralScore) : structuralScore;
 
   let verdict;
-  if (consistency.verdict === QCVerdict.FAIL) {
+  if (feedbackRequired && !feedbackSatisfied) {
+    verdict = QCVerdict.FAIL;
+  } else if (consistency.verdict === QCVerdict.FAIL) {
     verdict = QCVerdict.FAIL;
   } else if (consistency.verdict === QCVerdict.CONDITIONAL_PASS) {
     verdict = QCVerdict.CONDITIONAL_PASS;
@@ -218,13 +236,16 @@ function combineVerdict(consistency, llm) {
     severity = score >= SCORE_THRESHOLD ? null : score >= 5 ? Severity.MEDIUM : Severity.HIGH;
   }
 
-  const issues = [...(consistency.issues || []), ...(llm?.issues || [])];
+  const feedbackIssues = feedbackRequired && !feedbackSatisfied
+    ? (llm?.feedbackIssues?.length ? llm.feedbackIssues : ['The user revision requirement could not be verified as satisfied.'])
+    : [];
+  const issues = [...(consistency.issues || []), ...(llm?.issues || []), ...feedbackIssues];
   const suggestions = llm?.suggestions || [];
   const source = llmScore != null
     ? (consistency.verdict !== QCVerdict.PASS ? 'llm+structural' : 'llm')
     : 'structural';
 
-  return { score, verdict, severity, issues, suggestions, source, consistency, llm };
+  return { score, verdict, severity, issues, suggestions, source, consistency, llm, feedbackSatisfied };
 }
 
 export class QCAgent {
@@ -239,10 +260,10 @@ export class QCAgent {
     const isMultimodal = MULTIMODAL_STEPS.has(this.stepId);
 
     // Text steps keep their existing semantics: no LLM critique → no score → null.
-    if (!isMultimodal && !llm) return null;
+    if (!isMultimodal && !llm && !normalizeFeedback(ctx.feedback)) return null;
 
     // Media steps always yield at least the deterministic structural result.
-    return combineVerdict(consistency, llm);
+    return combineVerdict(consistency, llm, { feedbackRequired: Boolean(normalizeFeedback(ctx.feedback)) });
   }
 
   async #runLLM(ctx) {
@@ -269,6 +290,8 @@ export class QCAgent {
       scores: parsed.scores && typeof parsed.scores === 'object' ? parsed.scores : {},
       issues: Array.isArray(parsed.issues) ? parsed.issues : [],
       suggestions: Array.isArray(parsed.suggestions) ? parsed.suggestions : [],
+      feedbackSatisfied: typeof parsed.feedbackSatisfied === 'boolean' ? parsed.feedbackSatisfied : null,
+      feedbackIssues: Array.isArray(parsed.feedbackIssues) ? parsed.feedbackIssues : [],
     };
   }
 }

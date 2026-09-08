@@ -94,6 +94,23 @@ test('a rejected revision leaves downstream results valid and resumable', async 
   assert.equal(h.orchestrator.checkpoint.restore('script').acceptedArtifactId, scriptV1.id);
 });
 
+test('a revision that cannot verify the user feedback is rejected and preserves the adopted version', async () => {
+  const h = await createHarness();
+  await h.api.startPipeline();
+  const scriptV1 = h.accepted('script');
+
+  h.plan('script', [{
+    data: { ...STEP_DATA.script, title: 'Visually unchanged' },
+    metadata: { feedbackSatisfied: false },
+  }]);
+  await h.api.reviseStep('script', 'make the protagonist wear a red coat');
+
+  assert.equal(h.accepted('script').id, scriptV1.id);
+  assert.equal(h.state.data.script, scriptV1.data);
+  assert.equal(h.store.getByStep('script').at(-1).status, ArtifactStatus.FAILED);
+  assert.ok(h.calls.failures.flat().some(issue => issue.includes('pipeline.feedbackNotSatisfied')));
+});
+
 test('a failed revision does not consume a version number from the adopted lineage', async () => {
   const h = await createHarness();
   await h.api.startPipeline();

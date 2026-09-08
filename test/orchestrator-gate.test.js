@@ -117,3 +117,25 @@ for (const mode of ['auto', 'interactive']) {
     assert.equal(h.calls.runs.length, 1, 'a stopped pipeline does not advance into the next step');
   });
 }
+
+test('an IP retry during a user revision preserves both the user feedback and the IP correction', async () => {
+  const h = await createHarness();
+  await h.api.startPipeline();
+  h.plan('script', [
+    {
+      gate: {
+        verdict: QCVerdict.FAIL,
+        severity: Severity.CRITICAL,
+        issues: ['IP BLOCK'],
+        requiresRegeneration: true,
+        regenerationPrompt: 'Replace the protected character with an original one',
+      },
+    },
+    { gate: { verdict: QCVerdict.PASS, issues: [] } },
+  ]);
+
+  await h.api.reviseStep('script', 'make the protagonist wear a red coat');
+
+  assert.match(h.calls.runs.at(-1).feedback, /make the protagonist wear a red coat/);
+  assert.match(h.calls.runs.at(-1).feedback, /Replace the protected character with an original one/);
+});
