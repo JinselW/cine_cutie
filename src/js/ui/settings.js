@@ -9,6 +9,13 @@ const PROVIDER_LIST = ['openai', 'deepseek', 'dashscope', 'ark', 'kling', 'gemin
 const CUSTOM_VALUE = '__custom__';
 const COMFY_MODEL = '__comfyui__';
 
+// Three side-by-side video model dropdowns, one per generation mode.
+const MODEL_SLOTS = [
+  { modeId: 'firstFrame', configKey: 'video', dashKey: 'videoModel', selId: '#cfgVideoModelFirstFrame', wrapId: '#videoModelFirstFrameCustomWrap', customId: '#cfgVideoModelFirstFrameCustom', labelId: '#lblVideoModelFirstFrame' },
+  { modeId: 'firstLastFrame', configKey: 'lastFrameVideo', dashKey: 'lastFrameVideoModel', selId: '#cfgVideoModelFirstLastFrame', wrapId: '#videoModelFirstLastFrameCustomWrap', customId: '#cfgVideoModelFirstLastFrameCustom', labelId: '#lblVideoModelFirstLastFrame' },
+  { modeId: 'referenceImage', configKey: 'refVideo', dashKey: 'refVideoModel', selId: '#cfgVideoModelRefImage', wrapId: '#videoModelRefImageCustomWrap', customId: '#cfgVideoModelRefImageCustom', labelId: '#lblVideoModelRefImage' },
+];
+
 function updateIndicator() {
   const dot = $('#llmDot');
   if (dot) dot.classList.toggle('active', isConfigured());
@@ -85,30 +92,44 @@ function getSelectValue(selectEl, customInputEl) {
   return selectEl.value;
 }
 
-function slotDefaultModel(configKey) {
-  return VIDEO_MODES.find(m => m.configKey === configKey)?.defaultModel || '';
-}
+function applyComfyUiState(on) {
+  const block = $('#comfySettingsBlock');
+  if (block) block.classList.toggle('hidden', !on);
 
-function applyVideoMode(modeId, modelName) {
-  const mode = videoModeById(modeId);
+  const cfg = getConfig();
+  for (const slot of MODEL_SLOTS) {
+    const select = $(slot.selId);
+    const wrap = $(slot.wrapId);
+    const input = $(slot.customId);
+    if (!select) continue;
 
-  const label = $('#lblVideoModeModel');
-  if (label) label.textContent = t('settings.videoModeModel.' + mode.id);
-
-  const select = $('#cfgVideoModeModel');
-  if (!select) return mode;
-
-  const wrap = $('#videoModeModelCustomWrap');
-  const input = $('#cfgVideoModeModelCustom');
-  const name = modelName || mode.defaultModel;
-  const isCustom = populateModelSelect(select, mode.presets, null, name, true);
-  if (isCustom) {
-    wrap?.classList.remove('hidden');
-    if (input) input.value = name;
-  } else {
-    wrap?.classList.add('hidden');
+    if (on) {
+      select.innerHTML = '';
+      const opt = document.createElement('option');
+      opt.value = COMFY_MODEL;
+      opt.textContent = t('settings.comfyUIOption');
+      opt.selected = true;
+      select.appendChild(opt);
+      select.disabled = true;
+      wrap?.classList.add('hidden');
+    } else {
+      select.disabled = false;
+      const mode = videoModeById(slot.modeId);
+      let name = cfg.models?.[slot.configKey]?.name || mode.defaultModel;
+      if (name === COMFY_MODEL) name = mode.defaultModel;
+      const isCustom = populateModelSelect(select, mode.presets, null, name);
+      if (isCustom) {
+        wrap?.classList.remove('hidden');
+        if (input) input.value = name;
+      } else {
+        wrap?.classList.add('hidden');
+      }
+    }
   }
-  return mode;
+
+  const ssh = loadComfySshConfig();
+  if (on && ssh.host) startComfyMonitor('comfyMonitorSettings', { force: true });
+  else stopComfyMonitor('comfyMonitorSettings');
 }
 
 function openModal() {
@@ -180,10 +201,6 @@ function openModal() {
     modeSelect.value = videoModeById(cfg.videoMode).id;
   }
 
-  const mode = videoModeById(cfg.videoMode);
-  const savedModeModel = cfg.models[mode.configKey]?.name || mode.defaultModel;
-  applyVideoMode(mode.id, comfyActive ? COMFY_MODEL : savedModeModel);
-
   $('#cfgJsonMode').checked = cfg.jsonMode !== false;
   $('#cfgProxy').checked = cfg.useProxy === true;
 
@@ -194,10 +211,12 @@ function openModal() {
   $('#comfySshComfyPort').value = comfyCfg.comfyPort || '';
   $('#comfyEnableLightning').checked = comfyCfg.enableLightning || false;
 
+  const useComfyToggle = $('#cfgUseComfyVideo');
+  if (useComfyToggle) useComfyToggle.checked = comfyActive;
+  applyComfyUiState(comfyActive);
+
   clearStatus();
   modal.classList.remove('hidden');
-  if (comfyActive && comfyCfg.host) startComfyMonitor('comfyMonitorSettings', { force: true });
-  else stopComfyMonitor('comfyMonitorSettings');
 }
 
 function closeModal() {
@@ -241,18 +260,20 @@ function handleSave() {
   const img2imgName = getSelectValue(img2imgSelect, img2imgCustomInput);
 
   const mode = videoModeById($('#cfgVideoMode')?.value);
-  const modeModelName = getSelectValue($('#cfgVideoModeModel'), $('#cfgVideoModeModelCustom'));
-  const comfyChosen = modeModelName === COMFY_MODEL;
-  const chosenModel = (!modeModelName || comfyChosen) ? mode.defaultModel : modeModelName;
+  const useComfy = $('#cfgUseComfyVideo')?.checked === true;
 
-  const otherKey = mode.configKey === 'video' ? 'refVideo' : 'video';
-  let otherModel = getConfig().models?.[otherKey]?.name || slotDefaultModel(otherKey);
-  if (!comfyChosen && otherModel === COMFY_MODEL) otherModel = slotDefaultModel(otherKey);
-
-  const slotModels = { [mode.configKey]: chosenModel, [otherKey]: otherModel };
-  if (comfyChosen) {
-    slotModels.video = COMFY_MODEL;
-    slotModels.refVideo = COMFY_MODEL;
+  const llmModels = {};
+  const dashVideo = {};
+  if (useComfy) {
+    for (const slot of MODEL_SLOTS) llmModels[slot.configKey] = { name: COMFY_MODEL };
+  } else {
+    for (const slot of MODEL_SLOTS) {
+      const slotMode = videoModeById(slot.modeId);
+      let name = getSelectValue($(slot.selId), $(slot.customId));
+      if (!name || name === COMFY_MODEL) name = slotMode.defaultModel;
+      llmModels[slot.configKey] = { name };
+      dashVideo[slot.dashKey] = name;
+    }
   }
 
   if (!textModel.name) {
@@ -269,8 +290,9 @@ function handleSave() {
       text: textModel,
       image: { name: imageName || IMAGE_PRESETS[0] },
       img2img: { name: img2imgName || IMG2IMG_PRESETS[0] },
-      video: { name: slotModels.video },
-      refVideo: { name: slotModels.refVideo },
+      video: llmModels.video,
+      lastFrameVideo: llmModels.lastFrameVideo,
+      refVideo: llmModels.refVideo,
     },
     videoMode: mode.id,
     jsonMode,
@@ -282,18 +304,19 @@ function handleSave() {
     imageModel: imageName || IMAGE_PRESETS[0],
     img2imgModel: img2imgName || IMG2IMG_PRESETS[0],
   };
-  // Keep the ComfyUI sentinel in the shared settings record. The API provider
-  // retains its previous model in memory and receives new values when selected.
-  if (!comfyChosen) {
-    dashScopeConfig.videoModel = slotModels.video;
-    dashScopeConfig.refVideoModel = slotModels.refVideo;
+  // The ComfyUI sentinel lives only in the llm settings record; the DashScope
+  // API provider keeps its previously selected real models when ComfyUI is on.
+  if (!useComfy) {
+    dashScopeConfig.videoModel = dashVideo.videoModel;
+    dashScopeConfig.lastFrameVideoModel = dashVideo.lastFrameVideoModel;
+    dashScopeConfig.refVideoModel = dashVideo.refVideoModel;
   }
   saveDashScopeConfig(dashScopeConfig);
 
-  saveComfySshConfig();
+  if (useComfy) saveComfySshConfig();
 
-  setActiveProvider('video', comfyChosen ? 'video-comfy' : 'video');
-  if (comfyChosen) startComfyMonitor('comfyMonitorSettings', { force: true });
+  setActiveProvider('video', useComfy ? 'video-comfy' : 'video');
+  if (useComfy) startComfyMonitor('comfyMonitorSettings', { force: true });
   else stopComfyMonitor('comfyMonitorSettings');
 
   updateIndicator();
@@ -348,8 +371,7 @@ async function handleTest() {
 
   const result = await testConnection();
 
-  const modeModelName = getSelectValue($('#cfgVideoModeModel'), $('#cfgVideoModeModelCustom'));
-  const comfyChosen = modeModelName === COMFY_MODEL;
+  const comfyChosen = $('#cfgUseComfyVideo')?.checked === true;
 
   let comfyLine = null;
   if (comfyChosen) {
@@ -421,15 +443,6 @@ function saveComfySshConfig() {
   return config;
 }
 
-function setupVideoModeSelect() {
-  const select = $('#cfgVideoMode');
-  if (!select) return;
-  select.addEventListener('change', () => {
-    const keepComfy = $('#cfgVideoModeModel')?.value === COMFY_MODEL;
-    applyVideoMode(select.value, keepComfy ? COMFY_MODEL : undefined);
-  });
-}
-
 export function initSettings() {
   const settingsBtn = $('#settingsBtn');
   const settingsClose = $('#settingsClose');
@@ -456,10 +469,9 @@ export function initSettings() {
   setupModelSelectChange('#cfgTextModel', '#textModelCustomWrap', MODEL_PRESETS);
   setupModelSelectChange('#cfgImageModel', '#imageModelCustomWrap', IMAGE_PRESETS);
   setupModelSelectChange('#cfgImg2ImgModel', '#img2imgModelCustomWrap', IMG2IMG_PRESETS);
-  setupModelSelectChange('#cfgVideoModeModel', '#videoModeModelCustomWrap', []);
-  $('#cfgVideoModeModel')?.addEventListener('change', (event) => {
-    if (event.target.value === COMFY_MODEL) startComfyMonitor('comfyMonitorSettings', { force: true });
-    else stopComfyMonitor('comfyMonitorSettings');
+  for (const slot of MODEL_SLOTS) setupModelSelectChange(slot.selId, slot.wrapId, []);
+  $('#cfgUseComfyVideo')?.addEventListener('change', (event) => {
+    applyComfyUiState(event.target.checked);
   });
 
   const saveBtn = $('#saveSettingsBtn');
@@ -467,8 +479,6 @@ export function initSettings() {
 
   const testBtn = $('#testConnBtn');
   if (testBtn) testBtn.addEventListener('click', handleTest);
-
-  setupVideoModeSelect();
 
   updateIndicator();
 }

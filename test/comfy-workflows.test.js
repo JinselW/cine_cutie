@@ -100,9 +100,9 @@ test('ComfyUI workflow assets stay isolated from the API video provider', () => 
   const registry = readFileSync(new URL('../src/js/providers/registry.js', import.meta.url), 'utf8');
   const apiProvider = readFileSync(new URL('../src/js/providers/video.js', import.meta.url), 'utf8');
   const comfyProvider = readFileSync(new URL('../src/js/providers/videoComfy.js', import.meta.url), 'utf8');
-  assert.match(settings, /setActiveProvider\('video', comfyChosen \? 'video-comfy' : 'video'\)/);
-  assert.match(settings, /applyVideoMode\(select\.value, keepComfy \? COMFY_MODEL : undefined\)/);
-  assert.doesNotMatch(settings, /videoModel:\s*comfyChosen\s*\?/);
+  assert.match(settings, /setActiveProvider\('video', useComfy \? 'video-comfy' : 'video'\)/);
+  assert.match(settings, /llmModels\[slot\.configKey\] = \{ name: COMFY_MODEL \}/);
+  assert.doesNotMatch(settings, /dashScopeConfig\.(videoModel|refVideoModel|lastFrameVideoModel)\s*=\s*COMFY_MODEL/);
   assert.match(registry, /DEFAULT_PROVIDER_IDS = Object\.freeze\(\{ video: 'video' \}\)/);
   assert.match(apiProvider, /fetch\('\/api\/generate\/video'/);
   assert.doesNotMatch(apiProvider, /video-comfy|h3_.*_to_video\.json/);

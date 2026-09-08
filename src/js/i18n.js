@@ -328,6 +328,7 @@ const en = {
   'history.retrySave': '{error}. Click to retry save',
 
   'settings.comfyUIOption': 'ComfyUI (DGX Spark / H3)',
+  'settings.useComfyVideo': 'Use ComfyUI to generate video',
 
   'llm.notConfiguredFallback': 'LLM not configured, using templates...',
   'llm.fellBack': 'LLM unavailable ({reason}), using templates instead — process continues normally',
@@ -709,6 +710,7 @@ const zh = {
   'history.retrySave': '{error}。点击重试保存',
 
   'settings.comfyUIOption': 'ComfyUI (DGX Spark / H3)',
+  'settings.useComfyVideo': '是否使用 ComfyUI 生成视频',
 
   'llm.notConfiguredFallback': 'LLM 未配置，使用模板...',
   'llm.fellBack': 'LLM 不可用（{reason}），改用模板继续生成',
@@ -873,15 +875,20 @@ export function applyLang() {
       opt.textContent = t('settings.videoMode.' + opt.value);
     }
   }
-  const lblVideoModeModel = $('#lblVideoModeModel');
-  if (lblVideoModeModel && videoModeSelect?.value) {
-    lblVideoModeModel.textContent = t('settings.videoModeModel.' + videoModeSelect.value);
-  }
-
   const customPlaceholder = t('settings.customModelPlaceholder');
-  ['#cfgTextModelCustom', '#cfgImageModelCustom', '#cfgImg2ImgModelCustom', '#cfgVideoModeModelCustom'].forEach(sel => {
+  ['#cfgTextModelCustom', '#cfgImageModelCustom', '#cfgImg2ImgModelCustom',
+    '#cfgVideoModelFirstFrameCustom', '#cfgVideoModelFirstLastFrameCustom', '#cfgVideoModelRefImageCustom'].forEach(sel => {
     const el = $(sel);
     if (el) el.placeholder = customPlaceholder;
+  });
+
+  ['#cfgVideoModelFirstFrame', '#cfgVideoModelFirstLastFrame', '#cfgVideoModelRefImage'].forEach(sel => {
+    const select = $(sel);
+    if (!select) return;
+    for (const opt of select.options) {
+      if (opt.value === '__comfyui__') opt.textContent = t('settings.comfyUIOption');
+      else if (opt.value === '__custom__') opt.textContent = t('settings.customModel');
+    }
   });
 
   const lblJsonMode = $('#lblJsonMode');

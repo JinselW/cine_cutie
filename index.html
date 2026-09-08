@@ -206,6 +206,15 @@
         </div>
       </div>
 
+      <div class="modal-field modal-field-row">
+        <label id="lblUseComfyVideo" data-i18n="settings.useComfyVideo">Use ComfyUI to generate video</label>
+        <label class="toggle-switch">
+          <input type="checkbox" id="cfgUseComfyVideo">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+
+      <div id="comfySettingsBlock" class="hidden">
       <div class="modal-divider"></div>
 
       <!-- Module: ComfyUI SSH Connection -->
@@ -237,6 +246,7 @@
         </label>
       </div>
       <div id="comfyMonitorSettings" class="comfy-monitor hidden" aria-live="polite"></div>
+      </div>
 
       <div class="modal-divider"></div>
 
@@ -272,11 +282,27 @@
         <select id="cfgVideoMode" class="model-select"></select>
       </div>
 
-      <div class="model-select-group">
-        <label id="lblVideoModeModel">First-Frame Video Model</label>
-        <select id="cfgVideoModeModel" class="model-select"></select>
-        <div class="model-custom-wrap hidden" id="videoModeModelCustomWrap">
-          <input type="text" id="cfgVideoModeModelCustom" class="model-custom-input" placeholder="Model name...">
+      <div class="video-model-trio">
+        <div class="model-select-group">
+          <label id="lblVideoModelFirstFrame" data-i18n="settings.videoModeModel.firstFrame">First-Frame Video Model</label>
+          <select id="cfgVideoModelFirstFrame" class="model-select"></select>
+          <div class="model-custom-wrap hidden" id="videoModelFirstFrameCustomWrap">
+            <input type="text" id="cfgVideoModelFirstFrameCustom" class="model-custom-input" placeholder="Model name...">
+          </div>
+        </div>
+        <div class="model-select-group">
+          <label id="lblVideoModelFirstLastFrame" data-i18n="settings.videoModeModel.firstLastFrame">First &amp; Last Frames Video Model</label>
+          <select id="cfgVideoModelFirstLastFrame" class="model-select"></select>
+          <div class="model-custom-wrap hidden" id="videoModelFirstLastFrameCustomWrap">
+            <input type="text" id="cfgVideoModelFirstLastFrameCustom" class="model-custom-input" placeholder="Model name...">
+          </div>
+        </div>
+        <div class="model-select-group">
+          <label id="lblVideoModelRefImage" data-i18n="settings.videoModeModel.referenceImage">Reference-Image Video Model</label>
+          <select id="cfgVideoModelRefImage" class="model-select"></select>
+          <div class="model-custom-wrap hidden" id="videoModelRefImageCustomWrap">
+            <input type="text" id="cfgVideoModelRefImageCustom" class="model-custom-input" placeholder="Model name...">
+          </div>
         </div>
       </div>
 

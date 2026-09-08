@@ -526,3 +526,6 @@
   font-size:0.8rem;font-family:var(--font);box-sizing:border-box;
 }
 .model-custom-input:focus{border-color:var(--gold);outline:none}
+
+.video-model-trio{display:grid;grid-template-columns:repeat(3,1fr);gap:0 14px}
+@media (max-width:640px){.video-model-trio{grid-template-columns:1fr}}

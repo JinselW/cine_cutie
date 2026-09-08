@@ -7,7 +7,7 @@ import { reportBatchProgress } from '../progressTracker.js';
 const SETTINGS_KEY = 'cine-cutie-settings';
 const OLD_DS_KEY = 'cine-cutie-dashscope';
 
-let config = { apiKey: '', imageModel: 'wanx2.1-t2i-turbo', img2imgModel: '', videoModel: 'wanx2.1-i2v-plus', refVideoModel: 'wan2.7-r2v' };
+let config = { apiKey: '', imageModel: 'wanx2.1-t2i-turbo', img2imgModel: '', videoModel: 'wanx2.1-i2v-plus', lastFrameVideoModel: 'wan2.7-i2v', refVideoModel: 'wan2.7-r2v' };
 
 function loadConfig() {
   try {
@@ -18,6 +18,7 @@ function loadConfig() {
       config.imageModel = parsed.models?.image?.name || 'wanx2.1-t2i-turbo';
       config.img2imgModel = parsed.models?.img2img?.name || '';
       config.videoModel = parsed.models?.video?.name || 'wanx2.1-i2v-plus';
+      config.lastFrameVideoModel = parsed.models?.lastFrameVideo?.name || parsed.models?.video?.name || 'wan2.7-i2v';
       config.refVideoModel = parsed.models?.refVideo?.name || 'wan2.7-r2v';
     } else {
       const oldSaved = localStorage.getItem(OLD_DS_KEY);
@@ -34,6 +35,7 @@ function saveConfig(cfg) {
   if (cfg.imageModel !== undefined) config.imageModel = cfg.imageModel;
   if (cfg.img2imgModel !== undefined) config.img2imgModel = cfg.img2imgModel;
   if (cfg.videoModel !== undefined) config.videoModel = cfg.videoModel;
+  if (cfg.lastFrameVideoModel !== undefined) config.lastFrameVideoModel = cfg.lastFrameVideoModel;
   if (cfg.refVideoModel !== undefined) config.refVideoModel = cfg.refVideoModel;
 
   try {
@@ -46,6 +48,7 @@ function saveConfig(cfg) {
     if (cfg.imageModel !== undefined) parsed.models.image = { name: cfg.imageModel };
     if (cfg.img2imgModel !== undefined) parsed.models.img2img = { name: cfg.img2imgModel };
     if (cfg.videoModel !== undefined) parsed.models.video = { name: cfg.videoModel };
+    if (cfg.lastFrameVideoModel !== undefined) parsed.models.lastFrameVideo = { name: cfg.lastFrameVideoModel };
     if (cfg.refVideoModel !== undefined) parsed.models.refVideo = { name: cfg.refVideoModel };
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(parsed));
   } catch {}

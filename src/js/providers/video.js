@@ -75,7 +75,9 @@ const videoProvider = {
       }));
     }
 
-    const chosenModel = mode === 'referenceImage' ? dsConfig.refVideoModel : dsConfig.videoModel;
+    const chosenModel = mode === 'referenceImage' ? dsConfig.refVideoModel
+      : mode === 'firstLastFrame' ? (dsConfig.lastFrameVideoModel || dsConfig.videoModel)
+      : dsConfig.videoModel;
     const dsRes = dsVideoResolution(state.resolution || '720P', chosenModel);
 
     const bodyPayload = hasUploads
