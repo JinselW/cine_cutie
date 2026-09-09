@@ -618,10 +618,11 @@ textarea.edit-input{resize:vertical;min-height:70px}
 .api-provider-row .api-endpoint:focus{border-color:var(--gold);outline:none}
 .api-provider-row .input-with-toggle{width:140px;flex-shrink:0}
 .api-provider-row .api-key{
-  width:100%;padding:7px 10px;border-radius:var(--radius-xs);
+  width:100%;min-width:0;padding:7px 38px 7px 10px;border-radius:var(--radius-xs);
   border:1px solid var(--glass-border);background:var(--bg2);color:var(--cream);
   font-size:0.78rem;font-family:var(--font);
 }
+.api-provider-row .toggle-vis-btn{right:5px;width:28px;padding:4px;color:var(--cream3)}
 .api-provider-row .api-key:focus{border-color:var(--gold);outline:none}
 
 .model-select-group{margin-bottom:14px}
