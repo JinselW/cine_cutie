@@ -281,21 +281,36 @@ export async function stopGeneration() {
   setMascot(null);
 }
 
-export function addAgentMessage(icon, text) {
+export function addAgentMessage(icon, text, { key = null, tone = null } = {}) {
   if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
-    window.dispatchEvent(new CustomEvent('agent-memory-message', { detail: { icon, text } }));
+    window.dispatchEvent(new CustomEvent('agent-memory-message', { detail: { icon, text, key, tone } }));
   }
-  _allCurrentMsgs.push({ icon, text });
+  const message = { icon, text, key, tone };
+  if (key) {
+    const index = _allCurrentMsgs.findIndex(item => item.key === key);
+    if (index >= 0) _allCurrentMsgs[index] = message;
+    else _allCurrentMsgs.push(message);
+  } else {
+    _allCurrentMsgs.push(message);
+  }
   if (state.viewingStep !== null && state.stepRunning) {
-    _msgBuffer.push({ icon, text });
+    if (key) _msgBuffer = _msgBuffer.filter(item => item.key !== key);
+    _msgBuffer.push(message);
     return;
   }
-  _prependMsg(icon, text);
+  _prependMsg(icon, text, { key, tone });
 }
 
-function _prependMsg(icon, text) {
+function _prependMsg(icon, text, { key = null, tone = null } = {}) {
+  if (key) {
+    const existing = [...document.querySelectorAll('.agent-msg')]
+      .find(el => el.dataset.messageKey === key);
+    if (existing) existing.remove();
+  }
   const msg = document.createElement('div');
   msg.className = 'agent-msg';
+  if (tone) msg.classList.add(`agent-msg-${tone}`);
+  if (key) msg.dataset.messageKey = key;
   msg.innerHTML = `
     <div class="agent-icon">${icon}</div>
     <div class="agent-text">${text}</div>
@@ -306,15 +321,15 @@ function _prependMsg(icon, text) {
 export function renderCurrentMessages() {
   const content = $('#stepContent');
   content.querySelectorAll('.agent-msg').forEach(el => el.remove());
-  for (const { icon, text } of _allCurrentMsgs) {
-    _prependMsg(icon, text);
+  for (const { icon, text, key, tone } of _allCurrentMsgs) {
+    _prependMsg(icon, text, { key, tone });
   }
 }
 
 export function flushBufferedMessages() {
   if (_msgBuffer.length === 0) return;
-  for (const { icon, text } of _msgBuffer) {
-    _prependMsg(icon, text);
+  for (const { icon, text, key, tone } of _msgBuffer) {
+    _prependMsg(icon, text, { key, tone });
   }
   _msgBuffer = [];
 }

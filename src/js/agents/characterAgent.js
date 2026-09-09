@@ -162,7 +162,7 @@ export class CharacterAgent extends BaseAgent {
 
   async #writeDesignSpecs(ctx, token) {
     const signal = token?.signal;
-    addAgentMessage('🎨', t('ui.charDesignWriting'));
+    addAgentMessage('🎨', t('ui.charDesignWriting'), { key: 'activity-status' });
 
     if (!isConfigured()) return this.#templateDesigns(ctx);
 
@@ -294,7 +294,7 @@ export class CharacterAgent extends BaseAgent {
     const results = new Map();
     const pending = [...items];
 
-    addAgentMessage('🎨', t('ui.charDesignGenerating', { total: items.length }));
+    addAgentMessage('🎨', t('ui.charDesignGenerating', { total: items.length }), { key: 'activity-status' });
 
     for (let attempt = 0; attempt < MAX_ITEM_ATTEMPTS && pending.length > 0; attempt++) {
       const batch = pending.map(item => ({

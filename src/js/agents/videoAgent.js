@@ -378,7 +378,7 @@ export class VideoAgent extends BaseAgent {
     const results = new Map();
     const pending = [...items];
 
-    addAgentMessage('🎥', t('ui.videoGenGenerating', { current: 1, total: items.length }));
+    addAgentMessage('🎥', t('ui.videoGenGenerating', { current: 1, total: items.length }), { key: 'activity-status' });
 
     const maxAttempts = Math.max(MAX_ITEM_ATTEMPTS, ...items.map(item => item.modeCandidates?.length || 1));
     for (let attempt = 0; attempt < maxAttempts && pending.length > 0; attempt++) {
@@ -484,7 +484,7 @@ export class VideoAgent extends BaseAgent {
     const results = new Map();
     const pending = [...items];
 
-    addAgentMessage('🎥', t('ui.videoGenGenerating', { current: 1, total: items.length }));
+    addAgentMessage('🎥', t('ui.videoGenGenerating', { current: 1, total: items.length }), { key: 'activity-status' });
 
     for (let attempt = 0; attempt < MAX_ITEM_ATTEMPTS && pending.length > 0; attempt++) {
       const batch = pending.map(item => ({

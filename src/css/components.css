@@ -455,6 +455,8 @@ textarea.edit-input{resize:vertical;min-height:70px}
 }
 .agent-msg .agent-text{font-size:0.88rem;color:var(--cream2);line-height:1.6}
 .agent-msg.system .agent-icon{background:var(--bg3)}
+.agent-msg-danger{border-color:color-mix(in srgb,var(--rose) 45%,var(--glass-border))}
+.agent-msg-danger .agent-text{color:var(--rose)}
 
 .progress-wrap{margin:16px 0}
 .progress-bar{

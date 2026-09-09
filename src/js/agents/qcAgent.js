@@ -299,12 +299,16 @@ export class QCAgent {
 export function reportScore(score, agentIcon) {
   const scoreColor = score >= 8 ? '#00e5a0' : score >= 7 ? 'var(--gold)' : 'var(--rose)';
   const scoreText = t('critique.scoreDisplay', { score: score.toFixed(1) });
-  addAgentMessage(agentIcon, `<span style="color:${scoreColor}">${scoreText}</span>`);
+  addAgentMessage(agentIcon, `<span style="color:${scoreColor}">${scoreText}</span>`, { key: 'qc-status' });
   updateStepMetrics({ qualityScore: score });
 }
 
 export function reportRetry(score, retryNum, maxRetries, agentIcon) {
-  addAgentMessage(agentIcon, t('critique.retrying', { score: score.toFixed(1), retry: retryNum, max: maxRetries }));
+  addAgentMessage(
+    agentIcon,
+    t('critique.retrying', { score: score.toFixed(1), retry: retryNum, max: maxRetries }),
+    { key: 'qc-status', tone: 'danger' },
+  );
 }
 
 export function buildRetryFeedback(critiqueResult) {

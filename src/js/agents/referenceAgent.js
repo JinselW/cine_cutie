@@ -273,7 +273,7 @@ export class ReferenceAgent extends BaseAgent {
     const results = new Map();
     const pending = [...items];
 
-    addAgentMessage('🖼️', t('ui.refImagesGenerating', { current: 1, total: items.length }));
+    addAgentMessage('🖼️', t('ui.refImagesGenerating', { current: 1, total: items.length }), { key: 'activity-status' });
 
     for (let attempt = 0; attempt < MAX_ITEM_ATTEMPTS && pending.length > 0; attempt++) {
       const batch = pending.map(item => ({
