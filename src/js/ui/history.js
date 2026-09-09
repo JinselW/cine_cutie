@@ -138,7 +138,6 @@ export function initHistory() {
       detail.scrollTop = 0;
       if (canContinue) {
         detail.querySelector('[data-continue]').onclick = async () => {
-          if (!confirm(t('history.continueConfirm'))) return;
           dialog.close();
           restoreFormFromSnapshot(snap);
           showSection('pipelineSection');

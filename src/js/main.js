@@ -8,7 +8,7 @@ import './providers/render.js';
 import { $, $$, escapeHtml } from './utils.js';
 import { state } from './state.js';
 import { STEPS, dataKeyOf } from './config.js';
-import { buildPipelineBar, showSection, setMascot, addAgentMessage, updatePipeline, refreshRunningLanguage } from './ui/render.js';
+import { buildPipelineBar, showSection, setMascot, addAgentMessage, updatePipeline, refreshRunningLanguage, clearCurrentMessages } from './ui/render.js';
 import { showStepReadOnly } from './navigation.js';
 import { startPipeline, restoreSession, continuePipeline, clearSession, stopPipeline, persistWorkflow } from './engine.js';
 import { t, applyLang } from './i18n.js';
@@ -309,6 +309,9 @@ $('#startBtn').addEventListener('click', async () => {
   btn.disabled = true;
   btn.textContent = t('ui.starting');
   startProgressRun();
+  clearCurrentMessages();
+  $('#stepContent').innerHTML = '';
+  buildPipelineBar();
   showSection('pipelineSection');
 
   const genreLabel = state.visualStyle === 'custom'
@@ -320,7 +323,6 @@ $('#startBtn').addEventListener('click', async () => {
     : t('ui.modeCoHint');
 
   setTimeout(() => {
-    $('#stepContent').innerHTML = '';
     addAgentMessage('🎬', t('ui.welcome', { genreHint, modeHint }));
     setTimeout(() => startPipeline(), 2000);
   }, 800);
