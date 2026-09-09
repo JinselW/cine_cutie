@@ -24,7 +24,6 @@
         </div>
       </div>
       <button id="settingsBtn" class="icon-btn" title="AI Settings">⚙️<span class="llm-dot" id="llmDot"></span></button>
-      <button id="themeToggle" class="icon-btn" title="Toggle theme">🌙</button>
     </div>
     <div class="mascot-wrap">
       <div class="mascot" id="mascot">
@@ -340,6 +339,13 @@
         <select id="cfgLanguage" class="model-select">
           <option value="zh">中文</option>
           <option value="en">English</option>
+        </select>
+      </div>
+      <div class="modal-field modal-field-row">
+        <label id="lblTheme" data-i18n="ui.theme" for="cfgTheme">Theme</label>
+        <select id="cfgTheme" class="model-select">
+          <option value="dark" data-i18n="settings.theme.dark">Dark</option>
+          <option value="light" data-i18n="settings.theme.light">Light</option>
         </select>
       </div>
       <div class="modal-field modal-field-row">

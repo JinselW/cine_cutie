@@ -26,7 +26,6 @@ if (savedTheme) {
 } else {
   document.documentElement.dataset.theme = 'dark';
 }
-$('#themeToggle').textContent = state.theme === 'dark' ? '🌙' : '☀️';
 const savedLang = localStorage.getItem('cine-cutie-lang');
 if (savedLang) state.lang = savedLang;
 applyLang();
@@ -34,11 +33,17 @@ initSettings();
 initComfyStatus();
 initHistory();
 
-$('#themeToggle').addEventListener('click', () => {
-  state.theme = state.theme === 'dark' ? 'light' : 'dark';
-  document.documentElement.dataset.theme = state.theme;
-  localStorage.setItem('cine-cutie-theme', state.theme);
-  $('#themeToggle').textContent = state.theme === 'dark' ? '🌙' : '☀️';
+function setTheme(theme) {
+  if (theme !== 'dark' && theme !== 'light') return;
+  state.theme = theme;
+  document.documentElement.dataset.theme = theme;
+  localStorage.setItem('cine-cutie-theme', theme);
+  const themeSelect = $('#cfgTheme');
+  if (themeSelect) themeSelect.value = theme;
+}
+
+$('#cfgTheme')?.addEventListener('change', (event) => {
+  setTheme(event.target.value);
 });
 
 function setLanguage(lang) {
