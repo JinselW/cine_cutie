@@ -18,6 +18,24 @@ export function parseFfmpegProgress(output = '') {
   return matches.length ? Number(matches[matches.length - 1][1]) / 1_000_000 : 0;
 }
 
+export function parseVisualDefects(output = '') {
+  const text = String(output);
+  const sumDurations = pattern => [...text.matchAll(pattern)]
+    .reduce((sum, match) => sum + (Number(match[1]) || 0), 0);
+  return {
+    blackDurationSeconds: sumDurations(/black_duration:([0-9.]+)/g),
+    freezeDurationSeconds: sumDurations(/freeze_duration:\s*([0-9.]+)/g),
+  };
+}
+
+export function probeVisualDefects(inputPath) {
+  return new Promise(resolve => {
+    execFile(ffmpegPath, ['-hide_banner', '-i', inputPath, '-vf',
+      'blackdetect=d=0.2:pix_th=0.10,freezedetect=n=-50dB:d=1', '-an', '-f', 'null', '-'],
+    (_err, _stdout, stderr) => resolve(parseVisualDefects(stderr)));
+  });
+}
+
 function probeDuration(inputPath) {
   return new Promise(resolve => {
     execFile(ffmpegPath, ['-hide_banner', '-i', inputPath], (_err, _stdout, stderr) => {
