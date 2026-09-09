@@ -142,7 +142,7 @@
   box-shadow:0 0 10px rgba(74,222,128,.75);animation:pulse 1.5s ease infinite;
 }
 .comfy-monitor-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin-bottom:12px}
-.comfy-stat{min-width:0;padding:10px;background:rgba(0,0,0,.16);border-radius:var(--radius-xs)}
+.comfy-stat{min-width:0;padding:10px;background:transparent;border-radius:var(--radius-xs)}
 .comfy-stat span,.comfy-stat small{display:block;color:var(--cream3);font-size:.68rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .comfy-stat strong{display:block;margin:4px 0;font-size:.82rem;color:var(--cream);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .comfy-meter{margin-top:8px}
