@@ -96,8 +96,7 @@
 .mascot-thinking .mascot-reel{animation-duration:4s}
 
 .mascot-wrap.mascot-compact{
-  position:fixed;top:12px;left:12px;z-index:100;
-  margin:0;
+  display:none;
 }
 .mascot-wrap.mascot-compact .mascot{
   width:40px;height:40px;
@@ -147,7 +146,7 @@
 .mascot-wrap.mascot-compact.mascot-happy .mascot-mouth{
   width:8px;height:4px;border-bottom-width:1.5px;
 }
-.header.header-compact{padding:8px 0 8px;padding-left:60px}
+.header.header-compact{padding:8px 0}
 
 /* Mascot interaction effects */
 .mascot-bubble{

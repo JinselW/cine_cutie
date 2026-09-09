@@ -327,10 +327,8 @@ $('#startBtn').addEventListener('click', async () => {
     ? t('ui.modeAutoHint')
     : t('ui.modeCoHint');
 
-  setTimeout(() => {
-    addAgentMessage('🎬', t('ui.welcome', { genreHint, modeHint }));
-    setTimeout(() => startPipeline(), 2000);
-  }, 800);
+  addAgentMessage('🎬', t('ui.welcome', { genreHint, modeHint }));
+  await startPipeline();
 });
 
 $('#userInput').addEventListener('keydown', e => {
