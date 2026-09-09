@@ -258,6 +258,8 @@ const en = {
   'settings.nav.preferences': 'Preferences & Audio',
   'settings.preferencesTitle': 'General Preferences',
   'settings.language': 'Language',
+  'settings.theme.dark': 'Dark',
+  'settings.theme.light': 'Light',
   'settings.modelSelection': 'Model Selection',
   'settings.videoAudioHint': 'To get videos with built-in audio, choose a video model that supports audio generation — models without it produce silent clips.',
   'settings.textModel': 'Text & Evaluation Model',
@@ -702,6 +704,8 @@ const zh = {
   'settings.nav.preferences': '偏好与音频',
   'settings.preferencesTitle': '通用偏好',
   'settings.language': '语言',
+  'settings.theme.dark': '深色',
+  'settings.theme.light': '浅色',
   'settings.modelSelection': '模型选择',
   'settings.videoAudioHint': '若希望得到自带音频的视频，请选择支持音频生成的视频模型；不支持的模型只能输出无声片段。',
   'settings.textModel': '文本及评估模型',
@@ -911,8 +915,8 @@ export function applyLang() {
   if (langSelect) langSelect.value = state.lang;
   const settingsBtn = $('#settingsBtn');
   if (settingsBtn) settingsBtn.title = t('settings.title');
-  const themeBtn = $('#themeToggle');
-  if (themeBtn) themeBtn.title = t('ui.toggleTheme');
+  const themeSelect = $('#cfgTheme');
+  if (themeSelect) themeSelect.value = state.theme;
   const mascot = $('#mascot');
   if (mascot) mascot.title = t('ui.mascotHint');
 

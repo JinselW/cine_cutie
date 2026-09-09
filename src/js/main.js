@@ -8,7 +8,7 @@ import './providers/render.js';
 import { $, $$, escapeHtml } from './utils.js';
 import { state } from './state.js';
 import { STEPS, dataKeyOf } from './config.js';
-import { buildPipelineBar, showSection, setMascot, addAgentMessage, updatePipeline, refreshRunningLanguage } from './ui/render.js';
+import { buildPipelineBar, showSection, setMascot, addAgentMessage, updatePipeline, refreshRunningLanguage, clearCurrentMessages } from './ui/render.js';
 import { showStepReadOnly } from './navigation.js';
 import { startPipeline, restoreSession, continuePipeline, clearSession, stopPipeline, persistWorkflow } from './engine.js';
 import { t, applyLang } from './i18n.js';
@@ -26,7 +26,6 @@ if (savedTheme) {
 } else {
   document.documentElement.dataset.theme = 'dark';
 }
-$('#themeToggle').textContent = state.theme === 'dark' ? '🌙' : '☀️';
 const savedLang = localStorage.getItem('cine-cutie-lang');
 if (savedLang) state.lang = savedLang;
 applyLang();
@@ -34,11 +33,17 @@ initSettings();
 initComfyStatus();
 initHistory();
 
-$('#themeToggle').addEventListener('click', () => {
-  state.theme = state.theme === 'dark' ? 'light' : 'dark';
-  document.documentElement.dataset.theme = state.theme;
-  localStorage.setItem('cine-cutie-theme', state.theme);
-  $('#themeToggle').textContent = state.theme === 'dark' ? '🌙' : '☀️';
+function setTheme(theme) {
+  if (theme !== 'dark' && theme !== 'light') return;
+  state.theme = theme;
+  document.documentElement.dataset.theme = theme;
+  localStorage.setItem('cine-cutie-theme', theme);
+  const themeSelect = $('#cfgTheme');
+  if (themeSelect) themeSelect.value = theme;
+}
+
+$('#cfgTheme')?.addEventListener('change', (event) => {
+  setTheme(event.target.value);
 });
 
 function setLanguage(lang) {
@@ -309,6 +314,9 @@ $('#startBtn').addEventListener('click', async () => {
   btn.disabled = true;
   btn.textContent = t('ui.starting');
   startProgressRun();
+  clearCurrentMessages();
+  $('#stepContent').innerHTML = '';
+  buildPipelineBar();
   showSection('pipelineSection');
 
   const genreLabel = state.visualStyle === 'custom'
@@ -320,7 +328,6 @@ $('#startBtn').addEventListener('click', async () => {
     : t('ui.modeCoHint');
 
   setTimeout(() => {
-    $('#stepContent').innerHTML = '';
     addAgentMessage('🎬', t('ui.welcome', { genreHint, modeHint }));
     setTimeout(() => startPipeline(), 2000);
   }, 800);
