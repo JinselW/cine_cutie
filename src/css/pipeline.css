@@ -146,7 +146,6 @@
   border-radius:var(--radius-sm);background:transparent;
   text-align:left;color:var(--cream2);
 }
-.comfy-monitor-step{max-width:760px;margin-left:auto;margin-right:auto}
 .comfy-monitor-head,.comfy-task-line,.comfy-meter-head{
   display:flex;align-items:center;justify-content:space-between;gap:12px;
 }

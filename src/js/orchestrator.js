@@ -311,6 +311,9 @@ class Orchestrator {
   #buildContext(step) {
     const ctx = {
       userInput: state.userInput,
+      // Generation language is a live preference, not part of a workflow's
+      // historical identity. Every (re)run must follow the current UI.
+      lang: state.lang,
       promptDoc: state.promptDoc?.text || '',
       genre: state.genre,
       totalDuration: state.totalDuration,
@@ -732,13 +735,14 @@ class Orchestrator {
     state.imageSize = input.imageSize || '1280*720';
     state.resolution = input.resolution || '720P';
     state.mode = input.mode || 'auto';
-    if (input.lang) state.lang = input.lang;
+    // Do not restore input.lang: opening an old workflow must never change the
+    // user's current UI/output language preference.
     state.stopped = false;
     state.paused = false;
     state.stepRunning = false;
     state.viewingStep = null;
 
-    attachMemory(memoryId, input);
+    attachMemory(memoryId, { ...input, lang: state.lang });
     this.#token = new CancellationToken();
 
     const wasInterrupted = this.#runState.isInterrupted;

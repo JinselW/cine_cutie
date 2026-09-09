@@ -373,7 +373,8 @@
       <div class="modal-field">
         <label id="lblBgmFile" data-i18n="settings.bgm.select" for="cfgBgmFile">Select MP3 / WAV (&le;20MB)</label>
         <div class="bgm-file-row">
-          <input type="file" id="cfgBgmFile" accept="audio/mpeg,audio/wav,audio/x-wav,audio/mp4,.mp3,.wav,.m4a,.ogg,.aac,.flac">
+          <input class="visually-hidden-file" type="file" id="cfgBgmFile" accept="audio/mpeg,audio/wav,audio/x-wav,audio/mp4,.mp3,.wav,.m4a,.ogg,.aac,.flac">
+          <label class="action-btn bgm-file-picker" for="cfgBgmFile" data-i18n="settings.bgm.choose">Choose File</label>
           <span id="bgmFileName" class="bgm-file-name">No file</span>
           <button id="bgmClearBtn" class="action-btn" type="button" data-i18n="settings.bgm.clear">Clear</button>
         </div>

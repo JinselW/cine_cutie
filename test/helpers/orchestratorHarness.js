@@ -32,7 +32,7 @@ const NOOP_EXPORTS = ['showGenerating', 'setGenAnim', 'clearCurrentMessages', 'w
 
 export async function createHarness({ mode = 'auto' } = {}) {
   const state = {
-    mode, entities: {}, currentStep: -1, userInput: 'a story', genre: 'cinematic', totalDuration: 30,
+    mode, lang: 'zh', entities: {}, currentStep: -1, userInput: 'a story', genre: 'cinematic', totalDuration: 30,
     data: { script: null, characterDesign: null, storyboard: null, referenceImages: null, videoClips: null, finalVideo: null },
   };
   const calls = {

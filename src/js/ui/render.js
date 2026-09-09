@@ -3,7 +3,6 @@ import { STEPS, dataKeyOf } from '../config.js';
 import { state, resetState } from '../state.js';
 import { t } from '../i18n.js';
 import { onNodeClick } from '../navigation.js';
-import { isComfySelected, startComfyMonitor, stopComfyMonitor } from './comfyMonitor.js';
 import { beginStage, getProgressSnapshot } from '../progressTracker.js';
 
 let _genAnim = null;
@@ -151,7 +150,6 @@ export function showGenerating(stepIndex) {
         <div class="progress-label"><span id="genPhase">${t('progress.preparing')}</span><span id="genPercent"></span></div>
         <div class="progress-detail" id="genProgressDetail">${label}</div>
       </div>
-      ${step.id === 'videoGeneration' ? '<div id="comfyMonitorStep" class="comfy-monitor comfy-monitor-step hidden" aria-live="polite"></div>' : ''}
       <div style="margin-top:12px;text-align:center">
         <button class="action-btn" id="pauseBtn" style="padding:6px 20px;font-size:13px">${t('ui.pause')}</button>
       </div>
@@ -161,9 +159,6 @@ export function showGenerating(stepIndex) {
   setMascotCompact(true);
 
   $('#pauseBtn').addEventListener('click', pauseGeneration);
-  if (step.id === 'videoGeneration' && isComfySelected()) {
-    startComfyMonitor('comfyMonitorStep', { showTaskProgress: true });
-  }
 
   const renderProgress = detail => {
     const fill = $('#genProgress');
@@ -203,7 +198,6 @@ export function showGenerating(stepIndex) {
     stop() {
       if (_progressHandler) window.removeEventListener('pipeline-progress', _progressHandler);
       _progressHandler = null;
-      stopComfyMonitor('comfyMonitorStep');
     }
   };
   setGenAnim(anim);

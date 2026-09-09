@@ -141,6 +141,8 @@ function applyComfyUiState(on) {
 
 }
 
+window.addEventListener('languagechange', renderBgmFileUi);
+
 function openModal() {
   const modal = $('#settingsModal');
   if (!modal) return;

@@ -77,7 +77,10 @@ export function recordMemoryMessage(role, text, stepId = null) {
 
 export function activeMemoryId() { return active?.id; }
 export function attachMemory(id, snapshotInput) {
-  active = { id, input: structuredClone(snapshotInput || {}), messages: [], status: 'running' };
+  // Language follows the live preference when a historical run is resumed.
+  // Persist that effective value so subsequent resumes are reproducible without
+  // allowing an old snapshot to switch the interface back.
+  active = { id, input: structuredClone({ ...(snapshotInput || {}), lang: state.lang }), messages: [], status: 'running' };
 }
 export function retryMemorySave() { return saveMemory(); }
 export function detachMemory(id) {

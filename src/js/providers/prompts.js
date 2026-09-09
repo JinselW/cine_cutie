@@ -1,5 +1,10 @@
 const JSON_RULE = 'Reply ONLY with valid JSON. No markdown, no commentary, no code fences.';
-const LANG_RULE = 'Write all creative content (titles, descriptions, dialogue, etc.) in the SAME LANGUAGE as the user\'s story idea. Keep all JSON keys in English exactly as specified.';
+const LANG_RULE = 'Follow the OUTPUT LANGUAGE directive exactly, even when source material or a previous workflow is in another language. Keep all JSON keys in English exactly as specified.';
+
+export function buildLanguageDirective(lang) {
+  const language = lang === 'en' ? 'English' : 'Simplified Chinese';
+  return `OUTPUT LANGUAGE (CURRENT UI): ${language}. This overrides the language of the story idea, reference document, previous result, feedback, and historical workflow. Write every user-facing creative field (title, names, summaries, descriptions, design notes, dialogue, etc.) in ${language}. Fields explicitly marked as English-only generation prompts or stable visual tags must remain English; when such a technical field contains spoken dialogue, keep the quoted spoken words in ${language}.`;
+}
 
 export const STYLE_HINTS = {
   cinematic: 'cinematic film look, natural lighting, realistic tones',
@@ -251,7 +256,7 @@ export function buildMessages(stepId, ctx) {
   const prompt = PROMPTS[stepId];
   if (!prompt) return null;
 
-  const systemContent = prompt.system;
+  const systemContent = `${prompt.system}\n\n${buildLanguageDirective(ctx.lang)}`;
   let userContent = prompt.buildUser(ctx);
 
   if (ctx.constraints) {
