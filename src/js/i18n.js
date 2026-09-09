@@ -222,6 +222,7 @@ const en = {
   'settings.nav.models': 'Models & Generation',
   'settings.nav.preferences': 'Preferences & Audio',
   'settings.preferencesTitle': 'General Preferences',
+  'settings.language': 'Language',
   'settings.modelSelection': 'Model Selection',
   'settings.videoAudioHint': 'To get videos with built-in audio, choose a video model that supports audio generation — models without it produce silent clips.',
   'settings.textModel': 'Text & Evaluation Model',
@@ -629,6 +630,7 @@ const zh = {
   'settings.nav.models': '模型与生成',
   'settings.nav.preferences': '偏好与音频',
   'settings.preferencesTitle': '通用偏好',
+  'settings.language': '语言',
   'settings.modelSelection': '模型选择',
   'settings.videoAudioHint': '若希望得到自带音频的视频，请选择支持音频生成的视频模型；不支持的模型只能输出无声片段。',
   'settings.textModel': '文本及评估模型',
@@ -833,11 +835,8 @@ export function getLang() {
 }
 
 export function applyLang() {
-  const langBtn = $('#langToggle');
-  if (langBtn) {
-    langBtn.textContent = state.lang === 'zh' ? 'EN' : '中';
-    langBtn.title = t('ui.switchLanguage');
-  }
+  const langSelect = $('#cfgLanguage');
+  if (langSelect) langSelect.value = state.lang;
   const settingsBtn = $('#settingsBtn');
   if (settingsBtn) settingsBtn.title = t('settings.title');
   const themeBtn = $('#themeToggle');
