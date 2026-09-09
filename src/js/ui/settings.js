@@ -233,6 +233,7 @@ function openModal() {
   $('#comfySshPort').value = comfyCfg.port || '';
   $('#comfySshUser').value = comfyCfg.user || '';
   $('#comfySshComfyPort').value = comfyCfg.comfyPort || '';
+  $('#comfySshPassword').value = comfyCfg.password || '';
   $('#comfyEnableLightning').checked = comfyCfg.enableLightning || false;
 
   const useComfyToggle = $('#cfgUseComfyVideo');
@@ -480,6 +481,7 @@ function saveComfySshConfig() {
     host: $('#comfySshHost')?.value?.trim() || '',
     port: parseInt($('#comfySshPort')?.value) || 6078,
     user: $('#comfySshUser')?.value?.trim() || 'Developer',
+    password: $('#comfySshPassword')?.value || '',
     comfyPort: parseInt($('#comfySshComfyPort')?.value) || 8188,
     enableLightning: $('#comfyEnableLightning')?.checked || false,
   };
@@ -510,6 +512,12 @@ export function initSettings() {
     const target = btn.dataset.target;
     if (!target) return;
     const input = modal.querySelector(`.api-key[data-p="${target}"]`);
+    if (!input) return;
+    input.type = input.type === 'password' ? 'text' : 'password';
+  });
+
+  $('#toggleComfyPassword')?.addEventListener('click', () => {
+    const input = $('#comfySshPassword');
     if (!input) return;
     input.type = input.type === 'password' ? 'text' : 'password';
   });

@@ -321,6 +321,13 @@
             <label data-i18n="settings.comfyPort">ComfyUI Port</label>
             <input type="number" id="comfySshComfyPort" placeholder="8188">
           </div>
+          <div class="modal-field" style="grid-column: 1 / -1">
+            <label data-i18n="settings.comfySshPassword">SSH Password</label>
+            <div class="input-with-toggle">
+              <input type="password" id="comfySshPassword" placeholder="" autocomplete="off">
+              <button class="toggle-vis-btn" type="button" id="toggleComfyPassword">👁</button>
+            </div>
+          </div>
         </div>
         <div class="modal-field modal-field-row">
           <label data-i18n="settings.comfyLightning">Enable Lightning LoRA (faster, fewer steps)</label>

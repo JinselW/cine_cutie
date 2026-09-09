@@ -78,33 +78,22 @@ function safeResolveMediaPath(ref) {
 }
 
 function buildSshConfig(partial) {
-  const password = process.env.COMFY_SSH_PASSWORD;
-  if (!password) {
-    return null;
-  }
+  const password = process.env.COMFY_SSH_PASSWORD || partial?.password;
+  if (!password) return null;
+
   const serverHost = process.env.COMFY_SSH_HOST;
   const serverPort = process.env.COMFY_SSH_PORT;
   const serverUser = process.env.COMFY_SSH_USER;
   const serverComfyPort = process.env.COMFY_SSH_COMFY_PORT;
 
-  // 优先使用服务器端配置，防止 SSRF 攻击
   const host = serverHost || partial?.host;
   const port = serverPort || partial?.port || 6078;
   const user = serverUser || partial?.user || 'Developer';
   const comfyPort = serverComfyPort || partial?.comfyPort || 8188;
 
-  // 如果服务器端未配置 host，则拒绝客户端输入（生产环境）
-  if (!serverHost && !partial?.host) {
-    return null;
-  }
+  if (!host || !user) return null;
 
-  return {
-    host,
-    port,
-    user,
-    password,
-    comfyPort,
-  };
+  return { host, port, user, password, comfyPort };
 }
 
 const upload = multer({
@@ -123,7 +112,7 @@ const upload = multer({
 });
 
 function isV2Model(name) {
-  return typeof name === 'string' && name.startsWith('wan2.7');
+  return typeof name === 'string' && /^wan2\.\d/.test(name);
 }
 
 const bgmUpload = multer({
@@ -791,7 +780,7 @@ app.post('/api/generate/video-comfy', async (req, res) => {
 
   const sshConfig = buildSshConfig(clientSsh);
   if (!sshConfig) {
-    return res.status(500).json({ error: 'COMFY_SSH_PASSWORD not set on server' });
+    return res.status(500).json({ error: 'SSH password not configured — set COMFY_SSH_PASSWORD in .env or enter it in Settings' });
   }
 
   if (!Array.isArray(clips) || clips.length === 0) {
@@ -994,7 +983,7 @@ app.post('/api/upload/comfy', upload.array('files', 10), async (req, res) => {
 
   const sshConfig = buildSshConfig(clientSsh);
   if (!sshConfig) {
-    return res.status(500).json({ error: 'COMFY_SSH_PASSWORD not set on server' });
+    return res.status(500).json({ error: 'SSH password not configured — set COMFY_SSH_PASSWORD in .env or enter it in Settings' });
   }
 
   const uploaded = [];
@@ -1020,7 +1009,7 @@ app.get('/api/comfyui/status', async (req, res) => {
     const clientSsh = JSON.parse(sshConfigStr);
     const sshConfig = buildSshConfig(clientSsh);
     if (!sshConfig) {
-      return res.json({ tunnel: getTunnelStatus(), comfyui: { online: false, error: 'COMFY_SSH_PASSWORD not set on server' } });
+      return res.json({ tunnel: getTunnelStatus(), comfyui: { online: false, error: 'SSH password not configured — set COMFY_SSH_PASSWORD in .env or enter it in Settings' } });
     }
     const tunnel = getTunnelStatus();
     const comfyStatus = await checkComfyUIStatus(sshConfig);
@@ -1035,7 +1024,7 @@ app.get('/api/comfyui/monitor', async (req, res) => {
   if (!sshConfigStr) return res.status(400).json({ error: 'No SSH config provided' });
   try {
     const sshConfig = buildSshConfig(JSON.parse(sshConfigStr));
-    if (!sshConfig) return res.status(500).json({ error: 'COMFY_SSH_PASSWORD not set on server' });
+    if (!sshConfig) return res.status(500).json({ error: 'SSH password not configured — set COMFY_SSH_PASSWORD in .env or enter it in Settings' });
     const [comfy, system] = await Promise.allSettled([
       getComfyMonitorStatus(sshConfig),
       getDgxMetrics(sshConfig),
