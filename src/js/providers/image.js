@@ -7,7 +7,7 @@ import { reportBatchProgress } from '../progressTracker.js';
 const SETTINGS_KEY = 'cine-cutie-settings';
 const OLD_DS_KEY = 'cine-cutie-dashscope';
 
-let config = { apiKey: '', imageModel: 'wanx2.1-t2i-turbo', img2imgModel: '', videoModel: 'wan2.7-i2v', lastFrameVideoModel: 'wan2.7-i2v', refVideoModel: 'wan2.7-r2v' };
+let config = { apiKey: '', imageModel: 'wan2.6-t2i', img2imgModel: '', videoModel: 'wan2.6-i2v', lastFrameVideoModel: 'wan2.7-i2v', refVideoModel: 'wan2.7-r2v' };
 
 function loadConfig() {
   try {
@@ -15,9 +15,9 @@ function loadConfig() {
     if (saved) {
       const parsed = JSON.parse(saved);
       config.apiKey = parsed.apiProviders?.dashscope?.apiKey || '';
-      config.imageModel = parsed.models?.image?.name || 'wanx2.1-t2i-turbo';
+      config.imageModel = parsed.models?.image?.name || 'wan2.6-t2i';
       config.img2imgModel = parsed.models?.img2img?.name || '';
-      config.videoModel = parsed.models?.video?.name || 'wan2.7-i2v';
+      config.videoModel = parsed.models?.video?.name || 'wan2.6-i2v';
       config.lastFrameVideoModel = parsed.models?.lastFrameVideo?.name || parsed.models?.video?.name || 'wan2.7-i2v';
       config.refVideoModel = parsed.models?.refVideo?.name || 'wan2.7-r2v';
     } else {

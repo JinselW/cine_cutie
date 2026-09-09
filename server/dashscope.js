@@ -2,7 +2,7 @@ const DASHSCOPE_BASE = 'https://dashscope.aliyuncs.com/api/v1';
 
 export async function submitImageTask(prompt, { model, size = '1024*1024', apiKey, seed } = {}) {
   if (!model) throw new Error('submitImageTask: model is required');
-  const url = `${DASHSCOPE_BASE}/services/aigc/text2image/image-synthesis`;
+  const url = `${DASHSCOPE_BASE}/services/aigc/image-generation/generation`;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 30000);
 
@@ -19,8 +19,13 @@ export async function submitImageTask(prompt, { model, size = '1024*1024', apiKe
       },
       body: JSON.stringify({
         model,
-        input: { prompt },
-        parameters: { size, n: 1, ...(seed != null && { seed }) }
+        input: {
+          messages: [{
+            role: 'user',
+            content: [{ text: prompt }]
+          }]
+        },
+        parameters: { size, n: 1, watermark: false, ...(seed != null && { seed }) }
       }),
       signal: controller.signal
     });

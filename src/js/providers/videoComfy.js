@@ -69,6 +69,7 @@ const comfyUIProvider = {
         host: sshConfig.host,
         port: sshConfig.port || 6078,
         user: sshConfig.user || 'Developer',
+        password: sshConfig.password || '',
         comfyPort: sshConfig.comfyPort || 8188,
       },
       aspectRatio: state.aspectRatio || '16:9',

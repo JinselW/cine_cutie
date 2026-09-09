@@ -4,7 +4,7 @@ import { t } from '../i18n.js';
 import { addAgentMessage } from '../ui/render.js';
 
 const SETTINGS_KEY = 'cine-cutie-settings';
-const SETTINGS_VERSION = 3;
+const SETTINGS_VERSION = 4;
 const OLD_LLM_KEY = 'cine-cutie-llm';
 const OLD_DS_KEY = 'cine-cutie-dashscope';
 
@@ -25,12 +25,12 @@ const MODEL_PRESETS = {
   gemini:    ['gemini-2.0-flash', 'gemini-1.5-pro'],
 };
 
-const IMAGE_PRESETS = ['wanx2.1-t2i-turbo', 'wanx2.1-t2i-plus'];
+const IMAGE_PRESETS = ['wan2.6-t2i'];
 const IMG2IMG_PRESETS = ['wan2.6-image'];
 
 const VIDEO_MODES = [
-  { id: 'firstFrame', presets: ['wan2.7-i2v', 'wanx2.1-i2v-plus', 'wan2.5-i2v-preview'], defaultModel: 'wan2.7-i2v', configKey: 'video' },
-  { id: 'firstLastFrame', presets: ['wan2.7-i2v', 'wanx2.1-i2v-plus'], defaultModel: 'wan2.7-i2v', configKey: 'video' },
+  { id: 'firstFrame', presets: ['wan2.6-i2v'], defaultModel: 'wan2.6-i2v', configKey: 'video' },
+  { id: 'firstLastFrame', presets: ['wan2.7-i2v'], defaultModel: 'wan2.7-i2v', configKey: 'video' },
   { id: 'referenceImage', presets: ['wan2.7-r2v'], defaultModel: 'wan2.7-r2v', configKey: 'refVideo' },
   { id: 'auto', presets: [], defaultModel: '', configKey: null },
 ];
@@ -60,9 +60,9 @@ let config = {
   apiProviders: structuredClone(PROVIDER_DEFAULTS),
   models: {
     text: { provider: 'dashscope', name: 'qwen-plus' },
-    image: { name: 'wanx2.1-t2i-turbo' },
+    image: { name: 'wan2.6-t2i' },
     img2img: { name: 'wan2.6-image' },
-    video: { name: 'wan2.7-i2v' },
+    video: { name: 'wan2.6-i2v' },
     lastFrameVideo: { name: 'wan2.7-i2v' },
     refVideo: { name: 'wan2.7-r2v' },
   },
@@ -92,9 +92,9 @@ function migrateOldConfig() {
     apiProviders: structuredClone(PROVIDER_DEFAULTS),
     models: {
       text: { provider: 'dashscope', name: '' },
-      image: { name: 'wanx2.1-t2i-turbo' },
+      image: { name: 'wan2.6-t2i' },
       img2img: { name: 'wan2.6-image' },
-      video: { name: 'wan2.7-i2v' },
+      video: { name: 'wan2.6-i2v' },
       lastFrameVideo: { name: 'wan2.7-i2v' },
       refVideo: { name: 'wan2.7-r2v' },
     },
@@ -133,8 +133,8 @@ function loadConfig() {
     if (saved) {
       const parsed = JSON.parse(saved);
       const savedVersion = Number(parsed.settingsVersion || 0);
-      const upgradeFirstFrameDefault = savedVersion < 2
-        && ['wan2.5-i2v-preview', 'wanx2.1-i2v-plus'].includes(parsed.models?.video?.name?.trim());
+      const upgradeFirstFrameDefault = savedVersion < 4
+        && ['wan2.5-i2v-preview', 'wanx2.1-i2v-plus', 'wan2.7-i2v'].includes(parsed.models?.video?.name?.trim());
       const savedLastFrameName = parsed.models?.lastFrameVideo?.name?.trim();
       const upgradeFirstLastFrameDefault = savedVersion < 3
         && ['wan2.5-i2v-preview', 'wanx2.1-i2v-plus'].includes(savedLastFrameName);
@@ -143,9 +143,9 @@ function loadConfig() {
         apiProviders: { ...structuredClone(PROVIDER_DEFAULTS), ...parsed.apiProviders },
         models: {
           text: parsed.models?.text || { provider: 'dashscope', name: '' },
-          image: parsed.models?.image || { name: 'wanx2.1-t2i-turbo' },
+          image: parsed.models?.image || { name: 'wan2.6-t2i' },
           img2img: parsed.models?.img2img || { name: 'wan2.6-image' },
-          video: upgradeFirstFrameDefault ? { name: 'wan2.7-i2v' } : (parsed.models?.video || { name: 'wan2.7-i2v' }),
+          video: upgradeFirstFrameDefault ? { name: 'wan2.6-i2v' } : (parsed.models?.video || { name: 'wan2.6-i2v' }),
           lastFrameVideo: upgradeFirstLastFrameDefault
             ? { name: 'wan2.7-i2v' }
             : { name: savedLastFrameName || parsed.models?.video?.name || 'wan2.7-i2v' },

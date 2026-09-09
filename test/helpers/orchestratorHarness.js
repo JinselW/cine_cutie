@@ -40,6 +40,7 @@ export async function createHarness({ mode = 'auto' } = {}) {
     extracts: 0, cancelled: 0, animStops: 0, memoryStatus: null,
   };
   const persistence = { snapshots: [], next: null };
+  let pendingAdvance = null;
   const plans = new Map();
   const attempts = new Map();
   const gates = new Map();
@@ -110,8 +111,9 @@ export async function createHarness({ mode = 'auto' } = {}) {
     addAgentMessage: (icon, text) => calls.messages.push({ icon, text }),
     cancelAutoAdvance: () => calls.cancelled++,
     scheduleAutoAdvance: () => {},
-    setPendingAdvance: () => {},
-    clearPendingAdvance: () => {},
+    setPendingAdvance: fn => { pendingAdvance = fn; },
+    getPendingAdvance: () => pendingAdvance,
+    clearPendingAdvance: () => { pendingAdvance = null; },
     getGenAnim: () => ({ stop: () => calls.animStops++ }),
     finishStage: () => {},
   };
