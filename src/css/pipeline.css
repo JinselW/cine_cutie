@@ -45,7 +45,7 @@
 .pipe-node-sm.active{border-color:var(--gold);box-shadow:0 0 16px rgba(240,192,64,0.3);animation:pulse 1.5s ease infinite}
 .pipe-node-sm.done{border-color:var(--gold);background:var(--gold);color:var(--bg)}
 .pipe-node-sm.done::after{content:'✓';font-size:0.85rem;font-weight:700}
-.pipe-line-sm{width:28px;height:2px;background:var(--glass-border);transition:background 0.5s ease;margin-top:23px}
+.pipe-line-sm{width:56px;height:2px;background:var(--glass-border);transition:background 0.5s ease;margin-top:23px}
 .pipe-line-sm.done{background:var(--gold)}
 
 .gen-status{text-align:center;padding:32px 20px}
