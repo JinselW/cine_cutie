@@ -1,5 +1,6 @@
 import { BaseAgent } from './baseAgent.js';
-import { QCAgent, reportScore } from './qcAgent.js';
+import { reportScore } from './qcAgent.js';
+import { DeliveryQCAgent } from './deliveryQCAgent.js';
 import { getActiveProvider } from '../providers/registry.js';
 import { chat, getConfig, isConfigured, parseJson } from '../providers/llm.js';
 import { createArtifact, ArtifactKind, ArtifactStatus } from '../artifacts/artifactTypes.js';
@@ -31,7 +32,7 @@ export class EditorAgent extends BaseAgent {
 
   constructor() {
     super({ name: 'Post-Production Artist', stepId: 'postProduction' });
-    this.#qcAgent = new QCAgent({ stepId: 'postProduction' });
+    this.#qcAgent = new DeliveryQCAgent();
   }
 
   async run(ctx, _token) {
@@ -44,11 +45,21 @@ export class EditorAgent extends BaseAgent {
     const finalData = result;
     const hasFinal = !!finalData.finalVideo;
 
-    // Post-production concatenation is deterministic — a single unified QC decision,
-    // no regeneration. qcAgent.process folds the consistency hard gate into the score.
+    // Delivery QC combines deterministic media checks with multimodal creative review.
     reportPhase('validating');
     const crit = await this.#qcAgent.process({ data: finalData, entities: ctx.entities || {}, ...ctx });
     reportScore(crit.score, '🎬');
+
+    finalData.qcBaseline = {
+      ...(finalData.qcBaseline || {}),
+      overallQuality: crit.score,
+      narrativeFaithfulness: crit.creative?.llm?.scores?.criterion2 ?? null,
+      visualConsistency: crit.creative?.llm?.scores?.criterion3 ?? null,
+      deliveryVerdict: crit.verdict,
+      deliveryChecks: crit.technical?.checks || [],
+      repairPlan: crit.repairPlan || null,
+      failureReasons: crit.issues || [],
+    };
 
     const sourceArtifactIds = ctx.sourceArtifactIds?.videoGeneration ? [ctx.sourceArtifactIds.videoGeneration] : [];
 
@@ -65,13 +76,7 @@ export class EditorAgent extends BaseAgent {
         renderStatus: finalData.status || 'failed',
         qualityScore: crit.score,
         consistencyIssues: crit.consistency?.issues || [],
-        qcBaseline: {
-          ...(finalData.qcBaseline || {}),
-          overallQuality: crit.score,
-          narrativeFaithfulness: crit.llm?.scores?.criterion2 ?? null,
-          visualConsistency: crit.llm?.scores?.criterion3 ?? null,
-          failureReasons: [...(crit.consistency?.issues || []), ...(crit.llm?.issues || [])],
-        },
+        qcBaseline: finalData.qcBaseline,
         verdict: crit.verdict ?? (hasFinal ? null : QCVerdict.FAIL),
         feedbackSatisfied: crit.feedbackSatisfied ?? !ctx.feedback,
       },

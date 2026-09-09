@@ -25,7 +25,6 @@
       </div>
       <button id="settingsBtn" class="icon-btn" title="AI Settings">⚙️<span class="llm-dot" id="llmDot"></span></button>
       <button id="themeToggle" class="icon-btn" title="Toggle theme">🌙</button>
-      <button id="langToggle" class="icon-btn" title="Switch language">中</button>
     </div>
     <div class="mascot-wrap">
       <div class="mascot" id="mascot">
@@ -336,6 +335,13 @@
 
       <section class="settings-panel" data-settings-panel="preferences" hidden>
       <div class="modal-section-title" data-i18n="settings.preferencesTitle">General Preferences</div>
+      <div class="modal-field modal-field-row">
+        <label id="lblLanguage" data-i18n="settings.language" for="cfgLanguage">Language</label>
+        <select id="cfgLanguage" class="model-select">
+          <option value="zh">中文</option>
+          <option value="en">English</option>
+        </select>
+      </div>
       <div class="modal-field modal-field-row">
         <label id="lblJsonMode">JSON Mode</label>
         <label class="toggle-switch">

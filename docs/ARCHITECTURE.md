@@ -140,6 +140,7 @@ setActiveProvider(cap, id)     // 切换（localStorage `cine-cutie-providers`�
 ### 5. 质量保障 (`agents/qc*.js` + `retryAgent.js`)
 
 - **QCAgent** (`qcAgent.js`): 每步输出 LLM 自评 1-10（阈值 7）。媒体步骤附加真实图片/视频帧做多模态评审。
+- **DeliveryQCAgent** (`deliveryQCAgent.js` / `deliveryQC.js`): 最终渲染后检查可播放视频流、目标时长、黑帧、冻结帧、音频峰值与响度，再与多模态成片评审合并；失败结果附带建议回退的修复步骤。
   `combineVerdict()` 让确定性一致性检查成为硬门禁：最终分 = min(LLM 分, 结构分)
 - **一致性** (`qcConsistency.js`): `extractEntities` / `mergeEntities` 跨步追踪实体；
   `buildConsistencyConstraints` 注入 "CONSISTENCY CONSTRAINTS" 到 prompt；`checkConsistency` 检查缺角色图、镜头缺参考图、帧数与视频生成方式不匹配（缺收尾帧/尾帧，非致命 → CONDITIONAL_PASS）、片段失败率过高、步骤4规划的 mode 与实际片段 mode 不一致（设置在两步之间被改过，非致命提示重跑步骤4）等

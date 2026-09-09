@@ -365,6 +365,35 @@
 }
 .feedback-area textarea:focus{border-color:var(--rose)}
 .feedback-area textarea::placeholder{color:var(--cream3)}
+
+.edit-form .edit-body{display:flex;flex-direction:column;gap:14px}
+.edit-field{display:flex;flex-direction:column;gap:4px}
+.edit-label{font-size:0.72rem;color:var(--gold);font-weight:700;text-transform:uppercase;letter-spacing:0.3px}
+.edit-input{
+  width:100%;background:var(--bg2);border:1px solid var(--glass-border);border-radius:var(--radius-xs);
+  padding:8px 10px;color:var(--cream);font-size:0.86rem;outline:none;font-family:var(--font);line-height:1.5;
+}
+.edit-input:focus{border-color:var(--gold)}
+textarea.edit-input{resize:vertical;min-height:70px}
+.edit-check{width:18px;height:18px;accent-color:var(--gold)}
+.edit-readonly{padding:6px 0;border-bottom:1px dashed var(--glass-border)}
+.edit-ro-value{font-size:0.8rem;color:var(--cream3);word-break:break-word}
+.edit-array{display:flex;flex-direction:column;gap:8px;padding:10px;border:1px solid var(--glass-border);border-radius:var(--radius-xs);background:rgba(0,0,0,0.08)}
+.edit-array-label{font-size:0.78rem;color:var(--cream2);font-weight:700}
+.edit-array-items{display:flex;flex-direction:column;gap:8px}
+.edit-card{position:relative;padding:12px;border:1px solid var(--glass-border);border-radius:var(--radius-xs);background:var(--bg3);display:flex;flex-direction:column;gap:8px}
+.edit-card-title{font-size:0.78rem;color:var(--gold);font-weight:600}
+.edit-remove{
+  position:absolute;top:8px;right:8px;width:22px;height:22px;border-radius:50%;
+  border:none;background:var(--rose);color:#fff;cursor:pointer;font-size:0.7rem;line-height:1;
+}
+.edit-remove:hover{background:var(--rose-dim)}
+.edit-add{
+  align-self:flex-start;padding:6px 14px;border-radius:var(--radius-xs);
+  border:1px dashed var(--glass-border);background:transparent;color:var(--cream2);
+  cursor:pointer;font-size:0.8rem;font-family:var(--font);
+}
+.edit-add:hover{border-color:var(--gold);color:var(--cream)}
 .feedback-hint{font-size:0.78rem;color:var(--cream3);margin-top:6px}
 
 .agent-msg{
@@ -608,6 +637,7 @@
   background-repeat:no-repeat;background-position:right 10px center;
 }
 .model-select:focus{border-color:var(--gold);outline:none}
+.modal-field-row .model-select{width:auto;min-width:150px;margin-left:12px}
 .model-select optgroup{color:var(--cream2);background:var(--bg2)}
 .model-select option{color:var(--cream);background:var(--bg2)}
 

@@ -1,13 +1,15 @@
 import { $, escapeHtml } from '../utils.js';
 import { state } from '../state.js';
-import { STEPS } from '../config.js';
+import { STEPS, dataKeyOf } from '../config.js';
 import { setMascot } from './render.js';
 import { t } from '../i18n.js';
 import { getExecutionLog, getTotalTokens, getAverageQuality } from '../observability.js';
 import { getConfig as getDashScopeConfig } from '../providers/image.js';
 import { bindImageLightbox } from './lightbox.js';
+import { mountEditor } from './structuredEditor.js';
 
-bindImageLightbox();
+// UI modules are also imported transitively by pure Node tests; defer browser-only setup there.
+if (typeof document !== 'undefined') bindImageLightbox();
 
 let currentViewRerender = null;
 
@@ -27,7 +29,7 @@ function mediaUrl(p) {
   return p.startsWith('/api/media/') ? p : '/api/media/' + p;
 }
 
-function feedbackPanel(stepId, approveKey = 'ui.approve') {
+function feedbackPanel(stepId, approveKey = 'ui.approve', edit = null) {
   return `
     <div class="feedback-area" style="width:100%">
       <textarea id="feedbackInput" placeholder="${t('ui.feedbackPlaceholder')}"></textarea>
@@ -35,9 +37,43 @@ function feedbackPanel(stepId, approveKey = 'ui.approve') {
       <div class="action-row" style="margin-top:10px">
         <button class="action-btn primary" id="approveBtn">${t(approveKey)}</button>
         <button class="action-btn rose" id="reviseBtn">${t('ui.revise')}</button>
+        ${edit ? `<button class="action-btn" id="editBtn">${t('ui.editDirectly')}</button>` : ''}
       </div>
     </div>
   `;
+}
+
+// Switches the step view into an editable form. Save commits a manual revision via
+// applyManualEdit (which invalidates any downstream step that consumed the old
+// version) then re-renders the step read view. Cancel restores the read view.
+function bindEdit(stepId, data, onAdvance) {
+  const editBtn = $('#editBtn');
+  if (!editBtn) return;
+  editBtn.addEventListener('click', () => {
+    const step = STEPS.find(s => s.id === stepId);
+    const renderFn = {
+      script: renderScript,
+      characterDesign: renderCharacterDesign,
+      storyboard: renderStoryboard,
+      referenceImages: renderReferenceImages,
+      videoGeneration: renderVideoGeneration,
+      postProduction: renderPostProduction,
+    }[stepId];
+    const title = step ? t(step.labelKey) : '';
+    mountEditor($('#stepContent'), data, {
+      title,
+      onSave: async (edited) => {
+        const res = await window.__applyManualEdit(stepId, edited);
+        if (!res) {
+          alert(t('ui.editInvalid'));
+          return;
+        }
+        setMascot('happy');
+        renderFn(state.data[dataKeyOf(step)], onAdvance);
+      },
+      onCancel: () => renderFn(state.data[dataKeyOf(step)] ?? data, onAdvance),
+    });
+  });
 }
 
 let _autoAdvanceTimer = null;
@@ -80,7 +116,7 @@ export function clearPendingAdvance() {
   _pendingAdvance = null;
 }
 
-function bindFeedback(stepId, approveCallback) {
+function bindFeedback(stepId, approveCallback, edit = null) {
   const approveBtn = $('#approveBtn');
   const reviseBtn = $('#reviseBtn');
   if (approveBtn) approveBtn.addEventListener('click', approveCallback);
@@ -89,6 +125,7 @@ function bindFeedback(stepId, approveCallback) {
     if (!feedback) { alert(t('ui.alertFeedback')); return; }
     window.__reviseStep(stepId, feedback);
   });
+  if (edit) bindEdit(stepId, edit.data, edit.onAdvance);
 }
 
 export function renderScript(data, onAdvance, readOnly = false) {
@@ -148,8 +185,9 @@ export function renderScript(data, onAdvance, readOnly = false) {
   if (!readOnly) {
     setPendingAdvance(onAdvance);
     if (state.mode === 'interactive') {
-      $('#actionRow').innerHTML = feedbackPanel('script', 'ui.approveScript');
-      bindFeedback('script', onAdvance);
+      const edit = { data, onAdvance };
+      $('#actionRow').innerHTML = feedbackPanel('script', 'ui.approveScript', edit);
+      bindFeedback('script', onAdvance, edit);
     } else {
       autoAdvance(2000, onAdvance);
     }
@@ -205,8 +243,9 @@ export function renderCharacterDesign(data, onAdvance, readOnly = false) {
   if (!readOnly) {
     setPendingAdvance(onAdvance);
     if (state.mode === 'interactive') {
-      $('#actionRow').innerHTML = feedbackPanel('characterDesign', 'ui.approveCharacterDesign');
-      bindFeedback('characterDesign', onAdvance);
+      const edit = { data, onAdvance };
+      $('#actionRow').innerHTML = feedbackPanel('characterDesign', 'ui.approveCharacterDesign', edit);
+      bindFeedback('characterDesign', onAdvance, edit);
     } else {
       autoAdvance(2000, onAdvance);
     }
@@ -246,8 +285,9 @@ export function renderStoryboard(data, onAdvance, readOnly = false) {
   if (!readOnly) {
     setPendingAdvance(onAdvance);
     if (state.mode === 'interactive') {
-      $('#actionRow').innerHTML = feedbackPanel('storyboard', 'ui.approveStoryboard');
-      bindFeedback('storyboard', onAdvance);
+      const edit = { data, onAdvance };
+      $('#actionRow').innerHTML = feedbackPanel('storyboard', 'ui.approveStoryboard', edit);
+      bindFeedback('storyboard', onAdvance, edit);
     } else {
       autoAdvance(2000, onAdvance);
     }
@@ -374,6 +414,33 @@ export function renderPostProduction(data, onAdvance, readOnly = false) {
   const { isConfigured: dsConfigured } = getDashScopeStatus();
 
   const hasVideo = data.finalVideo && data.status === 'complete';
+  const qc = data.qcBaseline;
+  const checks = Array.isArray(qc?.deliveryChecks) ? qc.deliveryChecks : [];
+  const formatQcValue = value => {
+    if (value == null) return '';
+    if (typeof value === 'number') return Number.isInteger(value) ? String(value) : value.toFixed(2);
+    if (typeof value === 'object') return Object.entries(value)
+      .filter(([, item]) => item != null)
+      .map(([key, item]) => `${key}: ${typeof item === 'number' ? Math.round(item * 100) / 100 : item}`)
+      .join(' · ');
+    return String(value);
+  };
+  const qcReport = qc?.deliveryVerdict ? `
+    <section class="delivery-qc delivery-qc-${String(qc.deliveryVerdict).toLowerCase()}">
+      <div class="delivery-qc-head">
+        <div><span class="delivery-qc-icon">${qc.deliveryVerdict === 'PASS' ? '✓' : qc.deliveryVerdict === 'FAIL' ? '!' : '△'}</span>
+          <strong>${t('deliveryQC.title')}</strong></div>
+        <span class="delivery-qc-verdict">${escapeHtml(t('deliveryQC.verdict.' + qc.deliveryVerdict))}</span>
+      </div>
+      ${checks.length ? `<div class="delivery-qc-grid">${checks.map(item => `
+        <div class="delivery-qc-check delivery-qc-check-${String(item.status).toLowerCase()}">
+          <span class="delivery-qc-check-mark">${item.status === 'PASS' ? '✓' : item.status === 'FAIL' ? '×' : '!'}</span>
+          <div><strong>${escapeHtml(t('deliveryQC.check.' + item.id))}</strong>
+            <small>${escapeHtml(item.message || '')}${item.actual != null ? ` · ${escapeHtml(formatQcValue(item.actual))}` : ''}</small>
+          </div>
+        </div>`).join('')}</div>` : `<p class="delivery-qc-legacy">${t('deliveryQC.legacy')}</p>`}
+      ${qc.repairPlan ? `<div class="delivery-qc-repair"><strong>${t('deliveryQC.repair')}</strong> ${escapeHtml(t('steps.' + qc.repairPlan.targetStep + '.label'))} — ${escapeHtml(qc.repairPlan.reason || '')}</div>` : ''}
+    </section>` : '';
 
   el.innerHTML = `
     <div class="result-card">
@@ -387,6 +454,7 @@ export function renderPostProduction(data, onAdvance, readOnly = false) {
             <a href="${mediaUrl(data.finalVideo)}" download class="action-btn primary">${t('ui.postProdDownload')}</a>
           </div>`
         : `<div style="color:var(--cream3);font-size:0.85rem;text-align:center;padding:40px 0">${data.status === 'no-clips' ? t('ui.postProdNoClips') : data.status === 'failed' ? t('ui.postProdFailed') : '—'}</div>`}
+      ${qcReport}
     </div>
     ${readOnly ? '' : '<div class="action-row" id="actionRow"></div>'}
   `;

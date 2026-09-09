@@ -524,6 +524,49 @@ class Orchestrator {
     this.#renderStep(stepId, data, onAdvance);
   }
 
+  // Adopts a user-edited copy of a step's result as a new revision. This is the
+  // manual-edit analogue of reviseStep: it does not re-run the agent, but it
+  // commits an immutable revision and invalidates any downstream step that
+  // consumed the version it replaces.
+  async applyManualEdit(stepId, editedData) {
+    if (state.stopped) return null;
+    const stepIndex = STEPS.findIndex(s => s.id === stepId);
+    if (stepIndex < 0) return null;
+    const step = STEPS[stepIndex];
+
+    const validator = POST_VALIDATORS[stepId];
+    if (validator && !validator(editedData)) {
+      addAgentMessage('⚠️', t('pipeline.structuralFailed'));
+      return null;
+    }
+
+    const current = this.#store.getAcceptedByStep(stepId);
+    const revision = this.#store.createRevision(stepId, {
+      kind: step.artifactKind,
+      data: structuredClone(editedData),
+      sourceArtifactIds: [...(current?.sourceArtifactIds ?? [])],
+      status: ArtifactStatus.COMPLETE,
+    });
+    this.#store.commit(revision, { provenance: { agent: 'manual-edit', revision: true } });
+    const change = this.#store.replaceAcceptedArtifact(revision.id, { reasonCode: StaleReasonCode.UPSTREAM_REPLACED });
+
+    state.data[dataKeyOf(step)] = revision.data;
+    this.#rebuildEntities();
+    this.#checkpoint.save(stepId, { stepIndex, acceptedArtifactId: revision.id });
+    this.#runState.completeStep(stepId);
+
+    const staleStepIds = this.#invalidateStaleSteps(change?.staleArtifactIds ?? []);
+    this.#persistWorkflow();
+    await saveMemory();
+
+    return {
+      acceptedArtifact: revision,
+      supersededArtifactId: change?.supersededArtifact?.id ?? null,
+      staleArtifactIds: change?.staleArtifactIds ?? [],
+      staleStepIds,
+    };
+  }
+
   // Rolling back adopts a new version copied from a historical one, so version
   // numbers keep growing instead of reactivating an old artifact in place.
   async rollbackToStep(stepId, { toArtifactId = null } = {}) {
@@ -792,6 +835,10 @@ export async function startPipeline() {
 
 export async function reviseStep(stepId, feedback) {
   return getOrchestrator().reviseStep(stepId, feedback);
+}
+
+export async function applyManualEdit(stepId, editedData) {
+  return getOrchestrator().applyManualEdit(stepId, editedData);
 }
 
 export async function rollbackToStep(stepId, options) {

@@ -177,6 +177,8 @@ cine-cutie/
 │       │   ├── videoAgent.js     # 按 videoMode 取素材 + 运镜 motion + 逐片段时长
 │       │   ├── editorAgent.js    # ffmpeg 拼接成片（确定性）
 │       │   ├── qcAgent.js        # Self-Critique 评分 + combineVerdict 硬门禁
+│       │   ├── deliveryQCAgent.js# 成片技术硬门禁 + 多模态创意评审 + 修复定位
+│       │   ├── deliveryQC.js     # 时长/视频流/黑帧/冻结帧/音频阈值判定（纯逻辑）
 │       │   ├── qcConsistency.js  # 实体提取/合并 + 一致性约束 + checkConsistency
 │       │   ├── qcTypes.js        # QCVerdict / Severity / FailureType / maxRetriesFor
 │       │   ├── retryAgent.js     # per-item 重试策略规划（最多 3 次）

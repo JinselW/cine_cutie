@@ -41,9 +41,10 @@ $('#themeToggle').addEventListener('click', () => {
   $('#themeToggle').textContent = state.theme === 'dark' ? '🌙' : '☀️';
 });
 
-$('#langToggle').addEventListener('click', () => {
-  state.lang = state.lang === 'zh' ? 'en' : 'zh';
-  localStorage.setItem('cine-cutie-lang', state.lang);
+function setLanguage(lang) {
+  if (lang !== 'zh' && lang !== 'en') return;
+  state.lang = lang;
+  localStorage.setItem('cine-cutie-lang', lang);
   applyLang();
   buildPipelineBar();
   const currentStep = STEPS[state.currentStep];
@@ -52,6 +53,10 @@ $('#langToggle').addEventListener('click', () => {
   if (state.stepRunning) refreshRunningLanguage();
   else rerenderCurrentView();
   window.dispatchEvent(new CustomEvent('languagechange'));
+}
+
+$('#cfgLanguage')?.addEventListener('change', (event) => {
+  setLanguage(event.target.value);
 });
 
 buildPipelineBar();

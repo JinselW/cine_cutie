@@ -6,7 +6,7 @@ import { createMemoryRouter } from './memory.js';
 import { LRUCache } from './cache.js';
 import { submitImageTask, submitImageEditTask, parseImageResultUrl, submitVideoTask, submitVideoTaskV2, pollTask, downloadFile, detectVideoMode, hasVideoUploads, fileToDataUri } from './dashscope.js';
 import { createTask, getTask, updateTask, cancelTask, isTaskCancelled, cleanupTasks } from './tasks.js';
-import { concatVideos, checkFfmpeg, renderWithTransitions, probeStreams, probeAudioQuality, applyBgm, sanitizeVolume } from './render.js';
+import { concatVideos, checkFfmpeg, renderWithTransitions, probeStreams, probeAudioQuality, probeVisualDefects, applyBgm, sanitizeVolume } from './render.js';
 import { submitWorkflow, pollUntilDone, downloadOutput, uploadImageToComfy, checkComfyUIStatus, getComfyMonitorStatus, selectWorkflowMode, cancelPrompt, MAX_COMFY_REFERENCE_IMAGES } from './comfyui.js';
 import { ensureTunnel, closeTunnel, getTunnelStatus, deleteComfyInputFiles, getDgxMetrics } from './ssh-tunnel.js';
 import path from 'path';
@@ -737,6 +737,7 @@ app.post('/api/render/final', async (req, res) => {
       const finalOutput = adopted ? bgmOutput : outputPath;
       const media = await probeStreams(finalOutput);
       const audioQuality = media.hasAudio ? await probeAudioQuality(finalOutput) : { integratedLufs: null, truePeakDbfs: null };
+      const visualDefects = await probeVisualDefects(finalOutput);
       updateTask(task.id, {
         status: finalStatus,
         progress: finalStatus === 'completed' ? 100 : (cancelled ? 90 : 0),
@@ -748,6 +749,8 @@ app.post('/api/render/final', async (req, res) => {
             hasAudio: media.hasAudio,
             integratedLufs: audioQuality.integratedLufs,
             truePeakDbfs: audioQuality.truePeakDbfs,
+            blackDurationSeconds: visualDefects.blackDurationSeconds,
+            freezeDurationSeconds: visualDefects.freezeDurationSeconds,
             width: media.width,
             height: media.height,
             fps: media.fps,
