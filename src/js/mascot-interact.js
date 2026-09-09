@@ -2,6 +2,7 @@ import { t } from './i18n.js';
 
 let busy = false;
 let bubbleTimer = null;
+let writingTimer = null;
 
 const MESSAGES = {
   zh: [
@@ -76,6 +77,7 @@ function initEyeTracking(mascot) {
   const MAX = 3;
 
   document.addEventListener('mousemove', e => {
+    if (mascot.classList.contains('mascot-taking-notes')) return;
     [eyeL, eyeR].forEach(eye => {
       const r = eye.getBoundingClientRect();
       const cx = r.left + r.width / 2;
@@ -91,6 +93,27 @@ function initEyeTracking(mascot) {
   });
 }
 
+function initNoteTaking(mascot) {
+  const input = document.getElementById('userInput');
+  if (!input) return;
+
+  const start = () => mascot.classList.add('mascot-taking-notes');
+  const stop = () => {
+    clearTimeout(writingTimer);
+    mascot.classList.remove('mascot-taking-notes', 'mascot-is-writing');
+  };
+  const write = () => {
+    start();
+    mascot.classList.add('mascot-is-writing');
+    clearTimeout(writingTimer);
+    writingTimer = setTimeout(() => mascot.classList.remove('mascot-is-writing'), 520);
+  };
+
+  input.addEventListener('focus', start);
+  input.addEventListener('input', write);
+  input.addEventListener('blur', stop);
+}
+
 export function initMascotInteraction() {
   const mascot = document.getElementById('mascot');
   if (!mascot) return;
@@ -98,4 +121,5 @@ export function initMascotInteraction() {
   mascot.title = t('ui.mascotHint');
   mascot.addEventListener('click', handleClick);
   initEyeTracking(mascot);
+  initNoteTaking(mascot);
 }

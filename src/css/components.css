@@ -74,6 +74,11 @@
   width:12px;height:6px;border-bottom:2.5px solid var(--bg);border-radius:0 0 50% 50%;
   position:absolute;top:28px;left:50%;transform:translateX(-50%);
 }
+.mascot-brow{
+  width:10px;height:2px;background:var(--bg);border-radius:2px;position:absolute;top:4px;
+  opacity:0;transition:opacity .18s ease,transform .18s ease;
+}
+.mascot-brow.left{left:13px}.mascot-brow.right{right:13px}
 .mascot-reel{
   width:18px;height:18px;border:3px solid var(--cream);border-radius:50%;
   position:absolute;top:-6px;
@@ -89,6 +94,40 @@
   position:absolute;bottom:-12px;
 }
 .mascot-leg.left{left:24px}.mascot-leg.right{right:24px}
+.mascot-note-arm,.mascot-notebook{opacity:0;pointer-events:none}
+.mascot-note-arm{
+  width:12px;height:27px;background:var(--gold-dim);border:3px solid var(--gold);
+  border-radius:9px;position:absolute;z-index:4;bottom:1px;transform-origin:50% 0;
+  transition:opacity .15s ease,transform .25s cubic-bezier(.2,.8,.2,1);
+}
+.mascot-note-arm.left{left:8px;transform:rotate(40deg) translateY(9px)}
+.mascot-note-arm.right{right:7px;transform:rotate(-38deg) translateY(9px)}
+.mascot-notebook{
+  width:53px;height:31px;position:absolute;z-index:5;left:18px;bottom:-16px;
+  border:3px solid var(--cream);border-radius:3px 3px 7px 7px;
+  background:linear-gradient(90deg,#f6e7bd 0 49%,#e9d49f 49% 51%,#fff1ca 51%);
+  box-shadow:0 5px 13px rgba(0,0,0,.28);transform-origin:50% 100%;
+}
+.notebook-binding{position:absolute;left:50%;top:0;bottom:0;width:2px;background:rgba(91,65,43,.26);transform:translateX(-50%)}
+.notebook-page-lines{position:absolute;left:6px;right:6px;top:8px;height:12px;background:repeating-linear-gradient(to bottom,rgba(110,77,58,.28) 0 1px,transparent 1px 5px)}
+.mascot-pen{
+  width:4px;height:34px;position:absolute;z-index:7;left:-1px;top:13px;
+  border-radius:3px 3px 1px 1px;background:linear-gradient(90deg,var(--rose),#ff9cae);
+  box-shadow:0 0 0 1px rgba(34,25,45,.25);transform-origin:50% 5px;
+}
+.mascot-pen::after{content:'';position:absolute;left:0;bottom:-5px;border-left:2px solid transparent;border-right:2px solid transparent;border-top:6px solid var(--cream)}
+.mascot-taking-notes .mascot-note-arm,.mascot-taking-notes .mascot-notebook{opacity:1}
+.mascot-taking-notes .mascot-note-arm.left{transform:rotate(-48deg) translate(-1px,-1px)}
+.mascot-taking-notes .mascot-note-arm.right{transform:rotate(48deg) translate(1px,-1px)}
+.mascot-taking-notes .mascot-notebook{animation:notebookArrive .38s cubic-bezier(.2,.9,.25,1.2) both}
+.mascot-taking-notes .mascot-eye{animation:none;height:7px;top:10px;transform:rotate(8deg)}
+.mascot-taking-notes .mascot-eye.right{transform:rotate(-8deg)}
+.mascot-taking-notes .mascot-eye::after{--px:0px!important;--py:3px!important}
+.mascot-taking-notes .mascot-brow{opacity:.85}
+.mascot-taking-notes .mascot-brow.left{transform:rotate(8deg)}
+.mascot-taking-notes .mascot-brow.right{transform:rotate(-8deg)}
+.mascot-taking-notes .mascot-mouth{width:7px;height:3px;top:29px;border:0;border-bottom:2px solid var(--bg);border-radius:50%}
+.mascot-taking-notes.mascot-is-writing .mascot-pen{animation:mascotWrite .38s ease-in-out infinite}
 .mascot-happy .mascot-mouth{
   width:16px;height:8px;border-bottom:3px solid var(--bg);
 }

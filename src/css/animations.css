@@ -10,3 +10,5 @@
 @keyframes bubblePop{0%{transform:scale(0) translateY(8px);opacity:0}60%{transform:scale(1.1) translateY(-2px);opacity:1}100%{transform:scale(1) translateY(0);opacity:1}}
 @keyframes bubbleExit{to{transform:scale(0.5) translateY(-10px);opacity:0}}
 @keyframes mascotBounce{0%{transform:scaleY(1) scaleX(1)}20%{transform:scaleY(0.75) scaleX(1.15)}50%{transform:scaleY(1.2) scaleX(0.9) translateY(-18px)}75%{transform:scaleY(0.95) scaleX(1.05)}100%{transform:scaleY(1) scaleX(1)}}
+@keyframes mascotWrite{0%,100%{transform:rotate(-27deg) translate(0,0)}45%{transform:rotate(-21deg) translate(5px,2px)}70%{transform:rotate(-25deg) translate(2px,4px)}}
+@keyframes notebookArrive{0%{opacity:0;transform:translateY(18px) scale(.72) rotate(-5deg)}70%{opacity:1;transform:translateY(-2px) scale(1.04) rotate(1deg)}100%{opacity:1;transform:translateY(0) scale(1) rotate(0)}}
