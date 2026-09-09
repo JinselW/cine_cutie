@@ -26,8 +26,8 @@
 .comfy-status-dot.online{background:#4ade80;box-shadow:0 0 7px rgba(74,222,128,.65)}
 .comfy-status-dot.offline{background:var(--rose)}
 .comfy-status-popover{
-  position:absolute;z-index:1100;right:0;top:44px;width:min(560px,calc(100vw - 24px));
-  max-height:min(600px,75vh);overflow:auto;padding:0;border-radius:var(--radius-sm);
+  position:absolute;z-index:1100;right:0;top:44px;width:min(860px,calc(100vw - 32px));
+  max-height:min(84vh,860px);overflow:auto;padding:0;border-radius:var(--radius-sm);
   background:var(--bg2);border:1px solid var(--glass-border);box-shadow:0 16px 48px rgba(0,0,0,.35);
 }
 .comfy-monitor-header{margin:0;border:0;background:transparent}
