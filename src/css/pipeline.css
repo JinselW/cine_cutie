@@ -79,6 +79,14 @@
 .char-role{font-size:0.78rem;color:var(--rose);margin-bottom:8px}
 .char-desc{font-size:0.8rem;color:var(--cream3);line-height:1.5}
 .char-card[contenteditable="true"]{outline:1px dashed var(--gold);padding:16px}
+.card-regen-btn{
+  display:inline-flex;align-items:center;gap:5px;margin-top:10px;padding:4px 10px;
+  font-size:.72rem;font-family:var(--font);color:var(--cream2);background:var(--glass);
+  border:1px solid var(--glass-border);border-radius:var(--radius-xs);cursor:pointer;
+  transition:border-color var(--transition),color var(--transition),opacity var(--transition);
+}
+.card-regen-btn:hover{border-color:var(--gold);color:var(--cream)}
+.card-regen-btn:disabled{opacity:.55;cursor:default;border-color:var(--glass-border)}
 
 .storyboard-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px}
 .scene-card{

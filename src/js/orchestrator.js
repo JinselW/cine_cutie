@@ -9,7 +9,7 @@ import {
 import {
   renderScript, renderCharacterDesign, renderStoryboard,
   renderReferenceImages, renderVideoGeneration, renderPostProduction,
-  cancelAutoAdvance, scheduleAutoAdvance, setPendingAdvance, clearPendingAdvance,
+  cancelAutoAdvance, scheduleAutoAdvance, setPendingAdvance, clearPendingAdvance, getPendingAdvance,
 } from './ui/views.js';
 import { showCompletion } from './navigation.js';
 import { sleep } from './utils.js';
@@ -527,6 +527,33 @@ class Orchestrator {
     this.#renderStep(stepId, data, onAdvance);
   }
 
+  async regenerateCharacterImage(target) {
+    if (state.stopped) return { ok: false, error: 'stopped' };
+    const data = state.data.characterDesign;
+    if (!data) return { ok: false, error: 'no-data' };
+    const agent = resolveAgent('characterDesign');
+    if (typeof agent?.regenerateEntities !== 'function') return { ok: false, error: 'no-agent' };
+
+    if (!this.#token || this.#token.isCancelled) this.#token = new CancellationToken();
+    const patched = structuredClone(data);
+
+    let res;
+    try {
+      res = await agent.regenerateEntities(patched, state.genre, this.#token.signal, target);
+    } catch (error) {
+      return { ok: false, error: error.message };
+    }
+
+    if (!res?.okCount) return { ok: false, error: res?.error || 'no-image' };
+    if (this.#token.isCancelled || state.stopped) return { ok: false, error: 'cancelled' };
+
+    const edit = await this.applyManualEdit('characterDesign', patched);
+    if (!edit) return { ok: false, error: 'commit-failed' };
+
+    this.#renderStep('characterDesign', state.data.characterDesign, getPendingAdvance());
+    return { ok: true };
+  }
+
   // Adopts a user-edited copy of a step's result as a new revision. This is the
   // manual-edit analogue of reviseStep: it does not re-run the agent, but it
   // commits an immutable revision and invalidates any downstream step that
@@ -843,6 +870,10 @@ export async function reviseStep(stepId, feedback) {
 
 export async function applyManualEdit(stepId, editedData) {
   return getOrchestrator().applyManualEdit(stepId, editedData);
+}
+
+export async function regenerateCharacterImage(target) {
+  return getOrchestrator().regenerateCharacterImage(target);
 }
 
 export async function rollbackToStep(stepId, options) {

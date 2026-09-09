@@ -33,6 +33,10 @@ function pickDesign(list, entity, index) {
     || {};
 }
 
+function randomSeed() {
+  return 1 + Math.floor(Math.random() * 2147483646);
+}
+
 export class CharacterAgent extends BaseAgent {
   #retryAgent;
   #qcAgent;
@@ -102,6 +106,58 @@ export class CharacterAgent extends BaseAgent {
         feedbackSatisfied: bestCrit?.feedbackSatisfied ?? !ctx.feedback,
       },
     };
+  }
+
+  async regenerateEntities(data, genre, signal, target) {
+    const provider = getActiveProvider('image');
+    if (!provider) return { okCount: 0, data, error: 'No provider' };
+    if (!data) return { okCount: 0, data, error: 'No data' };
+
+    const kind = target?.kind;
+    const items = [];
+    const planned = [];
+
+    if (kind === 'character') {
+      const char = (data.characters || []).find(c => c.id === target.id);
+      if (!char) return { okCount: 0, data, error: 'not-found' };
+      for (const view of ['sheet', 'front']) {
+        const itemId = `${char.id}${view === 'sheet' ? SHEET_SUFFIX : FRONT_SUFFIX}`;
+        const base = view === 'sheet' ? this.#buildSheetPrompt(char, genre) : this.#buildFrontPrompt(char, genre);
+        items.push({ id: itemId, prompt: appendFeedback(base, target.feedback), seed: randomSeed() });
+        planned.push({ itemId, view });
+      }
+    } else if (kind === 'setting') {
+      const setting = (data.settings || []).find(s => s.id === target.id);
+      if (!setting) return { okCount: 0, data, error: 'not-found' };
+      items.push({ id: setting.id, prompt: appendFeedback(this.#buildSettingPrompt(setting, genre), target.feedback), seed: randomSeed() });
+      planned.push({ itemId: setting.id });
+    } else {
+      return { okCount: 0, data, error: 'bad-target' };
+    }
+
+    const results = await provider.generate({ items, overrides: {}, signal });
+    const byId = new Map((results || []).map(r => [r.id, r]));
+    let okCount = 0;
+    let firstError = null;
+
+    for (const { itemId, view } of planned) {
+      const r = byId.get(itemId);
+      if (r?.status !== 'complete' || !r.path) {
+        if (!firstError) firstError = r?.error || (r ? `status=${r.status || 'unknown'}` : 'no result for item');
+        continue;
+      }
+      if (kind === 'character') {
+        const char = data.characters.find(c => c.id === target.id);
+        if (view === 'sheet') { char.sheetPath = r.path; char.sheetUrl = r.imageUrl || ''; }
+        else { char.imagePath = r.path; char.imageUrl = r.imageUrl || ''; }
+      } else {
+        const setting = data.settings.find(s => s.id === target.id);
+        setting.imagePath = r.path; setting.imageUrl = r.imageUrl || '';
+      }
+      okCount++;
+    }
+
+    return { okCount, data, error: okCount ? null : (firstError || 'No image returned') };
   }
 
   async #writeDesignSpecs(ctx, token) {

@@ -128,6 +128,28 @@ function bindFeedback(stepId, approveCallback, edit = null) {
   if (edit) bindEdit(stepId, edit.data, edit.onAdvance);
 }
 
+let _regenBusy = false;
+async function handleRegenCharacterImage(btn) {
+  if (_regenBusy) return;
+  _regenBusy = true;
+  const buttons = Array.from(document.querySelectorAll('#stepContent [data-regen-id]'));
+  const regenHtml = `↻ ${escapeHtml(t('ui.regenerateImage'))}`;
+  const kind = btn.dataset.regenKind;
+  const id = btn.dataset.regenId;
+  buttons.forEach(b => { b.disabled = true; });
+  btn.innerHTML = escapeHtml(t('ui.regenerating'));
+  const restore = () => buttons.forEach(b => { b.disabled = false; b.innerHTML = regenHtml; });
+  try {
+    const res = await window.__regenerateDesignItem({ kind, id });
+    if (!res?.ok) { restore(); alert(`${t('ui.regenerateFailed')}${res?.error ? ` (${res.error})` : ''}`); }
+  } catch (error) {
+    restore();
+    alert(error?.message || t('ui.regenerateFailed'));
+  } finally {
+    _regenBusy = false;
+  }
+}
+
 export function renderScript(data, onAdvance, readOnly = false) {
   rememberView(() => renderScript(data, onAdvance, readOnly));
   const el = $('#stepContent');
@@ -199,6 +221,10 @@ export function renderCharacterDesign(data, onAdvance, readOnly = false) {
   rememberView(() => renderCharacterDesign(data, onAdvance, readOnly));
   const el = $('#stepContent');
   const { isConfigured: dsConfigured } = getDashScopeStatus();
+  const showRegen = !readOnly && state.mode === 'interactive' && dsConfigured;
+  const regenBtn = (kind, id) => showRegen
+    ? `<button type="button" class="card-regen-btn" data-regen-kind="${kind}" data-regen-id="${escapeHtml(id)}" title="${escapeHtml(t('ui.regenerateImage'))}">↻ ${escapeHtml(t('ui.regenerateImage'))}</button>`
+    : '';
 
   const charCards = (data.characters || []).map(c => {
     const hasSheet = !!c.sheetPath;
@@ -212,6 +238,7 @@ export function renderCharacterDesign(data, onAdvance, readOnly = false) {
         : `<div style="width:100%;aspect-ratio:16/9;background:var(--bg3);border-radius:var(--radius-xs);display:flex;align-items:center;justify-content:center;margin:8px 0;color:var(--cream3);font-size:0.75rem">${t('ui.charDesignNoImage')}</div>`}
       ${caption ? `<div style="font-size:0.7rem;color:var(--gold);margin-bottom:8px">${caption}</div>` : ''}
       <div class="char-desc" style="max-height:6em;overflow:auto">${escapeHtml(c.design || c.desc)}</div>
+      ${regenBtn('character', c.id)}
     </div>
   `;
   }).join('');
@@ -223,6 +250,7 @@ export function renderCharacterDesign(data, onAdvance, readOnly = false) {
         : `<div style="width:100%;aspect-ratio:16/9;background:var(--bg3);border-radius:var(--radius-xs);display:flex;align-items:center;justify-content:center;color:var(--cream3);font-size:0.75rem">${t('ui.charDesignNoImage')}</div>`}
       <div style="font-size:0.85rem;color:var(--cream);font-weight:600">${escapeHtml(s.name)}</div>
       <div class="char-desc" style="max-height:6em;overflow:auto;text-align:left">${escapeHtml(s.design || s.desc)}</div>
+      ${regenBtn('setting', s.id)}
     </div>
   `).join('');
 
@@ -246,6 +274,9 @@ export function renderCharacterDesign(data, onAdvance, readOnly = false) {
       const edit = { data, onAdvance };
       $('#actionRow').innerHTML = feedbackPanel('characterDesign', 'ui.approveCharacterDesign', edit);
       bindFeedback('characterDesign', onAdvance, edit);
+      el.querySelectorAll('[data-regen-id]').forEach(btn => {
+        btn.addEventListener('click', () => handleRegenCharacterImage(btn));
+      });
     } else {
       autoAdvance(2000, onAdvance);
     }
