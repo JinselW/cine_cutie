@@ -33,6 +33,74 @@ initSettings();
 initComfyStatus();
 initHistory();
 
+const INSPIRATION_IDEAS = {
+  zh: [
+    ['🚀', '一名火星快递员收到一个寄给三十年前自己的包裹。'],
+    ['🌧️', '一座永远下雨的小城里，修伞匠发现每把旧伞都保存着主人的一段记忆。'],
+    ['🕰️', '每天午夜，整座城市会静止一分钟，只有一个失眠的孩子还能行动。'],
+    ['🐋', '漂浮在云海中的小镇，靠一头会唱歌的鲸鱼指引回家的方向。'],
+    ['🎭', '一个不会撒谎的骗子，被迫在一场婚礼上扮演完美的新郎。'],
+    ['📻', '深夜电台主持人接到来自明天的听众电话，对方请求她阻止一场事故。'],
+    ['🌱', '末日后的最后一名园丁，在废墟中种出了一株会说话的植物。'],
+    ['🏮', '女孩继承了一家只在梦里营业的灯笼店，顾客都是忘记归路的人。'],
+    ['🤖', '陪伴老人多年的家用机器人即将被回收，于是策划了第一次离家旅行。'],
+    ['🔍', '侦探调查一宗没有受害者的谋杀案，却发现所有证据都指向未来的自己。'],
+    ['🎬', '过气动作演员回到故乡，发现小镇居民仍把他当作真正的超级英雄。'],
+    ['🌊', '海边女孩每天捡到一封漂流信，信里记录着一座正在消失的岛。'],
+  ],
+  en: [
+    ['🚀', 'A courier on Mars receives a package addressed to herself thirty years ago.'],
+    ['🌧️', 'In a town where it never stops raining, an umbrella repairer finds that old umbrellas preserve their owners’ memories.'],
+    ['🕰️', 'Every midnight the city freezes for one minute, and only one sleepless child can still move.'],
+    ['🐋', 'A village floating above the clouds relies on a singing whale to guide travelers home.'],
+    ['🎭', 'A con artist who cannot lie must pretend to be the perfect groom at a wedding.'],
+    ['📻', 'A late-night radio host receives a call from tomorrow asking her to prevent an accident.'],
+    ['🌱', 'The last gardener after the apocalypse grows a plant that can speak.'],
+    ['🏮', 'A girl inherits a lantern shop that opens only in dreams for customers who have forgotten the way home.'],
+    ['🤖', 'A household robot facing recycling plans its first trip away with the elderly owner it has cared for.'],
+    ['🔍', 'A detective investigates a murder with no victim, but every clue points to his future self.'],
+    ['🎬', 'A washed-up action star returns home and finds the town still believes he is a real superhero.'],
+    ['🌊', 'A girl by the sea finds a new drifting letter each day from an island that is slowly disappearing.'],
+  ],
+};
+let inspirationOffset = 0;
+
+function renderInspirationIdeas(advance = false) {
+  const grid = $('#inspirationGrid');
+  if (!grid) return;
+  const ideas = INSPIRATION_IDEAS[state.lang] || INSPIRATION_IDEAS.zh;
+  if (advance) inspirationOffset = (inspirationOffset + 6) % ideas.length;
+  grid.innerHTML = '';
+  for (let i = 0; i < 6; i++) {
+    const [icon, story] = ideas[(inspirationOffset + i) % ideas.length];
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'inspiration-card';
+    const mark = document.createElement('span');
+    mark.setAttribute('aria-hidden', 'true');
+    mark.textContent = icon;
+    button.append(mark, document.createTextNode(story));
+    button.addEventListener('click', () => {
+      const input = $('#userInput');
+      input.value = story;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      $('#inspirationPanel')?.classList.add('hidden');
+      $('#inspirationToggle')?.setAttribute('aria-expanded', 'false');
+      input.focus();
+    });
+    grid.appendChild(button);
+  }
+}
+
+$('#inspirationToggle')?.addEventListener('click', (event) => {
+  const panel = $('#inspirationPanel');
+  const open = panel.classList.toggle('hidden') === false;
+  event.currentTarget.setAttribute('aria-expanded', String(open));
+  if (open) renderInspirationIdeas();
+});
+$('#inspirationShuffle')?.addEventListener('click', () => renderInspirationIdeas(true));
+window.addEventListener('languagechange', () => renderInspirationIdeas());
+
 function setTheme(theme) {
   if (theme !== 'dark' && theme !== 'light') return;
   state.theme = theme;

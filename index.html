@@ -50,6 +50,18 @@
     <div class="section-title"><span class="icon">🎬</span> Tell me your story idea</div>
     <div class="input-area">
       <textarea id="userInput" placeholder="One sentence, a paragraph, or a wild idea — anything that sparks your imagination...&#10;&#10;e.g. &quot;A shy librarian discovers she can enter books and meet their characters&quot;"></textarea>
+      <div class="inspiration-library">
+        <button id="inspirationToggle" class="inspiration-toggle" type="button" aria-expanded="false" aria-controls="inspirationPanel">
+          <span aria-hidden="true">✦</span><span data-i18n="inspiration.open">浏览灵感库</span>
+        </button>
+        <div id="inspirationPanel" class="inspiration-panel hidden">
+          <div class="inspiration-head">
+            <div><strong data-i18n="inspiration.title">故事灵感库</strong><small data-i18n="inspiration.hint">选择一个起点，填入后仍可自由修改</small></div>
+            <button id="inspirationShuffle" class="action-btn" type="button" data-i18n="inspiration.shuffle">换一批</button>
+          </div>
+          <div id="inspirationGrid" class="inspiration-grid"></div>
+        </div>
+      </div>
       <div class="duration-row">
         <label for="totalDuration" id="lblDuration">视频总时长（秒）</label>
         <div class="duration-input-wrap">
