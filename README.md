@@ -237,10 +237,50 @@ cine-cutie/
 
 ## Docker 部署
 
+镜像内默认监听 `0.0.0.0:7860`（魔搭创空间的固定端口要求），本地运行需要把宿主机端口映射过去：
+
 ```bash
 docker build -t cine-cutie .
-docker run -p 3006:3006 cine-cutie
+docker run -p 3006:7860 -v cine-cutie-work:/mnt/workspace cine-cutie
+# 浏览器访问 http://localhost:3006
 ```
+
+如需换回 3006 作为容器内端口：`docker run -e PORT=3006 -p 3006:3006 cine-cutie`。
+
+## 部署到魔搭创空间
+
+官方文档：[Docker 创空间介绍](https://modelscope.cn/docs/studios/docker)。
+
+前置条件：Docker 创空间只对**已完成阿里云实名认证**的账号开放；构建环境不需要本地安装 Docker（平台侧构建），但需要本地装好 Git 与 Git LFS。
+
+1. **创建创空间**：站点右上角头像 →「创建创空间」→ 编程式创建 → SDK 选 **Docker**，按需选 CPU 资源规格，先建空仓库。
+2. **克隆仓库**（clone 时直接带上访问令牌，后续 push 免认证）：
+
+   ```bash
+   git lfs install
+   git clone https://oauth2:<你的访问令牌>@www.modelscope.cn/studios/<你的账号>/<创空间名>.git
+   ```
+
+   访问令牌在「个人中心 → 访问令牌」获取。
+3. **拷入项目文件**：把本仓库的 `src/`、`server/`、`index.html`、`vite.config.js`、`package.json`、`package-lock.json`、`Dockerfile`、`.dockerignore` 复制进克隆目录。
+   不要提交 `.env`、`node_modules/`、`dist/`、`media/`、`data/`（`.gitignore` 已排除）。
+4. **保留平台生成的 README 头部**：创空间的 `README.md` 是空间卡片，YAML 头（`---` 包裹的 `domain` / `license` / `tags` 等）被平台解析。请把本仓库 README 的正文并到平台生成文件的 YAML 头**之下**，不要整体覆盖掉头部。Docker SDK 的启动命令由 `Dockerfile` 的 `CMD` 决定，卡片里无需 `entry_file`。
+5. **提交并推送 master 分支**：
+
+   ```bash
+   git add -A && git commit -m "deploy: cine-cutie docker studio" && git push
+   ```
+6. **上线**：创空间详情页 →「设置」→「上线」（或空间内容页的「立即发布」）。构建日志与运行日志在同一页的「查看日志」抽屉里，构建失败先看 Dockerfile 阶段的报错。
+
+部署约束与注意事项：
+
+- 服务必须暴露在 `0.0.0.0:7860`，**端口当前不可修改**；容器内 `8080` 已被平台自带进程占用。`Dockerfile` 已用 `ENV` 写好，无需额外配置。
+- 环境变量只能在设置页配置、且**仅运行时注入**（Docker 创空间处于 Beta，构建期拿不到环境变量），改完需点「重启创空间」才生效。
+- 容器文件系统重启即清空，只有 `/mnt/workspace` 是持久卷。`Dockerfile` 已把素材与创作历史指向那里：`MEDIA_DIR=/mnt/workspace/media`、`MEMORY_DIR=/mnt/workspace/data/memory`。创空间被转移或重命名时该卷数据仍会丢失。
+- HTTP 头 `Authorization`、`X-modelscope-*`、`X-studio-*` 被平台占用，本项目的后端接口未使用它们（发往 DashScope 的 `Authorization` 是出站请求，不受影响）。
+- 创空间无法访问你内网的 DGX Spark。保持不设 `COMFY_SSH_PASSWORD`，所有 `/api/comfyui/*` 会直接拒绝，ComfyUI/SSH 隧道能力整体关闭（同时避免了公网侧的 SSRF 面）；视频生成请用 DashScope 后端。
+- 访问者在浏览器设置面板里填自己的 DashScope Key，存在各自的 localStorage，不会随创空间代码泄露。
+- 镜像构建走 `registry.npmmirror.com` 拉依赖（`package-lock.json` 里的 sha512 完整性校验仍然生效），并用 apt 安装的 ffmpeg + `FFMPEG_BIN` 绕开 `ffmpeg-static` 对 GitHub Releases 的下载。若构建日志卡在拉取基础镜像 `node:20-bookworm`，把它换成魔搭 ACR 内的等价镜像。
 
 ## 许可证
 

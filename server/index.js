@@ -18,7 +18,7 @@ const app = express();
 const cache = new LRUCache(100);
 const PORT = process.env.PORT || 3006;
 
-const MEDIA_DIR = path.join(__dirname, '..', 'media');
+const MEDIA_DIR = process.env.MEDIA_DIR || path.join(__dirname, '..', 'media');
 fs.mkdirSync(MEDIA_DIR, { recursive: true });
 
 const UPLOADS_DIR = path.join(MEDIA_DIR, 'uploads');
@@ -199,7 +199,7 @@ async function extractPromptText(file) {
 }
 
 app.use(express.json({ limit: '10mb' }));
-app.use('/api/memory', createMemoryRouter(path.join(__dirname, '..', 'data', 'memory')));
+app.use('/api/memory', createMemoryRouter(process.env.MEMORY_DIR || path.join(__dirname, '..', 'data', 'memory')));
 
 app.use((req, res, next) => {
   const start = Date.now();
