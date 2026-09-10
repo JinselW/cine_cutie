@@ -31,7 +31,7 @@ const IMG2IMG_PRESETS = ['wan2.6-image', 'doubao-seedream-5-0-260128'];
 const VIDEO_MODES = [
   { id: 'firstFrame', presets: ['wan2.6-i2v', 'doubao-seedance-2-0-260128', 'doubao-seedance-1-0-pro-250528'], defaultModel: 'wan2.6-i2v', configKey: 'video' },
   { id: 'firstLastFrame', presets: ['wan2.7-i2v', 'doubao-seedance-2-0-260128'], defaultModel: 'wan2.7-i2v', configKey: 'video' },
-  { id: 'referenceImage', presets: ['wan2.7-r2v'], defaultModel: 'wan2.7-r2v', configKey: 'refVideo' },
+  { id: 'referenceImage', presets: ['wan2.7-r2v', 'doubao-seedance-2-0-260128'], defaultModel: 'wan2.7-r2v', configKey: 'refVideo' },
   { id: 'auto', presets: [], defaultModel: '', configKey: null },
 ];
 

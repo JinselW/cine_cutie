@@ -475,8 +475,8 @@ app.post('/api/generate/video', async (req, res) => {
     return res.status(400).json({ error: 'A last frame requires a first frame' });
   }
 
-  if (mode === 'r2v' && !isV2Model(effectiveModel)) {
-    return res.status(400).json({ error: `${effectiveModel} accepts no reference images — pick a wan2.7 r2v model in Settings` });
+  if (mode === 'r2v' && !isV2Model(effectiveModel) && provider !== 'ark') {
+    return res.status(400).json({ error: `${effectiveModel} accepts no reference images — pick a wan2.7 r2v or doubao-seedance model in Settings` });
   }
 
   const task = createTask('video', { total: clips.length });
