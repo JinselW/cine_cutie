@@ -41,9 +41,9 @@ export class VideoAgent extends BaseAgent {
     // video stage cannot author prompts, so it rebuilds them deterministically and says so.
     const candidates = [ctx.promptPackage, ctx.referenceImages?.promptPackage].filter(Boolean);
     const reusable = candidates.find(candidate => this.#promptAgent.compatible(candidate, ctx));
-    if (!reusable && candidates.length) addAgentMessage('✍️', t('promptAgent.videoPackageRebuilt'));
     ctx.promptPackage = reusable ? structuredClone(reusable) : this.#promptAgent.migrateLegacy(ctx);
-    addAgentMessage('✍️', t('promptAgent.videoUsingPackage', { version: ctx.promptPackage.version }));
+    addAgentMessage('✍️', escapeHtml(t(reusable || !candidates.length
+      ? 'promptAgent.usingPackage' : 'promptAgent.videoPackageRebuilt', { version: ctx.promptPackage.version })), { key: 'prompt-status' });
     const hasUploads = ctx.uploads && (ctx.uploads.firstFrame || ctx.uploads.lastFrame || ctx.uploads.referenceImages?.length > 0);
 
     if (hasUploads) {
@@ -263,7 +263,7 @@ export class VideoAgent extends BaseAgent {
       shot: escapeHtml(String(shotId)),
       from: t(`settings.videoMode.${from}`),
       to: t(`settings.videoMode.${to}`),
-    }));
+    }), { key: `mode-fallback-${shotId}` });
   }
 
   #storyboardShots(ctx) {
@@ -360,8 +360,6 @@ export class VideoAgent extends BaseAgent {
 
     const results = new Map();
     const pending = [...items];
-
-    addAgentMessage('🎥', t('ui.videoGenGenerating', { current: 1, total: items.length }), { key: 'activity-status' });
 
     const maxAttempts = Math.max(MAX_ITEM_ATTEMPTS, ...items.map(item => item.modeCandidates?.length || 1));
     for (let attempt = 0; attempt < maxAttempts && pending.length > 0; attempt++) {
@@ -475,8 +473,6 @@ export class VideoAgent extends BaseAgent {
 
     const results = new Map();
     const pending = [...items];
-
-    addAgentMessage('🎥', t('ui.videoGenGenerating', { current: 1, total: items.length }), { key: 'activity-status' });
 
     for (let attempt = 0; attempt < MAX_ITEM_ATTEMPTS && pending.length > 0; attempt++) {
       const batch = pending.map(item => ({

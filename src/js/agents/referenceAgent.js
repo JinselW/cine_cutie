@@ -5,8 +5,6 @@ import { QCAgent, SCORE_THRESHOLD, reportScore, reportRetry } from './qcAgent.js
 import { getActiveProvider } from '../providers/registry.js';
 import { getConfig } from '../providers/llm.js';
 import { createArtifact, ArtifactKind, ArtifactStatus, recordItemAttempt } from '../artifacts/artifactTypes.js';
-import { addAgentMessage } from '../ui/render.js';
-import { t } from '../i18n.js';
 import { reportPhase } from '../progressTracker.js';
 import { checkVisualMediaBatch } from '../compliance/visualCompliance.js';
 import { QCVerdict } from './qcTypes.js';
@@ -50,7 +48,6 @@ export class ReferenceAgent extends BaseAgent {
         data: { mode, shots: [], extraFrames: [], promptPackage: error.promptPackage } })],
         metadata: { qualityScore: error.promptPackage.provenance.qc?.score ?? 0, verdict: 'FAIL' } };
     }
-    addAgentMessage('✍️', t('promptAgent.imageUsingPackage', { version: ctx.promptPackage.version }));
     const shotModes = ctx.promptPackage.data.shots.map(s => ({ mode: s.mode, reason: s.modeReason }));
     const items = this.#buildItems(pairs, ctx);
     const sourceArtifactIds = [
@@ -187,8 +184,6 @@ export class ReferenceAgent extends BaseAgent {
 
     const results = new Map();
     const pending = [...items];
-
-    addAgentMessage('🖼️', t('ui.refImagesGenerating', { current: 1, total: items.length }), { key: 'activity-status' });
 
     for (let attempt = 0; attempt < MAX_ITEM_ATTEMPTS && pending.length > 0; attempt++) {
       const batch = pending.map(item => ({

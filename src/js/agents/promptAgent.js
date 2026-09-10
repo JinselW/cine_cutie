@@ -28,15 +28,35 @@ export function promptQcGate(qc) {
   return 'passed';
 }
 
-function qcLogLine(gate, qc) {
+function qcLogLine(gate, qc, version) {
   const issues = (qc?.issues || []).join('; ');
   if (gate === 'blocked') return t('promptAgent.qcBlocked', { issues });
   if (gate === 'unavailable') return t('promptAgent.qcUnavailable', { issues: issues || t('ui.unknown') });
-  return t('promptAgent.qcPassed', { score: qc.score });
+  return t('promptAgent.qcPassed', { score: qc.score, version });
 }
 
 function apiErrorText(error) {
   return [error?.i18nKey || error?.message || 'unknown error', error?.detail].filter(Boolean).join(': ');
+}
+
+const DEGRADATION_KEYS = {
+  'Image provider item contract does not support negative prompt': 'promptAgent.degradeImageNegative',
+  'Provider item contract does not support negative prompt': 'promptAgent.degradeVideoNegative',
+  'Provider does not support generated audio': 'promptAgent.degradeAudio',
+};
+
+// Degradations stay stored verbatim for QC provenance; only the feed is localized, and an
+// unrecognized reason falls through so a new adapter can never hide a limitation.
+export function describeDegradation(reason) {
+  const text = String(reason || '');
+  const fallback = text.match(/^Mode fallback: (.+) → (.+)$/);
+  if (fallback) {
+    return t('promptAgent.degradeMode', {
+      from: t(`settings.videoMode.${fallback[1]}`), to: t(`settings.videoMode.${fallback[2]}`),
+    });
+  }
+  const key = DEGRADATION_KEYS[text];
+  return key ? t(key) : text;
 }
 
 const MAX_REJECTED_REVISIONS = 3;
@@ -50,9 +70,30 @@ function recordRejection(parent, rejected) {
 }
 export class PromptAgent extends BaseAgent {
   constructor({ qcAgent = new QCAgent({ stepId: 'promptPackage' }), generate = chat, config = getConfig,
-    log = message => addAgentMessage('✍️', escapeHtml(message)) } = {}) {
+    log = (message, tone = null) => addAgentMessage('✍️', escapeHtml(message), { key: 'prompt-status', tone }) } = {}) {
     super({ name: 'Prompt Engineer', stepId: null });
-    this.qcAgent = qcAgent; this.generate = generate; this.config = config; this.log = log;
+    this.qcAgent = qcAgent; this.generate = generate; this.config = config;
+    this.rawLog = log;
+    // One card per step: every status line carries the capability limits seen so far, so the
+    // notice can never stack next to — or be mistaken for — the review result it explains.
+    this.log = (message, tone = null) => {
+      this.lastStatus = { message, tone };
+      this.rawLog(this.#withNotes(message), tone);
+    };
+    this.capabilityNotes = [];
+    this.lastStatus = null;
+  }
+  #withNotes(message) {
+    const notes = this.capabilityNotes.join('；');
+    if (!notes) return message;
+    const label = t('promptAgent.capabilityNotes', { notes });
+    return message ? `${message}\n${label}` : label;
+  }
+  #noteCapability(reasons) {
+    const fresh = reasons.filter(reason => !this.capabilityNotes.includes(reason));
+    if (!fresh.length) return;
+    this.capabilityNotes.push(...fresh);
+    this.rawLog(this.lastStatus ? this.#withNotes(this.lastStatus.message) : this.#withNotes(''), this.lastStatus?.tone);
   }
   compatible(envelope, ctx) {
     return envelope?.adoptionStatus === 'adopted' && envelope.fingerprint === promptFingerprint(ctx, this.config())
@@ -64,7 +105,10 @@ export class PromptAgent extends BaseAgent {
   }
   async prepareShotPrompts(ctx) {
     const old = ctx.promptPackage || ctx.referenceImages?.promptPackage;
-    if (!ctx.feedback && this.compatible(old, ctx)) return structuredClone(old);
+    if (!ctx.feedback && this.compatible(old, ctx)) {
+      this.log(t('promptAgent.usingPackage', { version: old.version }));
+      return structuredClone(old);
+    }
     const template = compilePromptPackage(ctx, null, this.config(), { legacy: true });
     this.log(t('promptAgent.preparing', { count: template.shots.length }));
     const before = peekTokenUsage();
@@ -79,7 +123,7 @@ export class PromptAgent extends BaseAgent {
       const rejected = this.envelope(ctx, { schemaVersion: 1, shots: [] }, old, 'prepare', null, qc, usage, 'unavailable');
       if (old) recordRejection(old, rejected);
       error.promptPackage = rejected;
-      this.log(t('promptAgent.prepareFailed', { reason }));
+      this.log(t('promptAgent.prepareFailed', { reason }), 'danger');
       throw error;
     }
     const usage = { prompt: peekTokenUsage().prompt - before.prompt, completion: peekTokenUsage().completion - before.completion };
@@ -91,7 +135,7 @@ export class PromptAgent extends BaseAgent {
       const qc = { score: null, verdict: 'FAIL', source: 'structural', issues: [error.message] };
       error.promptPackage = this.envelope(ctx, { schemaVersion: 1, shots: [] }, old, 'prepare', null, qc, usage, 'blocked');
       if (old) recordRejection(old, error.promptPackage);
-      this.log(qcLogLine('blocked', qc));
+      this.log(qcLogLine('blocked', qc), 'danger');
       throw error;
     }
     return this.save(ctx, pkg, old, 'prepare', null, usage);
@@ -119,7 +163,7 @@ export class PromptAgent extends BaseAgent {
       const rejected = this.envelope(ctx, structuredClone(old.data), old, 'revise', ctx.shotId, qc, usage, 'unavailable');
       recordRejection(old, rejected);
       error.promptPackage = rejected;
-      this.log(t('promptAgent.reviseFailed', { shot: ctx.shotId, reason }));
+      this.log(t('promptAgent.reviseFailed', { shot: ctx.shotId, reason }), 'danger');
       throw error;
     }
     const usage = { prompt: peekTokenUsage().prompt - before.prompt, completion: peekTokenUsage().completion - before.completion };
@@ -136,7 +180,7 @@ export class PromptAgent extends BaseAgent {
       const rejected = this.envelope(ctx, structuredClone(old.data), old, 'revise', ctx.shotId, qc, usage, 'blocked');
       recordRejection(old, rejected);
       error.promptPackage = rejected;
-      this.log(qcLogLine('blocked', qc));
+      this.log(qcLogLine('blocked', qc), 'danger');
       throw error;
     }
     // Compilation of a revision must never alter other shots or global policy.
@@ -145,7 +189,7 @@ export class PromptAgent extends BaseAgent {
     // Existing input frames remain the instruction source during video retries.
     if (ctx.triggeredBy === 'VideoAgent') pkg.shots[index].image = structuredClone(target.image);
     const result = await this.save(ctx, pkg, old, 'revise', ctx.shotId, usage);
-    this.log(t('promptAgent.revised', { shot: ctx.shotId, version: result.version }));
+    this.log(t('promptAgent.revised', { shot: ctx.shotId, version: result.version, score: result.provenance.qc?.score }));
     return result;
   }
   async save(ctx, pkg, old, operation, shotId, usage) {
@@ -155,7 +199,7 @@ export class PromptAgent extends BaseAgent {
       : { score: null, verdict: 'FAIL', source: 'structural', issues: check.errors, suggestions: [] };
     const gate = check.valid ? promptQcGate(qc) : 'blocked';
     const result = this.envelope(ctx, pkg, old, operation, shotId, qc, usage, gate);
-    this.log(qcLogLine(gate, qc));
+    this.log(qcLogLine(gate, qc, result.version), gate === 'passed' ? null : 'danger');
     if (gate !== 'passed') {
       if (old) recordRejection(old, result);
       const issues = qc?.issues || (gate === 'unavailable' ? ['Prompt QC unavailable'] : []);
@@ -186,7 +230,7 @@ export class PromptAgent extends BaseAgent {
     const notified = new Set(promptPackage.adaptations.flatMap(adaptation => (adaptation.degradations || []).map(degradation => `${adaptation.provider}|${adaptation.media}|${degradation}`)));
     promptPackage.adaptations.push({ key, operation: 'adapt', agent: this.name, triggeredBy, shotId, provider, media: target, frameRole, tokens: { prompt: 0, completion: 0 }, timestamp: Date.now(), ...request });
     const fresh = request.degradations.filter(degradation => !notified.has(`${provider}|${target}|${degradation}`));
-    if (fresh.length) this.log(t('promptAgent.providerDegraded', { provider: provider || 'provider', media: target, reason: fresh.join('; ') }));
+    this.#noteCapability(fresh.map(describeDegradation));
     return request;
   }
 }

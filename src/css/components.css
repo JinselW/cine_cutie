@@ -453,7 +453,7 @@ textarea.edit-input{resize:vertical;min-height:70px}
   width:30px;height:30px;border-radius:50%;background:var(--gold);
   display:flex;align-items:center;justify-content:center;font-size:0.85rem;flex-shrink:0;
 }
-.agent-msg .agent-text{font-size:0.88rem;color:var(--cream2);line-height:1.6}
+.agent-msg .agent-text{font-size:0.88rem;color:var(--cream2);line-height:1.6;white-space:pre-line}
 .agent-msg.system .agent-icon{background:var(--bg3)}
 .agent-msg-danger{border-color:color-mix(in srgb,var(--rose) 45%,var(--glass-border))}
 .agent-msg-danger .agent-text{color:var(--rose)}

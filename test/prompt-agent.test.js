@@ -25,6 +25,36 @@ test('prepare creates a versioned, path-free package and reuses compatible input
   assert.equal(agent.compatible(pkg, ctx), false);
 });
 
+test('prompt progress stays on one card and ends on the decisive outcome', async () => {
+  const h = await promptHarness(); const agent = new h.PromptAgent(); const ctx = promptContext();
+  const pkg = await agent.prepareShotPrompts(ctx);
+  assert.equal((await agent.prepareShotPrompts({ ...ctx, promptPackage: pkg })).version, 1);
+  const statuses = h.calls.keys.filter(entry => entry.key === 'prompt-status');
+  assert.ok(statuses.length >= 3);
+  assert.equal(statuses.at(-1).text, 'promptAgent.usingPackage');
+  assert.ok(h.calls.keys.every(entry => entry.key === 'prompt-status' || entry.key === null));
+
+  const low = new h.PromptAgent({ qcAgent: { process: async () => ({ score: 3, verdict: 'CONDITIONAL_PASS', issues: ['flat lighting'], suggestions: [] }) } });
+  const before = h.calls.keys.length;
+  await assert.rejects(low.prepareShotPrompts(ctx));
+  const rejected = h.calls.keys.slice(before).filter(entry => entry.key === 'prompt-status').at(-1);
+  assert.equal(rejected.text, 'promptAgent.qcBlocked');
+  assert.equal(rejected.tone, 'danger');
+});
+
+test('capability limits read as localized phrases without hiding unknown ones', async () => {
+  const { describeDegradation } = await import('../src/js/agents/promptAgent.js');
+  const { state } = await import('../src/js/state.js');
+  const { t } = await import('../src/js/i18n.js');
+  state.lang = 'zh';
+  assert.equal(describeDegradation('Image provider item contract does not support negative prompt'), '图像不支持 negative prompt');
+  assert.equal(describeDegradation('Provider item contract does not support negative prompt'), '视频不支持 negative prompt');
+  assert.equal(describeDegradation('Provider does not support generated audio'), '不支持生成音频');
+  assert.equal(describeDegradation('Mode fallback: firstLastFrame → textToVideo'),
+    `模式回退 ${t('settings.videoMode.firstLastFrame')} → ${t('settings.videoMode.textToVideo')}`);
+  assert.equal(describeDegradation('Some future adapter limitation'), 'Some future adapter limitation');
+});
+
 test('schema rejects missing, duplicate, unknown IDs, durations, bindings, frames and paths', async () => {
   const h = await promptHarness(); const ctx = promptContext(); h.cfg.videoMode = 'firstLastFrame';
   const original = (await new h.PromptAgent().prepareShotPrompts(ctx)).data;
@@ -191,7 +221,8 @@ test('repeated adaptation is recorded and reported once per provider state', asy
   const args = { promptPackage: pkg, shotId: 's1', provider: 'dashscope', media: 'video', executedMode: 'firstFrame' };
   agent.adaptForProvider(args); agent.adaptForProvider(args);
   assert.equal(pkg.adaptations.length, 1);
-  assert.equal(h.calls.logs.filter(message => String(message).includes('promptAgent.providerDegraded')).length, 1);
+  assert.ok(h.calls.keys.every(entry => entry.key === 'prompt-status'));
+  assert.match(h.calls.keys.at(-1).text, /promptAgent\.capabilityNotes/);
   agent.adaptForProvider({ ...args, media: 'image', frameRole: 'first_frame' });
   assert.equal(pkg.adaptations.length, 2);
   agent.adaptForProvider({ ...args, executedMode: 'textToVideo' });

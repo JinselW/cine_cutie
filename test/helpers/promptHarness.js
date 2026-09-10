@@ -3,7 +3,7 @@ import path from 'node:path';
 import { readFileSync } from 'node:fs';
 export async function promptHarness({ videoId = 'video-comfy', imageGenerate, videoGenerate } = {}) {
   const cfg = { videoMode: 'auto', models: { text: { name: 'test-model' } } };
-  const calls = { llm: [], images: [], videos: [], logs: [] };
+  const calls = { llm: [], images: [], videos: [], logs: [], keys: [] };
   const qc = { score: 9, verdict: 'PASS', suggestions: [] };
   const context = vm.createContext({ console, structuredClone, AbortController, setTimeout, clearTimeout, Date, Map, Set });
   const stubs = {
@@ -18,7 +18,7 @@ export async function promptHarness({ videoId = 'video-comfy', imageGenerate, vi
     'src/js/providers/registry.js': { getActiveProvider: type => type === 'image' ? { id: 'image-test', generate: async ({ items }) => {
       calls.images.push(structuredClone(items)); return imageGenerate ? imageGenerate(items, calls.images.length) : items.map(i => ({ id: i.id, path: '/api/media/' + i.id + '.png', status: 'complete' }));
     } } : { id: videoId, generate: async ({ items }) => { calls.videos.push(structuredClone(items)); return videoGenerate ? videoGenerate(items, calls.videos.length) : items.map(i => ({ id: i.id, videoPath: '/api/media/' + i.id + '.mp4', status: 'complete' })); } } },
-    'src/js/ui/render.js': { addAgentMessage: (_, text) => calls.logs.push(text) },
+    'src/js/ui/render.js': { addAgentMessage: (_, text, { key = null, tone = null } = {}) => { calls.logs.push(text); calls.keys.push({ text, key, tone }); } },
     'src/js/i18n.js': { t: key => key },
     'src/js/utils.js': { escapeHtml: x => String(x) },
     'src/js/progressTracker.js': { reportPhase() {} },

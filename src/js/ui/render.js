@@ -316,7 +316,10 @@ function _prependMsg(icon, text, { key = null, tone = null } = {}) {
     <div class="agent-icon">${icon}</div>
     <div class="agent-text">${text}</div>
   `;
-  $('#stepContent').prepend(msg);
+  const content = $('#stepContent');
+  const status = content.querySelector('.agent-msg[data-message-key="prompt-status"]');
+  if (key === 'prompt-status' || !status) content.prepend(msg);
+  else status.after(msg);
 }
 
 export function renderCurrentMessages() {
