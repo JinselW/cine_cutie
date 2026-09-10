@@ -111,7 +111,7 @@
 .notebook-binding{position:absolute;left:50%;top:0;bottom:0;width:2px;background:rgba(91,65,43,.26);transform:translateX(-50%)}
 .notebook-page-lines{position:absolute;left:6px;right:6px;top:8px;height:12px;background:repeating-linear-gradient(to bottom,rgba(110,77,58,.28) 0 1px,transparent 1px 5px)}
 .mascot-pen{
-  width:4px;height:34px;position:absolute;z-index:7;left:-1px;top:13px;
+  width:4px;height:34px;position:absolute;z-index:7;left:-1px;top:4px;
   border-radius:3px 3px 1px 1px;background:linear-gradient(90deg,var(--rose),#ff9cae);
   box-shadow:0 0 0 1px rgba(34,25,45,.25);transform-origin:50% 5px;
 }
