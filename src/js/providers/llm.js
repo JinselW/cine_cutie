@@ -26,7 +26,7 @@ const MODEL_PRESETS = {
 };
 
 const IMAGE_PRESETS = ['wan2.6-t2i', 'doubao-seedream-5-0-260128', 'doubao-seedream-4-5-251128'];
-const IMG2IMG_PRESETS = ['wan2.6-image', 'doubao-seedream-5-0-260128'];
+const IMG2IMG_PRESETS = ['wan2.6-image', 'wan2.7-image', 'doubao-seedream-5-0-260128'];
 
 const VIDEO_MODES = [
   { id: 'firstFrame', presets: ['wan2.6-i2v', 'doubao-seedance-2-0-260128', 'doubao-seedance-1-0-pro-250528'], defaultModel: 'wan2.6-i2v', configKey: 'video' },

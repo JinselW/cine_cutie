@@ -89,7 +89,9 @@ export async function submitImageEditTask(prompt, imageUrls, { model, size = '1K
           size,
           n: 1,
           watermark: false,
-          prompt_extend: false,
+          // prompt_extend 只存在于 wan2.6-image；wan2.7-image 用 thinking_mode 取代，
+          // 传未知参数会被 API 拒绝，所以只对非 2.7 模型发送。
+          ...(!/^wan2\.7-/.test(model) && { prompt_extend: false }),
           ...(seed != null && { seed })
         }
       }),
