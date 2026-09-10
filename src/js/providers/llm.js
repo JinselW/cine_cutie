@@ -259,9 +259,13 @@ class LLMError extends Error {
   }
 }
 
-async function callChat(messages, { retryWithoutJsonFormat = false, signal: externalSignal } = {}) {
+const DEFAULT_CHAT_TIMEOUT_MS = 90000;
+// Full prompt-package generation/review routinely exceeds the default budget.
+export const HEAVY_TEXT_TIMEOUT_MS = 300000;
+
+async function callChat(messages, { retryWithoutJsonFormat = false, signal: externalSignal, timeoutMs = DEFAULT_CHAT_TIMEOUT_MS } = {}) {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 90000);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
   let onExternalAbort;
   if (externalSignal) {
@@ -323,7 +327,7 @@ async function callChat(messages, { retryWithoutJsonFormat = false, signal: exte
       }
       if (res.status === 400 && text.includes('response_format')) {
         if (!retryWithoutJsonFormat) {
-          return callChat(messages, { retryWithoutJsonFormat: true, signal: externalSignal });
+          return callChat(messages, { retryWithoutJsonFormat: true, signal: externalSignal, timeoutMs });
         }
       }
       throw new LLMError('llm.errHttp', `${res.status}: ${text.substring(0, 200)}`);
@@ -349,7 +353,7 @@ async function callChat(messages, { retryWithoutJsonFormat = false, signal: exte
     }
     if (err instanceof LLMError) throw err;
     if (err.name === 'AbortError') {
-      throw new LLMError('llm.errTimeout', '90s');
+      throw new LLMError('llm.errTimeout', `${Math.round(timeoutMs / 1000)}s`);
     }
     // Detect CORS or network errors
     const errMsg = err.message || '';
@@ -534,8 +538,8 @@ if (isConfigured()) {
   setActiveProvider('text', 'llm');
 }
 
-async function chat(messages, { signal, retryWithoutJsonFormat } = {}) {
-  return callChat(messages, { signal, retryWithoutJsonFormat });
+async function chat(messages, { signal, retryWithoutJsonFormat, timeoutMs } = {}) {
+  return callChat(messages, { signal, retryWithoutJsonFormat, timeoutMs });
 }
 
 export {

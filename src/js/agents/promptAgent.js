@@ -1,6 +1,6 @@
 import { BaseAgent } from './baseAgent.js';
 import { QCAgent, SCORE_THRESHOLD } from './qcAgent.js';
-import { chat, parseJson, getConfig, peekTokenUsage } from '../providers/llm.js';
+import { chat, parseJson, getConfig, peekTokenUsage, HEAVY_TEXT_TIMEOUT_MS } from '../providers/llm.js';
 import { createArtifact, ArtifactKind, ArtifactStatus } from '../artifacts/artifactTypes.js';
 import { compilePromptPackage } from '../prompts/promptCompiler.js';
 import { validatePromptPackage } from '../prompts/promptSchema.js';
@@ -71,7 +71,7 @@ export class PromptAgent extends BaseAgent {
     let response;
     try {
       response = await this.generate([{ role: 'system', content: 'You are the film Prompt Engineer. Return JSON with shots matching the provided template exactly. Create coherent opening/closing frames, visual, motion and audio prompts. Preserve IDs, durations, identity and continuity. Choose shot modes when videoMode is auto. Never include media paths. Respect user feedback; avoid IP, logos, watermarks and contradictory descriptions.' },
-        { role: 'user', content: JSON.stringify({ context: safeContext(ctx), template }) }], { signal: ctx.signal });
+        { role: 'user', content: JSON.stringify({ context: safeContext(ctx), template }) }], { signal: ctx.signal, timeoutMs: HEAVY_TEXT_TIMEOUT_MS });
     } catch (error) {
       const usage = { prompt: peekTokenUsage().prompt - before.prompt, completion: peekTokenUsage().completion - before.completion };
       const reason = apiErrorText(error);
@@ -111,7 +111,7 @@ export class PromptAgent extends BaseAgent {
     let response;
     try {
       response = await this.generate([{ role: 'system', content: 'Revise ONLY this shot prompt spec. Return the complete shot as JSON. Preserve shotId, duration, mode and bindings. Correct the reported failure without changing adjacent shots. No media paths.' },
-        { role: 'user', content: JSON.stringify({ shot: target, reason: ctx.reason, feedback: ctx.feedback, adjacentShots: old.data.shots.filter((s, i, a) => a[i - 1]?.shotId === target.shotId || a[i + 1]?.shotId === target.shotId), characterDesign: safeContext(ctx).characterDesign }) }], { signal: ctx.signal });
+        { role: 'user', content: JSON.stringify({ shot: target, reason: ctx.reason, feedback: ctx.feedback, adjacentShots: old.data.shots.filter((s, i, a) => a[i - 1]?.shotId === target.shotId || a[i + 1]?.shotId === target.shotId), characterDesign: safeContext(ctx).characterDesign }) }], { signal: ctx.signal, timeoutMs: HEAVY_TEXT_TIMEOUT_MS });
     } catch (error) {
       const usage = { prompt: peekTokenUsage().prompt - before.prompt, completion: peekTokenUsage().completion - before.completion };
       const reason = apiErrorText(error);

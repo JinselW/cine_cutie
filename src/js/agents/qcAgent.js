@@ -1,6 +1,6 @@
 import { validatePromptPackage } from '../prompts/promptSchema.js';
 import { getActiveProvider } from '../providers/registry.js';
-import { chat } from '../providers/llm.js';
+import { chat, HEAVY_TEXT_TIMEOUT_MS } from '../providers/llm.js';
 import { addAgentMessage } from '../ui/render.js';
 import { updateStepMetrics } from '../observability.js';
 import { t } from '../i18n.js';
@@ -299,7 +299,7 @@ export class QCAgent {
 
     let raw;
     try {
-      raw = await chat(messages, { signal: ctx.signal });
+      raw = await chat(messages, { signal: ctx.signal, timeoutMs: this.stepId === 'promptPackage' ? HEAVY_TEXT_TIMEOUT_MS : undefined });
     } catch (error) {
       if (this.stepId === 'promptPackage') {
         const detail = error?.detail ? `: ${error.detail}` : '';

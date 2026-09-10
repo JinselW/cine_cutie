@@ -7,7 +7,7 @@ export async function promptHarness({ videoId = 'video-comfy', imageGenerate, vi
   const qc = { score: 9, verdict: 'PASS', suggestions: [] };
   const context = vm.createContext({ console, structuredClone, AbortController, setTimeout, clearTimeout, Date, Map, Set });
   const stubs = {
-    'src/js/providers/llm.js': { getConfig: () => cfg, peekTokenUsage: () => ({ prompt: calls.llm.length * 100, completion: calls.llm.length * 50 }), parseJson: JSON.parse,
+    'src/js/providers/llm.js': { getConfig: () => cfg, peekTokenUsage: () => ({ prompt: calls.llm.length * 100, completion: calls.llm.length * 50 }), parseJson: JSON.parse, HEAVY_TEXT_TIMEOUT_MS: 300000,
       chat: async messages => { calls.llm.push(messages); const req = JSON.parse(messages[1].content);
         if (req.template) { const data = req.template; data.legacy = false; return JSON.stringify(data); }
         req.shot.video.visualPrompt = 'Revised visual action'; req.shot.image.firstFramePrompt = 'Revised opening action';
