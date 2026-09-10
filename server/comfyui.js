@@ -200,10 +200,26 @@ export async function getPromptSnapshot(sshConfig, promptId, { signal } = {}) {
   };
 }
 
+// 成片落在哪个 ui 键下并不稳定：ComfyUI 0.34 的 SaveVideo 复用图像的 `images` 并配一个
+// 平行的 `animated` 标记，其它版本/自定义节点用 `videos` 或 `gifs`。所以遍历所有键，
+// 靠扩展名判定视频，同时天然排除 SaveImage 产出的 png。
+const VIDEO_FILE_RE = /\.(mp4|webm|mov|m4v|mkv|avi|gif)$/i;
+
 export function collectVideoOutputs(outputs = {}) {
   const videos = [];
-  for (const nodeOutput of Object.values(outputs)) {
-    if (Array.isArray(nodeOutput?.videos)) videos.push(...nodeOutput.videos);
+  const seen = new Set();
+  for (const nodeOutput of Object.values(outputs || {})) {
+    if (!nodeOutput || typeof nodeOutput !== 'object') continue;
+    for (const value of Object.values(nodeOutput)) {
+      const entries = Array.isArray(value) ? value : [value];
+      for (const entry of entries) {
+        if (typeof entry?.filename !== 'string' || !VIDEO_FILE_RE.test(entry.filename)) continue;
+        const key = `${entry.type || 'output'}/${entry.subfolder || ''}/${entry.filename}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        videos.push(entry);
+      }
+    }
   }
   return videos;
 }

@@ -131,6 +131,18 @@ test('ComfyUI history output selection ignores preview images', () => {
   assert.deepEqual(collectVideoOutputs({ preview: { images: [{ filename: 'preview.png' }] } }), []);
 });
 
+test('ComfyUI 0.34 reports SaveVideo files under images with an animated flag', () => {
+  const saved = { filename: 'MiniMax_H3_00257_.mp4', subfolder: 'video', type: 'output' };
+  assert.deepEqual(
+    collectVideoOutputs({ 92: { images: [saved], animated: [true] } }),
+    [saved],
+  );
+  assert.deepEqual(
+    collectVideoOutputs({ 92: { gifs: [{ filename: 'clip.gif', subfolder: 'video', type: 'output' }] } }),
+    [{ filename: 'clip.gif', subfolder: 'video', type: 'output' }],
+  );
+});
+
 test('remote cancellation interrupts only the matching running prompt', () => {
   const queue = {
     queue_running: [[7, 'running-prompt', {}, {}, []]],
