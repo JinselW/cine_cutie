@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { ensureTunnel } from './ssh-tunnel.js';
+import { COMFY_CLIP_TIMEOUT_MS } from '../shared/comfyTimeouts.js';
 import { createHash } from 'crypto';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -236,28 +237,46 @@ export async function submitWorkflow(sshConfig, { mode, prompt, seed, duration, 
   return result.prompt_id;
 }
 
-export async function pollUntilDone(sshConfig, promptId, { timeoutMs = 600000, pollIntervalMs = 5000, signal } = {}) {
+function readHistoryEntry(entry) {
+  if (entry.status?.status_str === 'success') {
+    const videoOutputs = collectVideoOutputs(entry.outputs);
+    if (!videoOutputs.length) {
+      return { status: 'error', message: 'ComfyUI completed without a video output' };
+    }
+    return { status: 'success', outputs: videoOutputs };
+  }
+  if (entry.status?.status_str === 'error') {
+    return { status: 'error', message: entry.status?.messages?.join(', ') || 'Unknown error' };
+  }
+  return null;
+}
+
+export async function pollUntilDone(sshConfig, promptId, { timeoutMs = COMFY_CLIP_TIMEOUT_MS, pollIntervalMs = 5000, signal } = {}) {
   const startTime = Date.now();
 
   while (true) {
     if (signal?.aborted) throw new Error('Cancelled');
-    if (Date.now() - startTime > timeoutMs) throw new Error('ComfyUI generation timeout');
 
     await new Promise(r => setTimeout(r, pollIntervalMs));
 
     const history = await comfyRequest(sshConfig, `/history/${promptId}`, { signal });
     if (history[promptId]) {
-      const entry = history[promptId];
-      if (entry.status?.status_str === 'success') {
-        const videoOutputs = collectVideoOutputs(entry.outputs);
-        if (!videoOutputs.length) {
-          return { status: 'error', message: 'ComfyUI completed without a video output' };
-        }
-        return { status: 'success', outputs: videoOutputs };
-      }
-      if (entry.status?.status_str === 'error') {
-        return { status: 'error', message: entry.status?.messages?.join(', ') || 'Unknown error' };
-      }
+      const result = readHistoryEntry(history[promptId]);
+      if (result) return result;
+    }
+
+    // 预算耗尽不等于渲染失败：长尾任务可能只差几秒，所以最后再读一次，仍然没有就把
+    // prompt 留给 ComfyUI 跑完。这里绝不能抛异常——抛出会让调用方清理时 interrupt 掉
+    // 一个还在正常渲染的任务，白丢十几分钟 GPU。
+    if (Date.now() - startTime > timeoutMs) {
+      const final = await comfyRequest(sshConfig, `/history/${promptId}`, { signal }).catch(() => null);
+      const late = final?.[promptId] && readHistoryEntry(final[promptId]);
+      if (late) return late;
+      return {
+        status: 'timeout',
+        promptId,
+        message: `ComfyUI 单段生成超过 ${Math.round(timeoutMs / 60000)} 分钟仍未完成，已保留该 prompt 继续在 ComfyUI 侧渲染`,
+      };
     }
   }
 }

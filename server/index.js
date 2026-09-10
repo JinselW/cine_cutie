@@ -1248,7 +1248,7 @@ app.post('/api/generate/video-comfy', async (req, res) => {
                   workflowMode: mode, inferenceProfile: inference.profile, clipStartedAt: Date.now(),
                 });
 
-                const pollResult = await pollUntilDone(sshConfig, promptId, { timeoutMs: 600000, signal: comfyAbort.signal });
+                const pollResult = await pollUntilDone(sshConfig, promptId, { signal: comfyAbort.signal });
                 promptFinished = true;
 
                 if (comfyAbort.signal.aborted || isTaskCancelled(task.id)) {

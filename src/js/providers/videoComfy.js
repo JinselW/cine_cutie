@@ -4,6 +4,7 @@ import { tierToMp } from '../utils/resolution.js';
 import { registerBackendTask, unregisterBackendTask } from './activeTasks.js';
 import { reportBatchProgress } from '../progressTracker.js';
 import { selectComfyWorkflow } from './comfyWorkflowMode.js';
+import { COMFY_CLIP_TIMEOUT_MS } from '../../../shared/comfyTimeouts.js';
 
 const DEFAULT_CLIP_DURATION = 5;
 
@@ -104,9 +105,9 @@ const comfyUIProvider = {
         }));
       }
       const startTime = Date.now();
-      // The server allows one 10-minute ComfyUI attempt per clip. Keep a small
-      // transfer/polling margin without waiting through obsolete backend retries.
-      const MAX_WAIT = Math.max(20 * 60 * 1000, clips.length * 11 * 60 * 1000);
+      // 每段预算取服务端的同一个常量再加下载/轮询余量：两层预算以前各写各的
+      // （客户端 11 分钟、服务端 10 分钟），结果服务端先放弃而客户端还在等。
+      const MAX_WAIT = clips.length * (COMFY_CLIP_TIMEOUT_MS + 60000);
       const maxPollAttempts = Math.ceil(MAX_WAIT / 5000);
 
       for (let attempt = 0; attempt < maxPollAttempts; attempt++) {
