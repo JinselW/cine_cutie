@@ -64,6 +64,27 @@ const INSPIRATION_IDEAS = {
   ],
 };
 let inspirationOffset = 0;
+const lastPlaceholderIdea = { zh: -1, en: -1 };
+let currentPlaceholderIdea = '';
+
+function showRandomInspirationPlaceholder() {
+  const input = $('#userInput');
+  const ideas = INSPIRATION_IDEAS[state.lang] || INSPIRATION_IDEAS.zh;
+  if (!input || !ideas.length) return;
+
+  let index = Math.floor(Math.random() * ideas.length);
+  if (ideas.length > 1 && index === lastPlaceholderIdea[state.lang]) {
+    index = (index + 1) % ideas.length;
+  }
+  lastPlaceholderIdea[state.lang] = index;
+  currentPlaceholderIdea = ideas[index][1];
+
+  const guidance = t('ui.placeholder').split('\n\n')[0];
+  const example = state.lang === 'en'
+    ? `e.g. "${currentPlaceholderIdea}"`
+    : `比如："${currentPlaceholderIdea}"`;
+  input.placeholder = `${guidance}\n\n${example}`;
+}
 
 function renderInspirationIdeas(advance = false) {
   const grid = $('#inspirationGrid');
@@ -99,7 +120,11 @@ $('#inspirationToggle')?.addEventListener('click', (event) => {
   if (open) renderInspirationIdeas();
 });
 $('#inspirationShuffle')?.addEventListener('click', () => renderInspirationIdeas(true));
-window.addEventListener('languagechange', () => renderInspirationIdeas());
+window.addEventListener('languagechange', () => {
+  renderInspirationIdeas();
+  showRandomInspirationPlaceholder();
+});
+showRandomInspirationPlaceholder();
 
 function setTheme(theme) {
   if (theme !== 'dark' && theme !== 'light') return;
@@ -405,7 +430,7 @@ $('#userInput').addEventListener('keydown', e => {
   } else if (e.key === 'Tab') {
     e.preventDefault();
     const ta = e.currentTarget;
-    ta.setRangeText(t('ui.example'), ta.selectionStart, ta.selectionEnd, 'end');
+    ta.setRangeText(currentPlaceholderIdea || t('ui.example'), ta.selectionStart, ta.selectionEnd, 'end');
     ta.dispatchEvent(new Event('input', { bubbles: true }));
   }
 });
