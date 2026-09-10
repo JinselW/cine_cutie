@@ -219,14 +219,17 @@ test('repeated adaptation is recorded and reported once per provider state', asy
   const agent = new h.PromptAgent();
   const pkg = await agent.prepareShotPrompts(promptContext());
   const args = { promptPackage: pkg, shotId: 's1', provider: 'dashscope', media: 'video', executedMode: 'firstFrame' };
+  const callsBeforeAdaptation = h.calls.keys.length;
   agent.adaptForProvider(args); agent.adaptForProvider(args);
   assert.equal(pkg.adaptations.length, 1);
   assert.ok(h.calls.keys.every(entry => entry.key === 'prompt-status'));
-  assert.match(h.calls.keys.at(-1).text, /promptAgent\.capabilityNotes/);
+  assert.equal(h.calls.keys.length, callsBeforeAdaptation);
   agent.adaptForProvider({ ...args, media: 'image', frameRole: 'first_frame' });
   assert.equal(pkg.adaptations.length, 2);
+  assert.equal(h.calls.keys.length, callsBeforeAdaptation);
   agent.adaptForProvider({ ...args, executedMode: 'textToVideo' });
   assert.equal(pkg.adaptations.length, 3);
+  assert.match(h.calls.keys.at(-1).text, /promptAgent\.capabilityNotes/);
   assert.ok(pkg.adaptations.every(adaptation => adaptation.executedMode === 'firstFrame' || adaptation.executedMode === 'textToVideo'));
 });
 

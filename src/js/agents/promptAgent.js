@@ -45,6 +45,14 @@ const DEGRADATION_KEYS = {
   'Provider does not support generated audio': 'promptAgent.degradeAudio',
 };
 
+// Negative prompts are optional provider-contract details. Keep their omission in
+// adaptation provenance for diagnostics, but do not surface it as a user-facing
+// capability warning because generation can continue normally without the field.
+const SILENT_DEGRADATIONS = new Set([
+  'Image provider item contract does not support negative prompt',
+  'Provider item contract does not support negative prompt',
+]);
+
 // Degradations stay stored verbatim for QC provenance; only the feed is localized, and an
 // unrecognized reason falls through so a new adapter can never hide a limitation.
 export function describeDegradation(reason) {
@@ -229,7 +237,8 @@ export class PromptAgent extends BaseAgent {
     if (promptPackage.adaptations.some(adaptation => adaptation.key === key)) return request;
     const notified = new Set(promptPackage.adaptations.flatMap(adaptation => (adaptation.degradations || []).map(degradation => `${adaptation.provider}|${adaptation.media}|${degradation}`)));
     promptPackage.adaptations.push({ key, operation: 'adapt', agent: this.name, triggeredBy, shotId, provider, media: target, frameRole, tokens: { prompt: 0, completion: 0 }, timestamp: Date.now(), ...request });
-    const fresh = request.degradations.filter(degradation => !notified.has(`${provider}|${target}|${degradation}`));
+    const fresh = request.degradations.filter(degradation =>
+      !SILENT_DEGRADATIONS.has(degradation) && !notified.has(`${provider}|${target}|${degradation}`));
     this.#noteCapability(fresh.map(describeDegradation));
     return request;
   }
