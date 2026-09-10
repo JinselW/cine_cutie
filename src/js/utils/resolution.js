@@ -61,3 +61,28 @@ function parseRatio(aspectRatio) {
   if (!rw || !rh) return [16, 9];
   return [rw, rh];
 }
+
+const DURATION_RULES = [
+  { pattern: /^wan2\.7-/, range: [2, 15] },
+  { pattern: /^wan2\.6-i2v-flash/, range: [2, 15] },
+  { pattern: /^wan2\.6-i2v-us/, values: [5, 10, 15] },
+  { pattern: /^wan2\.6-i2v/, range: [2, 15] },
+  { pattern: /^wan2\.5-i2v/, values: [5, 10] },
+  { pattern: /^wanx2\.1-i2v-turbo/, values: [3, 4, 5] },
+  { pattern: /^doubao-seedance/, values: [5, 10] },
+];
+
+export function getDefaultVideoDuration(modelName) {
+  const rule = DURATION_RULES.find(r => r.pattern.test(modelName || ''));
+  if (!rule) return 5;
+  if (rule.values) return rule.values[Math.floor(rule.values.length / 2)];
+  return Math.round((rule.range[0] + rule.range[1]) / 2);
+}
+
+export function getVideoDurationRange(modelName) {
+  const rule = DURATION_RULES.find(r => r.pattern.test(modelName || ''));
+  const fallback = getDefaultVideoDuration(modelName);
+  if (!rule) return { min: 3, max: 10, fallback };
+  if (rule.values) return { min: rule.values[0], max: rule.values[rule.values.length - 1], fallback };
+  return { min: rule.range[0], max: rule.range[1], fallback };
+}

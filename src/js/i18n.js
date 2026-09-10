@@ -1,5 +1,6 @@
 import { state } from './state.js';
 import { $, $$ } from './utils.js';
+import { getDefaultVideoDuration } from './utils/resolution.js';
 
 const en = {
   'ui.subtitle': 'Your AI Movie Creation Agent',
@@ -219,7 +220,7 @@ const en = {
   'ui.takeSelected': 'Take {num} — SELECTED',
   'ui.durationLabel': 'Duration',
   'ui.durationInputLabel': 'Total Duration (seconds)',
-  'ui.durationInputHint': 'Each clip is ~5s, will generate {count} shots',
+  'ui.durationInputHint': 'Each clip ~{sec}s, will generate {count} shots',
   'ui.na': 'N/A',
 
   'settings.title': 'AI Model Settings',
@@ -675,7 +676,7 @@ const zh = {
   'ui.takeSelected': '镜头 {num} — 已选中',
   'ui.durationLabel': '时长',
   'ui.durationInputLabel': '视频总时长（秒）',
-  'ui.durationInputHint': '每个片段约 5 秒，将生成 {count} 个镜头',
+  'ui.durationInputHint': '每个片段约 {sec} 秒，将生成 {count} 个镜头',
   'ui.na': '无',
 
   'settings.title': 'AI 模型设置',
@@ -973,9 +974,15 @@ export function applyLang() {
   if (lblDuration) lblDuration.textContent = t('ui.durationInputLabel');
   const durationHint = $('#durationHint');
   if (durationHint) {
-    const val = Math.max(5, parseInt($('#totalDuration')?.value) || 30);
-    const clips = Math.ceil(val / 5);
-    durationHint.textContent = t('ui.durationInputHint', { count: clips });
+    let modelName = '';
+    try {
+      const saved = localStorage.getItem('cine-cutie-settings');
+      if (saved) modelName = JSON.parse(saved).models?.video?.name || '';
+    } catch {}
+    const secPerClip = getDefaultVideoDuration(modelName);
+    const val = Math.max(secPerClip, parseInt($('#totalDuration')?.value) || 30);
+    const clips = Math.ceil(val / secPerClip);
+    durationHint.textContent = t('ui.durationInputHint', { sec: secPerClip, count: clips });
   }
 
   const lblAspectRatio = $('#lblAspectRatio');

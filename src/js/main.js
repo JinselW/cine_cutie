@@ -326,7 +326,7 @@ function updateDurationHint() {
   const secPerClip = getDefaultVideoDuration(dsConfig.videoModel);
   const val = Math.max(secPerClip, parseInt($('#totalDuration').value) || 30);
   const clips = Math.ceil(val / secPerClip);
-  $('#durationHint').textContent = t('ui.durationInputHint', { count: clips });
+  $('#durationHint').textContent = t('ui.durationInputHint', { sec: secPerClip, count: clips });
 }
 $('#totalDuration').addEventListener('input', updateDurationHint);
 updateDurationHint();
