@@ -79,7 +79,7 @@ OUTPUT JSON SCHEMA:
 }
 
 Requirements:
-- 2-4 characters, each with detailed appearance
+- 1-4 characters, each with detailed appearance
 - 2-4 settings, each with vivid visual descriptions
 - 1-${maxEpisodes} episodes (limited by ${totalDuration}s total duration), each with 2-4 segments
 - Make characters visually distinctive for image generation
