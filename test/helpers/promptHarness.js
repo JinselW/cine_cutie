@@ -1,7 +1,7 @@
 import vm from 'node:vm';
 import path from 'node:path';
 import { readFileSync } from 'node:fs';
-export async function promptHarness({ videoId = 'video-comfy', imageGenerate, videoGenerate } = {}) {
+export async function promptHarness({ videoId = 'video-comfy', imageGenerate, videoGenerate, visualCompliance = null } = {}) {
   const cfg = { videoMode: 'auto', models: { text: { name: 'test-model' } } };
   const calls = { llm: [], images: [], videos: [], logs: [], keys: [] };
   const qc = { score: 9, verdict: 'PASS', suggestions: [] };
@@ -24,6 +24,9 @@ export async function promptHarness({ videoId = 'video-comfy', imageGenerate, vi
     'src/js/progressTracker.js': { reportPhase() {} },
     'src/js/agents/qcAgent.js': { QCAgent: class { async process() { return { ...qc }; } }, SCORE_THRESHOLD: 7, reportScore() {}, reportRetry() {} },
   };
+  if (visualCompliance) {
+    stubs['src/js/compliance/visualCompliance.js'] = { checkVisualMediaBatch: async () => visualCompliance };
+  }
   const cache = new Map();
   async function load(file) {
     file = file.replaceAll('\\', '/');

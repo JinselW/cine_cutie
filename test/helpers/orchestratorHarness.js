@@ -32,7 +32,8 @@ const NOOP_EXPORTS = ['showGenerating', 'setGenAnim', 'clearCurrentMessages', 'w
 
 export async function createHarness({ mode = 'auto' } = {}) {
   const state = {
-    mode, lang: 'zh', entities: {}, currentStep: -1, userInput: 'a story', genre: 'cinematic', totalDuration: 30,
+    mode, lang: 'zh', entities: {}, currentStep: -1, userInput: 'a story', genre: 'cinematic',
+    visualStyle: 'cinematic', customStyle: '', totalDuration: 30, aspectRatio: '16:9', imageSize: '1280*720', resolution: '720P',
     data: { script: null, characterDesign: null, storyboard: null, referenceImages: null, videoClips: null, finalVideo: null },
   };
   const calls = {
@@ -83,6 +84,9 @@ export async function createHarness({ mode = 'auto' } = {}) {
     recordMemoryMessage: () => {},
     buildWorkflowSnapshot: ({ store, checkpoint, runState }) => ({
       schemaVersion: 2,
+      mode: state.mode,
+      input: { userInput: state.userInput, genre: state.genre, visualStyle: state.visualStyle, customStyle: state.customStyle,
+        totalDuration: state.totalDuration, aspectRatio: state.aspectRatio, imageSize: state.imageSize, resolution: state.resolution, mode: state.mode },
       artifacts: store.snapshot(),
       acceptedByStep: store.snapshotAccepted(),
       checkpoint: checkpoint.snapshot(),

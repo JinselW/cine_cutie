@@ -204,6 +204,34 @@ test('restoring a session rebuilds state, entities and the resume point from ado
   assert.equal(second.store.validateGraph().ok, true);
 });
 
+test('a restored session keeps the creative inputs it was started with', async () => {
+  const first = await createHarness();
+  Object.assign(first.state, { totalDuration: 5, genre: 'romance', userInput: 'a girl at the tide line' });
+  await first.runPipeline(4);
+  const saved = serialized(first.lastSnapshot());
+
+  const second = await createHarness();
+  second.persistence.next = saved;
+  second.api.restoreSession();
+
+  assert.equal(second.state.totalDuration, 5, 'delivery QC must judge the cut against the requested length');
+  assert.equal(second.state.genre, 'romance');
+  assert.equal(second.state.userInput, 'a girl at the tide line');
+});
+
+test('a session saved before inputs were persisted does not clobber current state', async () => {
+  const first = await createHarness();
+  await first.runPipeline(2);
+  const saved = serialized({ ...first.lastSnapshot(), input: undefined });
+
+  const second = await createHarness();
+  second.state.totalDuration = 12;
+  second.persistence.next = saved;
+  second.api.restoreSession();
+
+  assert.equal(second.state.totalDuration, 12);
+});
+
 test('dependency traversal is identical after a reload', async () => {
   const first = await createHarness();
   await first.runPipeline(4);

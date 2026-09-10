@@ -9,7 +9,13 @@ import { bindImageLightbox } from './lightbox.js';
 import { mountEditor } from './structuredEditor.js';
 
 // UI modules are also imported transitively by pure Node tests; defer browser-only setup there.
-if (typeof document !== 'undefined') bindImageLightbox();
+if (typeof document !== 'undefined') {
+  bindImageLightbox();
+  document.addEventListener('click', (event) => {
+    const btn = event.target?.closest?.('[data-rerun-step]');
+    if (btn) handleRerun(btn);
+  });
+}
 
 let currentViewRerender = null;
 
@@ -41,6 +47,33 @@ function feedbackPanel(stepId, approveKey = 'ui.approve', edit = null) {
       </div>
     </div>
   `;
+}
+
+// Auto quality retries are gone, so re-shooting is the user's call: this button
+// re-runs a finished step with a fresh seed and keeps the old version in history.
+function rerunRow(stepId) {
+  return `<div class="action-row"><button class="action-btn" data-rerun-step="${stepId}">${t('ui.rerunStep.' + stepId)}</button></div>`;
+}
+
+let _rerunBusy = false;
+async function handleRerun(btn) {
+  if (_rerunBusy || typeof window.__rerunStep !== 'function') return;
+  const stepId = btn.dataset.rerunStep;
+  if (stepId === 'videoGeneration' && !confirm(t('ui.rerunConfirm'))) return;
+
+  _rerunBusy = true;
+  btn.disabled = true;
+  const label = btn.textContent;
+  btn.textContent = t('ui.rerunning');
+  try {
+    await window.__rerunStep(stepId);
+  } catch (error) {
+    alert(t('ui.rerunFailed'));
+    btn.disabled = false;
+    btn.textContent = label;
+  } finally {
+    _rerunBusy = false;
+  }
 }
 
 // Switches the step view into an editable form. Save commits a manual revision via
@@ -426,6 +459,7 @@ export function renderVideoGeneration(data, onAdvance, readOnly = false) {
       ${data?.mode ? `<div style="font-size:0.8rem;color:var(--cream3);margin-bottom:12px">${t('settings.videoModeLabel')}: <span style="color:var(--gold)">${escapeHtml(t('settings.videoMode.' + data.mode))}</span></div>` : ''}
       ${!dsConfigured ? `<div style="background:var(--bg3);border-radius:var(--radius-xs);padding:12px;margin-bottom:16px;color:var(--gold);font-size:0.85rem">${t('ui.videoGenConfigNeeded')}</div>` : ''}
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px">${clips}</div>
+      ${rerunRow('videoGeneration')}
     </div>
     ${readOnly ? '' : '<div class="action-row" id="actionRow"></div>'}
   `;
@@ -533,6 +567,7 @@ export function renderPostProduction(data, onAdvance, readOnly = false) {
       ${qcReport}
       ${complianceReport}
       ${soundPlanReport}
+      ${rerunRow('postProduction')}
     </div>
     ${readOnly ? '' : '<div class="action-row" id="actionRow"></div>'}
   `;
@@ -657,6 +692,8 @@ export function showCompletion() {
         <button class="action-btn" id="exportBtn">${t('ui.exportProject')}</button>
         <button class="action-btn" id="logBtn">📊 ${t('log.viewLog')}</button>
         ${hasVideo ? `<a href="${mediaUrl(finalVideo.finalVideo)}" download class="action-btn">${t('ui.postProdDownload')}</a>` : ''}
+        <button class="action-btn" data-rerun-step="postProduction">${t('ui.rerunStep.postProduction')}</button>
+        <button class="action-btn" data-rerun-step="videoGeneration">${t('ui.rerunStep.videoGeneration')}</button>
       </div>
     </div>
   `;

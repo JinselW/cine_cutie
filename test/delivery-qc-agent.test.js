@@ -22,10 +22,11 @@ test('delivery baseline blocks missing or malformed output', () => {
   assert.equal(result.repairPlan.targetStep, 'postProduction');
 });
 
-test('delivery baseline blocks material duration drift', () => {
+test('delivery baseline warns but still ships material duration drift', () => {
   const result = evaluateDeliveryBaseline({ ...healthy, qcBaseline: { ...healthy.qcBaseline, durationSeconds: 20 } }, { expectedDuration: 30 });
-  assert.equal(result.verdict, QCVerdict.FAIL);
-  assert.equal(result.repairPlan.targetStep, 'storyboard');
+  assert.equal(result.verdict, QCVerdict.CONDITIONAL_PASS);
+  assert.equal(result.repairPlan, null);
+  assert.ok(result.checks.some(check => check.id === 'duration' && check.status === 'WARN'));
 });
 
 test('delivery baseline blocks long black and frozen segments', () => {

@@ -18,8 +18,10 @@ export function evaluateDeliveryBaseline(data, { expectedDuration = null, limits
   const validStream = width > 0 && height > 0 && fps > 0 && duration > 0;
   checks.push(check('video_stream', validStream ? 'PASS' : 'FAIL', validStream ? 'Playable video stream detected' : 'Video stream metadata is invalid', { width, height, fps, duration }));
   const requestedDuration = finite(expectedDuration);
+  // Advisory, never blocking: clips round to whole seconds and crossfades overlap
+  // them, so a short target duration is unreachable by construction.
   if (requestedDuration > 0 && duration > 0) { const tolerance = Math.max(2, requestedDuration * limits.durationToleranceRatio); const delta = Math.abs(duration - requestedDuration);
-    checks.push(check('duration', delta <= tolerance ? 'PASS' : 'FAIL', delta <= tolerance ? 'Duration matches the requested delivery' : 'Final duration differs materially from the requested duration', duration, { seconds: requestedDuration, tolerance })); }
+    checks.push(check('duration', delta <= tolerance ? 'PASS' : 'WARN', delta <= tolerance ? 'Duration matches the requested delivery' : 'Final duration differs from the requested duration', duration, { seconds: requestedDuration, tolerance })); }
   const blackRatio = duration > 0 ? blackDuration / duration : 0; const blackFail = blackDuration >= limits.blackDurationFailSeconds && blackRatio >= limits.blackRatioFail;
   checks.push(check('black_frames', blackFail ? 'FAIL' : 'PASS', blackFail ? 'Excessive black frames detected' : 'No excessive black frames detected', { seconds: blackDuration, ratio: blackRatio }));
   const freezeFail = freezeDuration >= limits.freezeDurationFailSeconds;
@@ -69,7 +71,7 @@ export function evaluateDeliveryBaseline(data, { expectedDuration = null, limits
 
   const failed = checks.filter(x => x.status === 'FAIL'); const warned = checks.filter(x => x.status === 'WARN');
   const verdict = failed.length ? QCVerdict.FAIL : warned.length ? QCVerdict.CONDITIONAL_PASS : QCVerdict.PASS;
-  const repairTarget = failed.some(x => ['output', 'video_stream'].includes(x.id)) ? 'postProduction' : failed.some(x => ['black_frames', 'freeze_frames'].includes(x.id)) ? 'videoGeneration' : failed.some(x => x.id === 'duration') ? 'storyboard' : null;
+  const repairTarget = failed.some(x => ['output', 'video_stream'].includes(x.id)) ? 'postProduction' : failed.some(x => ['black_frames', 'freeze_frames'].includes(x.id)) ? 'videoGeneration' : null;
   return { verdict, severity: failed.length ? Severity.HIGH : warned.length ? Severity.MEDIUM : null, score: verdict === QCVerdict.PASS ? 10 : verdict === QCVerdict.CONDITIONAL_PASS ? 7 : 5,
     checks, issues: [...failed, ...warned].map(x => x.message), repairPlan: repairTarget ? { targetStep: repairTarget, reason: failed.map(x => x.message).join('; ') } : null };
 }

@@ -173,15 +173,15 @@ export function checkConsistency(stepId, data, entities) {
     case 'videoGeneration': {
       const expectedClips = entities?.refShotCount || 0;
       const actualClips = (data.clips || []).length;
+      const completed = (data.clips || []).filter(c => c.status === 'complete').length;
       if (expectedClips > 0 && actualClips < expectedClips * 0.5) {
         issues.push(`Only ${actualClips}/${expectedClips} reference shots have video clips`);
       }
-      const failed = (data.clips || []).filter(c => c.status === 'failed');
-      if (failed.length > actualClips * 0.5 && actualClips > 0) {
-        issues.push(failed.length === actualClips
-          ? t('pipeline.allVideoClipsFailed', { count: actualClips })
-          : t('pipeline.videoClipsFailed', { failed: failed.length, total: actualClips }));
+      if (actualClips > 0 && completed === 0) {
+        issues.push(t('pipeline.allVideoClipsFailed', { count: actualClips }));
         hasFatal = true;
+      } else if (completed < actualClips) {
+        issues.push(t('pipeline.videoClipsFailed', { failed: actualClips - completed, total: actualClips }));
       }
       const plannedMode = entities?.refVideoMode;
       if (plannedMode && plannedMode !== 'auto' && data.mode && plannedMode !== data.mode) {

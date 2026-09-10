@@ -107,11 +107,13 @@
 **实现**：多层质量门禁（`#postGate()`）：
 
 1. **结构校验**：`POST_VALIDATORS` 为每步定义结构规则（script 需 `validateScript`、videoGeneration 需 `clips` 数组等）
-2. **Self-Critique**：QCAgent 独立评分，低于阈值 7 触发重试
+2. **Self-Critique**：QCAgent 独立评分，低于阈值 7 触发重试；**仅适用于创作步骤（script / storyboard / characterDesign / referenceImages）**
 3. **一致性门禁**：`checkConsistency` 硬门禁，最终分 = min(LLM 分, 结构分)
 4. **IP 合规门禁**：BLOCK → 该步 FAIL，WARN/REVIEW → CONDITIONAL_PASS 并在 UI 提示
 5. **JSON 容错**：解析失败自动重试，提取花括号/方括号内容
 6. **模板降级**：API 出错或未配置 Key 时回退 Template Provider，流程不中断
+
+**成片步骤不做严格质量重试**：videoGeneration 的创意评分只记录、不拦截；postProduction 不再调用创意评分器。整步评分重试已移除（一次低分会把全部片段换 seed 重跑，成本翻倍）。这两步只有两种情况会 FAIL：视觉/IP 合规 FAIL，或确实没有可交付的素材（片段全部生成失败 / 成片缺流、无有效视频流、黑帧、冻结、静音过长等技术基线不达标）。时长偏差仅 WARN（片段按整秒生成且转场会重叠，短时长目标在构造上无法命中）。片段部分失败仅 CONDITIONAL_PASS。想换一条 take 由用户点「🎥 重拍片段」/「🎬 重新合成」触发 `rerunStep(stepId)`，它带新的 `seedSalt` 走与 reviseStep 相同的提交与门禁路径。
 
 ### 2.3 IP 合规
 

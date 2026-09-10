@@ -13,6 +13,10 @@ export function buildWorkflowSnapshot({ store, checkpoint, runState }) {
     schemaVersion: WORKFLOW_SCHEMA_VERSION,
     savedAt: Date.now(),
     mode: state.mode,
+    // promptDoc is left out on purpose: its text can blow the localStorage quota.
+    input: { userInput: state.userInput, genre: state.genre, visualStyle: state.visualStyle,
+      customStyle: state.customStyle, totalDuration: state.totalDuration, aspectRatio: state.aspectRatio,
+      imageSize: state.imageSize, resolution: state.resolution, mode: state.mode },
     artifacts: store.snapshot(),
     acceptedByStep: store.snapshotAccepted(),
     checkpoint: checkpoint.snapshot(),
@@ -31,6 +35,7 @@ export function normalizeWorkflowSnapshot(raw) {
     schemaVersion: WORKFLOW_SCHEMA_VERSION,
     savedAt: raw.savedAt ?? null,
     mode: raw.mode ?? 'auto',
+    input: raw.input ?? null,
     artifacts: raw.artifacts ?? {},
     acceptedByStep: raw.acceptedByStep ?? {},
     checkpoint: raw.checkpoint ?? {},

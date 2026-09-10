@@ -245,13 +245,14 @@ class Orchestrator {
 
   // Generation and revision share one path: build context from adopted upstream
   // versions, run the agent, gate the output, then adopt or reject it atomically.
-  async #runAgentStep(step, feedback = null) {
+  async #runAgentStep(step, feedback = null, { seedSalt = 0 } = {}) {
     const agent = resolveAgent(step.id);
     const agentName = step.agent || 'Agent';
     logStepStart(step.id, agentName);
 
     try {
       const ctx = this.#buildContext(step);
+      if (seedSalt) ctx.seedSalt = seedSalt;
       if (feedback != null) {
         ctx.feedback = feedback;
         ctx.previousResult = this.#store.getAcceptedByStep(step.id)?.data ?? null;
@@ -496,19 +497,34 @@ class Orchestrator {
   }
 
   async reviseStep(stepId, feedback) {
+    return this.#rerunStep(stepId, feedback);
+  }
+
+  // Re-runs a finished step exactly as the user approved it, with a fresh
+  // generation seed. Quality is no longer auto-retried, so this is the one
+  // place where "take another shot" happens: on the user's call, not the
+  // reviewer's. Shares reviseStep's commit, gate and render path.
+  async rerunStep(stepId) {
+    return this.#rerunStep(stepId, '', { seedSalt: 1 + Math.floor(Math.random() * 99999) });
+  }
+
+  async #rerunStep(stepId, feedback, { seedSalt = 0 } = {}) {
     if (state.stopped) return;
     const stepIndex = STEPS.findIndex(s => s.id === stepId);
     if (stepIndex < 0) return;
     // A restored session has no live token, and a previous failed run may have
     // cancelled its token. A user-initiated revision is a fresh operation.
     if (!this.#token || this.#token.isCancelled) this.#token = new CancellationToken();
-    recordMemoryMessage('user', feedback, stepId);
+    const reroll = !feedback?.trim?.();
 
     updatePipeline(stepIndex, 'active');
     const step = STEPS[stepIndex];
-    clearCurrentMessages();
     const stepLabel = t(step.labelKey);
-    addAgentMessage(step.icon, t('ui.receivedFeedback', { step: stepLabel, feedback }));
+    recordMemoryMessage('user', feedback || t('ui.rerunStarted', { step: stepLabel }), stepId);
+    clearCurrentMessages();
+    addAgentMessage(step.icon, reroll
+      ? t('ui.rerunStarted', { step: stepLabel })
+      : t('ui.receivedFeedback', { step: stepLabel, feedback }));
 
     showGenerating(stepIndex);
     state.stepRunning = true;
@@ -517,7 +533,7 @@ class Orchestrator {
     let data;
     try {
       [data] = await Promise.all([
-        this.#runAgentStep(step, feedback),
+        this.#runAgentStep(step, feedback, { seedSalt }),
         sleep(delay),
       ]);
     } catch (err) {
@@ -545,7 +561,7 @@ class Orchestrator {
     await saveMemory();
     this.#refreshPipeline();
 
-    addAgentMessage(step.icon, t('ui.revisionComplete'));
+    addAgentMessage(step.icon, t(reroll ? 'ui.rerunComplete' : 'ui.revisionComplete'));
 
     const onAdvance = () => this.#advanceStep();
     this.#renderStep(stepId, data, onAdvance);
@@ -686,6 +702,21 @@ class Orchestrator {
     return candidates.length > 0 ? candidates[candidates.length - 1] : null;
   }
 
+  // Deliberately excludes lang: opening an old workflow must never change the
+  // user's current UI/output language preference.
+  #applySessionInput(input) {
+    if (!input) return;
+    state.userInput = input.userInput || '';
+    state.genre = input.genre || 'cinematic';
+    state.visualStyle = input.visualStyle || 'cinematic';
+    state.customStyle = input.customStyle || '';
+    state.totalDuration = input.totalDuration || 30;
+    state.aspectRatio = input.aspectRatio || '16:9';
+    state.imageSize = input.imageSize || '1280*720';
+    state.resolution = input.resolution || '720P';
+    state.mode = input.mode || 'auto';
+  }
+
   restoreSession() {
     const snapshot = loadPersistedWorkflow();
     if (!snapshot) return false;
@@ -695,6 +726,7 @@ class Orchestrator {
     this.#checkpoint.restoreSnapshot(snapshot.checkpoint);
     this.#runState.restoreSnapshot(snapshot.runState);
     state.mode = snapshot.mode || 'auto';
+    this.#applySessionInput(snapshot.input);
     const migrated = this.#migrateLegacyCheckpoints();
 
     for (const key of Object.keys(state.data)) state.data[key] = null;
@@ -777,17 +809,7 @@ class Orchestrator {
     }
     this.#rebuildEntities();
 
-    state.userInput = input.userInput || '';
-    state.genre = input.genre || 'cinematic';
-    state.visualStyle = input.visualStyle || 'cinematic';
-    state.customStyle = input.customStyle || '';
-    state.totalDuration = input.totalDuration || 30;
-    state.aspectRatio = input.aspectRatio || '16:9';
-    state.imageSize = input.imageSize || '1280*720';
-    state.resolution = input.resolution || '720P';
-    state.mode = input.mode || 'auto';
-    // Do not restore input.lang: opening an old workflow must never change the
-    // user's current UI/output language preference.
+    this.#applySessionInput(input);
     state.stopped = false;
     state.paused = false;
     state.stepRunning = false;
@@ -890,6 +912,10 @@ export async function startPipeline() {
 
 export async function reviseStep(stepId, feedback) {
   return getOrchestrator().reviseStep(stepId, feedback);
+}
+
+export async function rerunStep(stepId) {
+  return getOrchestrator().rerunStep(stepId);
 }
 
 export async function applyManualEdit(stepId, editedData) {

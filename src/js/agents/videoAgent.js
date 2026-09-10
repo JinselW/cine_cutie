@@ -1,7 +1,7 @@
 import { PromptAgent } from './promptAgent.js';
 import { BaseAgent } from './baseAgent.js';
 import { RetryAgent, ItemRetryStrategy } from './retryAgent.js';
-import { QCAgent, SCORE_THRESHOLD, reportScore, reportRetry } from './qcAgent.js';
+import { QCAgent, reportScore } from './qcAgent.js';
 import { getActiveProvider } from '../providers/registry.js';
 import { getConfig } from '../providers/llm.js';
 import { getConfig as getImageConfig } from '../providers/image.js';
@@ -15,7 +15,7 @@ import { checkVisualMediaBatch } from '../compliance/visualCompliance.js';
 import { QCVerdict } from './qcTypes.js';
 
 const MAX_ITEM_ATTEMPTS = 3;
-const MAX_STAGE_RETRIES = 1;
+const BASE_SEED = 42;
 // 参考生视频模型最多接受 5 张参考图
 const MAX_REFERENCE_IMAGES = 5;
 
@@ -72,29 +72,18 @@ export class VideoAgent extends BaseAgent {
       sourceArtifactIds,
     });
 
-    let bestData = null, bestCrit = null, bestScore = -Infinity;
+    // The creative score on generated footage is advisory: it is reported so the
+    // user can judge the take, but it never re-rolls the batch (that doubled the
+    // cost of this step) and it never blocks delivery. Only IP compliance can.
+    reportPhase('generatingVideos');
+    const results = await this.#generateItems(items, artifact, ctx, _token);
+    const finalData = this.#assembleResult(results, refImages, mode);
+    finalData.promptPackage = structuredClone(ctx.promptPackage);
 
-    for (let attempt = 0; attempt <= MAX_STAGE_RETRIES; attempt++) {
-      if (_token?.signal?.aborted) break;
+    reportPhase('validating');
+    const crit = await this.#qcAgent.process({ data: finalData, entities: ctx.entities || {}, ...ctx });
+    reportScore(crit.score, '🎥');
 
-      reportPhase(attempt ? 'retrying' : 'generatingVideos', { attempt: attempt + 1 });
-      const results = await this.#generateItems(items, artifact, ctx, _token);
-      const data = this.#assembleResult(results, refImages, mode);
-
-      data.promptPackage = structuredClone(ctx.promptPackage);
-      reportPhase('validating');
-      const crit = await this.#qcAgent.process({ data, entities: ctx.entities || {}, ...ctx });
-      reportScore(crit.score, '🎥');
-      if (crit.score > bestScore) { bestScore = crit.score; bestData = data; bestCrit = crit; }
-
-      if (crit.score >= SCORE_THRESHOLD || attempt === MAX_STAGE_RETRIES) break;
-      if (crit.source === 'structural') break;
-
-      reportRetry(crit.score, attempt + 1, MAX_STAGE_RETRIES, '🎥');
-      for (const item of items) item.seed += 13;
-    }
-
-    const finalData = bestData || { mode, clips: [] };
     const complete = finalData.clips.filter(c => c.status === 'complete').length;
     const fallbackClips = finalData.clips.filter(c => c.plannedVideoMode && c.plannedVideoMode !== c.videoMode).length;
 
@@ -116,11 +105,11 @@ export class VideoAgent extends BaseAgent {
         failedClips: finalData.clips.filter(c => c.status === 'failed').length,
         fallbackClips,
         fallbackUsed: fallbackClips > 0,
-        qualityScore: bestCrit?.score ?? 0,
-        consistencyIssues: bestCrit?.consistency?.issues || [],
-        verdict: visualBlocked ? QCVerdict.FAIL : bestCrit?.verdict ?? null,
+        qualityScore: crit?.score ?? null,
+        consistencyIssues: crit?.consistency?.issues || [],
+        verdict: visualBlocked ? QCVerdict.FAIL : null,
         visualCompliance: finalData.visualCompliance,
-        feedbackSatisfied: bestCrit?.feedbackSatisfied ?? !ctx.feedback,
+        feedbackSatisfied: crit?.feedbackSatisfied ?? !ctx.feedback,
       },
     };
   }
@@ -142,7 +131,7 @@ export class VideoAgent extends BaseAgent {
         id: `upload_clip_${i}`,
         prompt: adapted.prompt,
         imageUrl: uploads.firstFrame?.serverPath || uploads.referenceImages?.[0]?.serverPath || '',
-        seed: 42,
+        seed: BASE_SEED + (ctx.seedSalt || 0),
         referenceId: 'uploads',
       });
     }
@@ -175,29 +164,15 @@ export class VideoAgent extends BaseAgent {
       }) };
     };
 
-    let bestData = null, bestCrit = null, bestScore = -Infinity;
+    reportPhase('generatingVideos');
+    const results = await this.#generateItemsWithUploads(items, artifact, ctx, _token);
+    const finalData = assemble(results);
+    finalData.promptPackage = structuredClone(ctx.promptPackage);
 
-    for (let attempt = 0; attempt <= MAX_STAGE_RETRIES; attempt++) {
-      if (_token?.signal?.aborted) break;
+    reportPhase('validating');
+    const crit = await this.#qcAgent.process({ data: finalData, entities: ctx.entities || {}, ...ctx });
+    reportScore(crit.score, '🎥');
 
-      reportPhase(attempt ? 'retrying' : 'generatingVideos', { attempt: attempt + 1 });
-      const results = await this.#generateItemsWithUploads(items, artifact, ctx, _token);
-      const data = assemble(results);
-
-      data.promptPackage = structuredClone(ctx.promptPackage);
-      reportPhase('validating');
-      const crit = await this.#qcAgent.process({ data, entities: ctx.entities || {}, ...ctx });
-      reportScore(crit.score, '🎥');
-      if (crit.score > bestScore) { bestScore = crit.score; bestData = data; bestCrit = crit; }
-
-      if (crit.score >= SCORE_THRESHOLD || attempt === MAX_STAGE_RETRIES) break;
-      if (crit.source === 'structural') break;
-
-      reportRetry(crit.score, attempt + 1, MAX_STAGE_RETRIES, '🎥');
-      for (const item of items) item.seed += 13;
-    }
-
-    const finalData = bestData || { clips: [] };
     const complete = finalData.clips.filter(c => c.status === 'complete').length;
 
     finalData.visualCompliance = await checkVisualMediaBatch(finalData.clips
@@ -215,11 +190,11 @@ export class VideoAgent extends BaseAgent {
         totalClips: finalData.clips.length,
         completeClips: complete,
         failedClips: finalData.clips.filter(c => c.status === 'failed').length,
-        qualityScore: bestCrit?.score ?? 0,
-        consistencyIssues: bestCrit?.consistency?.issues || [],
-        verdict: visualBlocked ? QCVerdict.FAIL : bestCrit?.verdict ?? null,
+        qualityScore: crit?.score ?? null,
+        consistencyIssues: crit?.consistency?.issues || [],
+        verdict: visualBlocked ? QCVerdict.FAIL : null,
         visualCompliance: finalData.visualCompliance,
-        feedbackSatisfied: bestCrit?.feedbackSatisfied ?? !ctx.feedback,
+        feedbackSatisfied: crit?.feedbackSatisfied ?? !ctx.feedback,
       },
     };
   }
@@ -312,7 +287,7 @@ export class VideoAgent extends BaseAgent {
         id: shot.shot_id,
         ...this.#promptAgent.adaptForProvider({ promptPackage: ctx.promptPackage, shotId: spec.shotId, provider: getActiveProvider('video')?.id, executedMode: shotMode }),
         duration: spec.duration,
-        seed: 42,
+        seed: BASE_SEED + (ctx.seedSalt || 0),
         plannedVideoMode: preferredMode,
         videoMode: shotMode,
         videoModeReason: shot.videoModeReason || '',

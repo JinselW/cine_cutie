@@ -1,5 +1,4 @@
 import { BaseAgent } from './baseAgent.js';
-import { reportScore } from './qcAgent.js';
 import { DeliveryQCAgent } from './deliveryQCAgent.js';
 import { getActiveProvider } from '../providers/registry.js';
 import { chat, getConfig, isConfigured, parseJson } from '../providers/llm.js';
@@ -12,6 +11,9 @@ import { generateAudioOverlay } from '../audio/audioClient.js';
 
 const SCENE_TRANSITION = 0.5;
 const FADE_IO = 0.5;
+// Video generation is currently silent, so do not burn dialogue-derived subtitles.
+// Keep the cue builder in place so subtitles can be restored when speech is enabled.
+const SUBTITLES_ENABLED = false;
 
 // Storyboard segments have no id, so key each shot by its episode/segment indices.
 function buildSceneMap(storyboard) {
@@ -127,16 +129,16 @@ export class EditorAgent extends BaseAgent {
     if (result?.soundPlan) finalData.soundPlan = result.soundPlan;
     if (result?.audioResult) finalData.audioResult = result.audioResult;
 
-    // Delivery QC combines deterministic media checks with multimodal creative review.
+    // Final delivery has no creative score gate. Verify playability, then apply
+    // the final IP and visual compliance report below.
     reportPhase('validating');
     const crit = await this.#qcAgent.process({ data: finalData, entities: ctx.entities || {}, ...ctx });
-    reportScore(crit.score, '🎬');
 
     finalData.qcBaseline = {
       ...(finalData.qcBaseline || {}),
-      overallQuality: crit.score,
-      narrativeFaithfulness: crit.creative?.llm?.scores?.criterion2 ?? null,
-      visualConsistency: crit.creative?.llm?.scores?.criterion3 ?? null,
+      overallQuality: null,
+      narrativeFaithfulness: null,
+      visualConsistency: null,
       deliveryVerdict: crit.verdict,
       deliveryChecks: crit.technical?.checks || [],
       repairPlan: crit.repairPlan || null,
@@ -155,6 +157,7 @@ export class EditorAgent extends BaseAgent {
       finalVideo: finalData.finalVideo,
       signal: _token?.signal,
     });
+    const complianceBlocked = finalData.complianceReport.verdict === QCVerdict.FAIL;
 
     const sourceArtifactIds = ctx.sourceArtifactIds?.videoGeneration ? [ctx.sourceArtifactIds.videoGeneration] : [];
 
@@ -169,11 +172,14 @@ export class EditorAgent extends BaseAgent {
       metadata: {
         retries: 0,
         renderStatus: finalData.status || 'failed',
-        qualityScore: crit.score,
-        consistencyIssues: crit.consistency?.issues || [],
+        qualityScore: null,
+        consistencyIssues: [...(crit.consistency?.issues || []),
+          ...(crit.technical?.checks || []).filter(c => c.status === 'FAIL').map(c => c.message),
+          ...(complianceBlocked ? (finalData.complianceReport.findings || []).map(f => f.recommendation || f.matched || f.label || f.type).filter(Boolean) : []),
+          ...(hasFinal ? [] : [finalData.error || 'Render produced no output file'])],
         qcBaseline: finalData.qcBaseline,
         complianceReport: finalData.complianceReport,
-        verdict: crit.verdict ?? (hasFinal ? null : QCVerdict.FAIL),
+        verdict: complianceBlocked ? QCVerdict.FAIL : (crit.verdict ?? (hasFinal ? null : QCVerdict.FAIL)),
         feedbackSatisfied: crit.feedbackSatisfied ?? !ctx.feedback,
       },
     };
@@ -236,13 +242,16 @@ export class EditorAgent extends BaseAgent {
         enabled: editPlan.bgmEnabled ?? configuredBgm.enabled,
         volume: editPlan.bgmVolume ?? configuredBgm.volume,
       };
+      const subtitles = SUBTITLES_ENABLED
+        ? buildSubtitleCues(ctx.storyboard, ctx.script, valid, transitions)
+        : [];
       const result = await provider.generate({
         items,
         transitions,
         fadeIn: editPlan.fadeIn,
         fadeOut: editPlan.fadeOut,
         bgm,
-        subtitles: buildSubtitleCues(ctx.storyboard, ctx.script, valid, transitions),
+        subtitles,
         audioOverlay: hasRealAudio ? { path: audioResult.mixedAudioPath } : null,
         signal: token?.signal,
       });
@@ -250,6 +259,7 @@ export class EditorAgent extends BaseAgent {
         episodes: (ctx.storyboard?.episodes || []).map(ep => ({ episode: ep.episode })),
         finalVideo: result.finalVideo,
         status: result.status,
+        error: result.error || null,
         bgm: bgm?.enabled ? { enabled: true, path: bgm.path || '', volume: bgm.volume ?? 0.6 } : null,
         subtitles: result.subtitles || null,
         qcBaseline: result.qcBaseline || null,
