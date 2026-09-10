@@ -98,7 +98,7 @@ const renderProvider = {
             subtitles: taskData.result?.subtitles || null,
           };
         }
-        if (taskData.status === 'failed' || taskData.status === 'cancelled') {
+        if (taskData.status === 'failed' || taskData.status === 'cancelled' || taskData.status === 'interrupted') {
           return { finalVideo: '', status: 'failed', error: taskData.status === 'cancelled' ? 'Cancelled' : (taskData.error || 'Render failed') };
         }
       }

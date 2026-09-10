@@ -222,7 +222,7 @@ async function generateImages(prompts, ids, seeds, refs, externalSignal) {
         }
         break;
       }
-      if (taskData.status === 'failed' || taskData.status === 'cancelled') {
+      if (taskData.status === 'failed' || taskData.status === 'cancelled' || taskData.status === 'interrupted') {
         return prompts.map((_, i) => ({
           id: ids[i],
           path: '',

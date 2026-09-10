@@ -9,8 +9,10 @@ import { isArkModel, isArkVideoModel, isArkImageModel, submitArkVideoTask, submi
 import { getTask, updateTask, isTaskCancelled, listTasks, initTaskStore } from './tasks.js';
 import { TaskController } from './task-controller.js';
 import { FileTaskStore, InMemoryTaskStore } from './task-store.js';
-import { concatVideos, checkFfmpeg, renderWithTransitions, probeStreams, probeAudioQuality, probeVisualDefects, applyBgm, applySubtitles, sanitizeVolume } from './render.js';
+import { concatVideos, checkFfmpeg, renderWithTransitions, probeStreams, probeAudioQuality, probeVisualDefects, probeSilenceDuration, probeAudioStreamDuration, applyBgm, applySubtitles, sanitizeVolume } from './render.js';
 import { generateAudioAsset, mixAudioTimeline, applyAudioOverlay, buildAudioLineageEntry } from './audio-mix.js';
+import './edgeTtsProvider.js';
+import './sfxProvider.js';
 import { submitWorkflow, pollUntilDone, downloadOutput, uploadImageToComfy, checkComfyUIStatus, getComfyMonitorStatus, selectWorkflowMode, cancelPrompt, getWorkflowIdentity, MAX_COMFY_REFERENCE_IMAGES } from './comfyui.js';
 import { ensureTunnel, closeTunnel, getTunnelStatus, deleteComfyInputFiles, getDgxMetrics } from './ssh-tunnel.js';
 import { resolveInferenceOptions } from './inference-profiles.js';
@@ -80,6 +82,7 @@ const controller = new TaskController({
   maxConcurrency: Number(process.env.TASK_MAX_CONCURRENCY) || 4,
   perOwnerLimit: Number(process.env.TASK_PER_OWNER_LIMIT) || 2,
   retentionMs: (Number(process.env.TASK_RETENTION_HOURS) || 1) * 3600000,
+  recoveryContext: { mediaDir: MEDIA_DIR, downloadFile },
 });
 
 function isPathWithinDir(filePath, allowedDir) {
@@ -408,7 +411,7 @@ app.post('/api/generate/image', async (req, res) => {
                 taskId = await submitImageTask(prompts[i], { model, size, apiKey: mediaApiKey, seed: itemSeed });
               }
               upstreamTaskId = taskId;
-              updateTask(task.id, { upstreamTaskId });
+              updateTask(task.id, { upstreamTaskId, provider });
 
               let pollResult;
               for (let attempt = 0; attempt < 120; attempt++) {
@@ -721,7 +724,7 @@ app.post('/api/generate/video', async (req, res) => {
             }
 
             upstreamTaskId = taskId || upstreamTaskId;
-            updateTask(task.id, { upstreamTaskId });
+            updateTask(task.id, { upstreamTaskId, provider });
             let pollResult;
             if (provider === 'ark') {
               for (let attempt = 0; attempt < 240; attempt++) {
@@ -1034,6 +1037,8 @@ app.post('/api/render/final', async (req, res) => {
         const media = await probeStreams(finalOutput);
         const audioQuality = media.hasAudio ? await probeAudioQuality(finalOutput) : { integratedLufs: null, truePeakDbfs: null };
         const visualDefects = await probeVisualDefects(finalOutput);
+        const audioSilenceSeconds = media.hasAudio ? await probeSilenceDuration(finalOutput) : 0;
+        const audioDurationSeconds = media.hasAudio ? await probeAudioStreamDuration(finalOutput) : null;
         updateTask(task.id, {
           status: finalStatus,
           progress: finalStatus === 'completed' ? 100 : (cancelled ? 90 : 0),
@@ -1047,6 +1052,8 @@ app.post('/api/render/final', async (req, res) => {
               truePeakDbfs: audioQuality.truePeakDbfs,
               blackDurationSeconds: visualDefects.blackDurationSeconds,
               freezeDurationSeconds: visualDefects.freezeDurationSeconds,
+              audioSilenceSeconds,
+              audioDurationSeconds,
               width: media.width,
               height: media.height,
               fps: media.fps,

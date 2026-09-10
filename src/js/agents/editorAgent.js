@@ -40,8 +40,10 @@ export function buildAudioTracks(soundPlan, clips, transitions = []) {
     starts[i] = Math.max(starts[i - 1], starts[i - 1] + durations[i - 1] - overlap);
   }
   const tracks = [];
-  for (let i = 0; i < clips.length && i < soundPlan.shots.length; i++) {
-    const shot = soundPlan.shots[i];
+  for (let i = 0; i < clips.length; i++) {
+    const clip = clips[i];
+    const shot = soundPlan.shots.find(s => String(s.shotId) === String(clip.shot_id));
+    if (!shot) continue;
     const offset = starts[i];
     const duration = durations[i];
     if (shot.dialogue || shot.narratorText) {
@@ -223,6 +225,10 @@ export class EditorAgent extends BaseAgent {
         audioResult = await generateAudioOverlay({ tracks: audioTracks, signal: token?.signal });
       }
 
+      const allDegraded = audioResult?.trackResults?.length > 0
+        && audioResult.trackResults.every(t => t.degraded);
+      const hasRealAudio = audioResult?.mixedAudioPath && !allDegraded;
+
       const items = valid.map(c => ({ id: c.shot_id, videoPath: c.videoPath, status: c.status }));
       const configuredBgm = getConfig().bgm || {};
       const bgm = {
@@ -237,7 +243,7 @@ export class EditorAgent extends BaseAgent {
         fadeOut: editPlan.fadeOut,
         bgm,
         subtitles: buildSubtitleCues(ctx.storyboard, ctx.script, valid, transitions),
-        audioOverlay: audioResult?.mixedAudioPath ? { path: audioResult.mixedAudioPath } : null,
+        audioOverlay: hasRealAudio ? { path: audioResult.mixedAudioPath } : null,
         signal: token?.signal,
       });
       return {

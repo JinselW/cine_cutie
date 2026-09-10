@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { randomBytes } from 'crypto';
 
-const TERMINAL = new Set(['completed', 'failed', 'cancelled']);
+const TERMINAL = new Set(['completed', 'failed', 'cancelled', 'interrupted']);
 
 export function isTerminalStatus(status) {
   return TERMINAL.has(status);

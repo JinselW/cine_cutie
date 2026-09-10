@@ -73,8 +73,13 @@ export function compileSoundPlan(ctx) {
     )
   );
 
-  const perShot = shots.map(({ shot, segment }) => {
-    const dialogueInfo = extractDialogue(segment, characters);
+  const dialogueAssigned = new Set();
+  const perShot = shots.map(({ shot, segment, episode }) => {
+    const segmentId = `${episode?.episode ?? 0}:${(episode?.segments || []).indexOf(segment)}`;
+    const isFirstShotInSegment = !dialogueAssigned.has(segmentId);
+    if (isFirstShotInSegment) dialogueAssigned.add(segmentId);
+
+    const dialogueInfo = isFirstShotInSegment ? extractDialogue(segment, characters) : { dialogue: '', narratorText: '', speakerId: null };
     const soundEffects = extractSoundEffects(segment);
     const audioPrompt = shot.audio_description || 'Natural ambient sound, no dialogue';
     const musicMood = inferMusicMood(audioPrompt, segment);

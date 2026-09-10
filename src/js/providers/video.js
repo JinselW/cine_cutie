@@ -76,7 +76,7 @@ async function submitBatch(sentClips, bodyPayload, dsConfig, signal, onProgress)
       if (taskData.status === 'completed') {
         return { clips: taskData.result?.clips || [] };
       }
-      if (taskData.status === 'failed' || taskData.status === 'cancelled') {
+      if (taskData.status === 'failed' || taskData.status === 'cancelled' || taskData.status === 'interrupted') {
         return { error: taskData.status === 'cancelled' ? 'Cancelled' : (taskData.error || 'Generation failed') };
       }
     }

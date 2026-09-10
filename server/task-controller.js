@@ -1,4 +1,5 @@
 import { EventEmitter } from 'events';
+import path from 'path';
 import { isTerminalStatus } from './task-store.js';
 
 const DEFAULT_MAX_CONCURRENCY = 4;
@@ -17,18 +18,21 @@ export class TaskController extends EventEmitter {
   #cleanupTimer = null;
   #recoveryResults = [];
   #initialized = false;
+  #recoveryContext;
 
   constructor({
     store,
     maxConcurrency = DEFAULT_MAX_CONCURRENCY,
     perOwnerLimit = DEFAULT_PER_OWNER,
     retentionMs = DEFAULT_RETENTION_MS,
+    recoveryContext = null,
   }) {
     super();
     this.#store = store;
     this.#maxConcurrency = maxConcurrency;
     this.#perOwnerLimit = perOwnerLimit;
     this.#retentionMs = retentionMs;
+    this.#recoveryContext = recoveryContext;
   }
 
   get store() {
@@ -225,8 +229,11 @@ export class TaskController extends EventEmitter {
           reason: 'no_external_id',
         });
       } else {
-        this.#store.updateTask(task.id, { status: 'pending' });
-        this.#recoveryResults.push({ taskId: task.id, action: 'reset_to_pending' });
+        this.#store.updateTask(task.id, {
+          status: 'interrupted',
+          error: 'Server restarted before task could execute',
+        });
+        this.#recoveryResults.push({ taskId: task.id, action: 'marked_interrupt', reason: 'queued_no_worker' });
       }
     }
   }
@@ -274,12 +281,27 @@ export class TaskController extends EventEmitter {
       const snapshot = await getPromptSnapshot(sshConfig, task.promptId);
 
       if (snapshot.completed && snapshot.status === 'success') {
+        const ctx = this.#recoveryContext;
+        const clips = [];
+
+        if (ctx?.mediaDir && snapshot.outputs?.length) {
+          const { downloadOutput } = await import('./comfyui.js');
+          for (let i = 0; i < snapshot.outputs.length; i++) {
+            try {
+              const downloaded = await downloadOutput(sshConfig, snapshot.outputs[i], ctx.mediaDir);
+              clips.push({ index: i, status: 'ok', path: `/api/media/${downloaded.localName}` });
+            } catch (dlErr) {
+              clips.push({ index: i, status: 'error', error: `Download failed: ${dlErr.message}` });
+            }
+          }
+        }
+
         this.#store.updateTask(task.id, {
           status: 'completed',
           progress: 100,
-          result: { recovered: true, promptId: task.promptId, outputs: snapshot.outputs },
+          result: { clips, total: clips.length, success: clips.filter(c => c.status === 'ok').length, recovered: true, promptId: task.promptId },
         });
-        return { taskId: task.id, action: 'recovered_completed', promptId: task.promptId };
+        return { taskId: task.id, action: 'recovered_completed', promptId: task.promptId, downloaded: clips.length };
       }
 
       if (snapshot.completed && snapshot.status === 'error') {
@@ -315,44 +337,63 @@ export class TaskController extends EventEmitter {
   async #recoverCloudTask(task) {
     try {
       const provider = task.provider;
+      const ctx = this.#recoveryContext;
+      let pollResult = null;
+      let mediaUrl = null;
+
       if (provider === 'ark') {
-        const { pollArkTask } = await import('./ark.js');
-        const apiKey = process.env.ARK_API_KEY;
+        const pollFn = ctx?.pollArkTask || (await import('./ark.js')).pollArkTask;
+        const parseFn = ctx?.parseArkVideoUrl || (await import('./ark.js')).parseArkVideoUrl;
+        const apiKey = ctx?.arkApiKey || process.env.ARK_API_KEY;
         if (!apiKey) {
           this.#store.updateTask(task.id, { status: 'interrupted', error: 'Cannot recover: no ARK_API_KEY' });
           return { taskId: task.id, action: 'marked_interrupt', reason: 'no_api_key' };
         }
-        const result = await pollArkTask(task.upstreamTaskId, apiKey);
-        const s = (result.status || '').toLowerCase();
+        pollResult = await pollFn(task.upstreamTaskId, apiKey);
+        const s = (pollResult.status || '').toLowerCase();
         if (s === 'succeeded') {
-          this.#store.updateTask(task.id, { status: 'completed', progress: 100, result: { recovered: true, upstreamTaskId: task.upstreamTaskId } });
-          return { taskId: task.id, action: 'recovered_completed', upstreamTaskId: task.upstreamTaskId };
-        }
-        if (s === 'failed' || s === 'cancelled') {
+          mediaUrl = parseFn(pollResult);
+        } else if (s === 'failed' || s === 'cancelled') {
           this.#store.updateTask(task.id, { status: 'failed', error: `Upstream task ${s}` });
           return { taskId: task.id, action: 'recovered_failed', upstreamTaskId: task.upstreamTaskId };
         }
       } else if (provider === 'dashscope') {
-        const { pollTask } = await import('./dashscope.js');
-        const apiKey = process.env.DASHSCOPE_API_KEY;
+        const pollFn = ctx?.pollTask || (await import('./dashscope.js')).pollTask;
+        const parseFn = ctx?.parseImageResultUrl || (await import('./dashscope.js')).parseImageResultUrl;
+        const apiKey = ctx?.dashscopeApiKey || process.env.DASHSCOPE_API_KEY;
         if (!apiKey) {
           this.#store.updateTask(task.id, { status: 'interrupted', error: 'Cannot recover: no DASHSCOPE_API_KEY' });
           return { taskId: task.id, action: 'marked_interrupt', reason: 'no_api_key' };
         }
-        const result = await pollTask(task.upstreamTaskId, apiKey);
-        const s = result.output?.task_status;
+        pollResult = await pollFn(task.upstreamTaskId, apiKey);
+        const s = pollResult.output?.task_status;
         if (s === 'SUCCEEDED') {
-          this.#store.updateTask(task.id, { status: 'completed', progress: 100, result: { recovered: true, upstreamTaskId: task.upstreamTaskId } });
-          return { taskId: task.id, action: 'recovered_completed', upstreamTaskId: task.upstreamTaskId };
-        }
-        if (s === 'FAILED') {
-          this.#store.updateTask(task.id, { status: 'failed', error: `Upstream task failed: ${result.output?.message || ''}` });
+          mediaUrl = task.type === 'image'
+            ? parseFn(pollResult)
+            : pollResult.output?.video_url;
+        } else if (s === 'FAILED') {
+          this.#store.updateTask(task.id, { status: 'failed', error: `Upstream task failed: ${pollResult.output?.message || ''}` });
           return { taskId: task.id, action: 'recovered_failed', upstreamTaskId: task.upstreamTaskId };
         }
       }
 
-      this.#store.updateTask(task.id, { status: 'interrupted', error: 'Cloud task still running or status unknown after restart' });
-      return { taskId: task.id, action: 'marked_interrupt', upstreamTaskId: task.upstreamTaskId };
+      if (!mediaUrl || !ctx?.mediaDir || !ctx?.downloadFile) {
+        this.#store.updateTask(task.id, { status: 'interrupted', error: 'Cloud task still running or recovery context unavailable' });
+        return { taskId: task.id, action: 'marked_interrupt', upstreamTaskId: task.upstreamTaskId };
+      }
+
+      const ext = task.type === 'image' ? '.png' : '.mp4';
+      const filename = `recovered_${task.id}${ext}`;
+      const savePath = path.join(ctx.mediaDir, filename);
+      await ctx.downloadFile(mediaUrl, savePath);
+
+      const mediaPath = `/api/media/${filename}`;
+      const result = task.type === 'image'
+        ? { images: [{ index: 0, status: 'ok', path: mediaPath, imageUrl: mediaUrl }], total: 1, success: 1, recovered: true }
+        : { clips: [{ index: 0, status: 'ok', path: mediaPath }], total: 1, success: 1, recovered: true };
+
+      this.#store.updateTask(task.id, { status: 'completed', progress: 100, result });
+      return { taskId: task.id, action: 'recovered_completed', upstreamTaskId: task.upstreamTaskId, downloaded: filename };
     } catch (err) {
       this.#store.updateTask(task.id, { status: 'interrupted', error: `Recovery failed: ${err.message}` });
       return { taskId: task.id, action: 'recovery_error', error: err.message };

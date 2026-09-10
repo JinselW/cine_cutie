@@ -199,6 +199,32 @@ export function probeAudioQuality(inputPath) {
   });
 }
 
+export function parseSilenceDuration(output = '') {
+  const matches = [...String(output).matchAll(/silence_duration:\s*([0-9.]+)/g)];
+  return matches.reduce((sum, m) => sum + (Number(m[1]) || 0), 0);
+}
+
+export function probeSilenceDuration(inputPath) {
+  return new Promise(resolve => {
+    execFile(ffmpegPath, ['-hide_banner', '-i', inputPath, '-af',
+      'silencedetect=noise=-50dB:d=0.5', '-f', 'null', '-'],
+    (_err, _stdout, stderr) => resolve(parseSilenceDuration(stderr)));
+  });
+}
+
+export function probeAudioStreamDuration(inputPath) {
+  return new Promise(resolve => {
+    execFile(ffmpegPath, ['-hide_banner', '-i', inputPath], (_err, _stdout, stderr) => {
+      const text = String(stderr);
+      const audioLine = text.split('\n').find(l => /Stream.*Audio:/.test(l));
+      if (!audioLine) return resolve(null);
+      const dur = audioLine.match(/Duration:\s*([0-9.]+)/);
+      if (dur) return resolve(Number(dur[1]));
+      resolve(parseFfmpegDuration(text));
+    });
+  });
+}
+
 function pickTarget(streams) {
   const first = streams[0] || {};
   const width = first.width || 1280;

@@ -9,17 +9,17 @@ import { TaskController } from '../server/task-controller.js';
 
 // ── isTerminalStatus ────────────────────────────────────────────────────────
 
-test('isTerminalStatus: completed, failed, cancelled are terminal', () => {
+test('isTerminalStatus: completed, failed, cancelled, interrupted are terminal', () => {
   assert.equal(isTerminalStatus('completed'), true);
   assert.equal(isTerminalStatus('failed'), true);
   assert.equal(isTerminalStatus('cancelled'), true);
+  assert.equal(isTerminalStatus('interrupted'), true);
 });
 
-test('isTerminalStatus: pending, running, queued, interrupted are not terminal', () => {
+test('isTerminalStatus: pending, running, queued are not terminal', () => {
   assert.equal(isTerminalStatus('pending'), false);
   assert.equal(isTerminalStatus('running'), false);
   assert.equal(isTerminalStatus('queued'), false);
-  assert.equal(isTerminalStatus('interrupted'), false);
 });
 
 // ── Shared store behavior ───────────────────────────────────────────────────
@@ -586,7 +586,7 @@ test('TaskController: recovery marks running tasks without external IDs as inter
   }
 });
 
-test('TaskController: recovery resets queued tasks to pending', async () => {
+test('TaskController: recovery marks queued tasks without worker as interrupted', async () => {
   const store = new InMemoryTaskStore();
   await store.init();
 
@@ -597,10 +597,12 @@ test('TaskController: recovery resets queued tasks to pending', async () => {
   await controller.init();
   try {
     const recovered = store.getTask(task.id);
-    assert.equal(recovered.status, 'pending');
+    assert.equal(recovered.status, 'interrupted');
+    assert.ok(recovered.error.includes('Server restarted'));
 
     const results = controller.recoveryResults;
-    assert.equal(results[0].action, 'reset_to_pending');
+    assert.equal(results[0].action, 'marked_interrupt');
+    assert.equal(results[0].reason, 'queued_no_worker');
   } finally {
     await controller.shutdown();
   }
@@ -639,4 +641,61 @@ test('TaskController: task:promoted event fires when task starts running', async
     const promotedId = await promoted.promise;
     assert.equal(promotedId, r.task.id);
   });
+});
+
+test('TaskController: cleanup deletes interrupted tasks past retention', async () => {
+  const store = new InMemoryTaskStore();
+  await store.init();
+
+  const task = store.createTask('render');
+  store.updateTask(task.id, { status: 'interrupted', error: 'Server restarted' });
+
+  const controller = new TaskController({ store, maxConcurrency: 2 });
+  await controller.init();
+  try {
+    await new Promise(r => setTimeout(r, 20));
+    const removed = await controller.runCleanup(5);
+    assert.equal(removed, 1);
+    assert.equal(store.getTask(task.id), null);
+  } finally {
+    await controller.shutdown();
+  }
+});
+
+test('TaskController: cloud recovery without recoveryContext marks interrupted', async () => {
+  const store = new InMemoryTaskStore();
+  await store.init();
+
+  const task = store.createTask('video');
+  store.updateTask(task.id, {
+    status: 'running',
+    upstreamTaskId: 'fake-upstream-123',
+    provider: 'dashscope',
+  });
+
+  const controller = new TaskController({ store, maxConcurrency: 2 });
+  await controller.init();
+  try {
+    const recovered = store.getTask(task.id);
+    assert.equal(recovered.status, 'interrupted');
+    assert.ok(recovered.error.includes('recovery context unavailable') || recovered.error.includes('DASHSCOPE_API_KEY'));
+  } finally {
+    await controller.shutdown();
+  }
+});
+
+test('TaskController: recoveryContext is stored and accessible', async () => {
+  const ctx = { mediaDir: '/tmp/test-media', downloadFile: async () => {} };
+  const store = new InMemoryTaskStore();
+  await store.init();
+
+  const controller = new TaskController({ store, maxConcurrency: 2, recoveryContext: ctx });
+  await controller.init();
+  try {
+    const health = await controller.getHealth();
+    assert.ok(health.queue);
+    assert.ok(health.recovery);
+  } finally {
+    await controller.shutdown();
+  }
 });
