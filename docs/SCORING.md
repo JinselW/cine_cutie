@@ -9,9 +9,9 @@
 |----------|------|----------|----------|
 | 多 Agent 架构与工程 | 30 | 25-28 | 6 核心 Agent + QCAgent/RetryAgent/IPComplianceAgent + 一致性追踪 + ArtifactStore |
 | 统一一句话生成测试 | 25 | 20-23 | 一句话灵感（可选提示词文件）→ 端到端成片 + 多重质量门禁 + 跨步骤一致性 |
-| 技术创新与模型工程 | 25 | 18-22 | Self-Critique + per-item Auto-Retry + 三种视频生成方式 + Context Pruning |
+| 技术创新与模型工程 | 25 | 18-22 | Self-Critique + per-item Auto-Retry + 逐镜多模式规划/降级 + Context Pruning |
 | 自主工作质量 | 10 | 7-9 | 多轮评分选优 + 结构校验 + IP 合规门禁 + 优雅降级 |
-| 可复现性与部署 | 10 | 7-9 | Vite 构建 + 零运行时依赖 + Seed 可复现 + Docker + 完整文档 |
+| 可复现性与部署 | 10 | 7-9 | Vite 构建 + 原生前端 + Seed 可复现 + Docker + 完整文档 |
 
 ---
 
@@ -29,7 +29,7 @@
 | `StoryboardAgent` | storyboard | 分镜（集/段/镜头）+ camera 运镜参数 + 镜头数按总时长封顶 + `validateStoryboard` |
 | `ReferenceAgent` | referenceImages | 按 `videoMode` 规划帧图（首帧 N / 首尾帧 N+1 / 参考图 N），融合剧本 beat + visualTag + 分镜 prompt，定妆图作图生图参考 |
 | `VideoAgent` | videoGeneration | 按 `videoMode` 取步骤 4 素材，拼运镜 motion prompt，逐片段时长，per-item 重试 |
-| `EditorAgent` | postProduction | ffmpeg 拼接成片（确定性，不重生成） |
+| `EditorAgent` | postProduction | 声音计划与可用音轨混合、ffmpeg 拼接/转场、DeliveryQC（确定性，不重生成） |
 
 **质量/合规 Agent（跨步骤介入）**：
 
@@ -127,13 +127,15 @@
 
 ## 三、技术创新与模型工程 (25 分)
 
-### 3.1 三种视频生成方式（videoMode）
+### 3.1 视频生成方式（videoMode）
 
 **创新点**：设置面板的「视频生成方式」统一驱动步骤 4 产帧规划与步骤 5 取素材/选模型：
 
-- `firstFrame` 首帧生视频（默认 wanx2.1-i2v-plus）：每镜 1 张首帧
+- `firstFrame` 首帧生视频（默认 `wan2.6-i2v`）：每镜 1 张首帧
 - `firstLastFrame` 首尾帧生视频（默认 wan2.7-i2v）：每镜首帧，镜头 i 尾帧复用镜头 i+1 首帧，末镜补 1 张收尾帧（N+1）
 - `referenceImage` 参考图生视频（默认 wan2.7-r2v）：每镜 1 张身份参考图（≤5 张）
+- `auto` 自动规划：Prompt Agent 可逐镜选择上述模式，并在模型不可用时记录实际降级路径
+- ComfyUI 还支持缺图时降级到 `textToVideo`；其参考图工作流最多接收 6 张，DashScope r2v 最多接收 5 张
 
 ### 3.2 角色一致性方案（三层锁定）
 
@@ -191,10 +193,10 @@
 
 ## 五、可复现性与部署 (10 分)
 
-### 5.1 构建系统与零依赖
+### 5.1 构建系统与前端技术栈
 
 - Vite 6 构建，`npm run build` 一键输出到 `dist/`
-- 运行时零外部框架依赖，纯原生 HTML + CSS + JavaScript (ES Modules)，可在任何静态托管部署
+- 前端不依赖 UI 框架，使用原生 HTML + CSS + JavaScript (ES Modules)；完整功能仍需 Express 后端、媒体工具及所选模型服务
 
 ### 5.2 配置持久化
 
@@ -204,7 +206,7 @@
 
 ### 5.3 部署
 
-- Docker 支持：`docker run -p 3006:3006 -v cine-data:/app/data -v cine-media:/app/media cine-cutie`
+- Docker 支持：镜像内默认端口为 7860，持久目录为 `/mnt/workspace`；本地可运行 `docker run -p 3006:7860 -v cine-work:/mnt/workspace cine-cutie`
 - 远程 GPU：DGX Spark (GB10) 经 SSH 隧道运行 ComfyUI
 
 ### 5.4 文档与测试
@@ -213,7 +215,7 @@
 - `docs/ARCHITECTURE.md`：系统架构、数据流、模块详解
 - `docs/MEMORY.md`：创作历史使用与备份说明
 - `docs/SCORING.md`：本文档
-- 测试：`test/ip-compliance.test.js`、`test/memory.test.js`、`test/orchestrator-gate.test.js`、`smoke_test.mjs`
+- 测试：`test/ip-compliance.test.js`、`test/memory.test.js`、`test/orchestrator-gate.test.js`、`test/smoke.test.js`
 
 ### 5.5 可提交的复现与审计证据
 
@@ -245,4 +247,5 @@
 | `src/js/memory.js` + `server/memory.js` | 创作历史（前端建档/快照 + 后端档案读写） |
 | `src/js/observability.js` | 执行日志（从 ArtifactStore 派生） |
 | `server/dashscope.js` | DashScope 客户端 + `clampVideoDuration` 档位夹取 |
-| `server/render.js` | ffmpeg 拼接（copy 失败回退重编码） |
+| `server/render.js` | ffmpeg 拼接、转场、音频 overlay、BGM、字幕与技术探测 |
+| `server/audio-mix.js` + `src/js/audio/*.js` | 声音规划、TTS/SFX Provider、混音与 lineage |

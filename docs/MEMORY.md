@@ -15,7 +15,7 @@
 - 页面被关闭时尚在执行的任务可能保留“运行中 / 上次执行未结束”状态；已保存阶段可以查看，这不代表后台会继续整个流程。
 - 所谓完整快照指应用当前生成的数据、消息和产物历史，不包括没有被应用记录的模型内部推理或远端服务日志。
 
-Docker 持久化示例：`docker run -p 3006:3006 -v cine-data:/app/data -v cine-media:/app/media cine-cutie`。
+Docker 镜像默认监听 7860，并把 Memory 与媒体放在 `/mnt/workspace`。本地持久化示例：`docker run -p 3006:7860 -v cine-work:/mnt/workspace cine-cutie`。
 
 ## API
 

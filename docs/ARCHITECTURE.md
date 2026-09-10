@@ -76,8 +76,8 @@ const RENDERERS = {
 | `CharacterAgent` | characterDesign | 两阶段：LLM 先写角色/场景设计稿（design/visualTag/palette），再据此生成三视图定妆图 + 正面图 + 场景空镜图，per-item 重试 |
 | `StoryboardAgent` | storyboard | 分镜（集/段/镜头）+ 镜头数按总时长封顶 |
 | `ReferenceAgent` | referenceImages | 按设置的视频生成方式规划帧图（首帧 N / 首尾帧 N+1，尾帧复用下镜首帧 / 参考图 N）；提示词融合剧本 beat + 命中角色/场景 visualTag + 分镜 prompt，并把定妆图作图生图参考 |
-| `VideoAgent` | videoGeneration | 读设置的 `videoMode` 后从步骤4结果取素材（首帧 / 首帧+尾帧，尾帧缺失时按"复用下镜首帧"现算 / 参考图列表 ≤5 张），拼运镜 motion prompt，片段时长取分镜为该镜头规划的 `duration`，per-item 重试 |
-| `EditorAgent` | postProduction | ffmpeg 拼接成片：跨场景 crossfade（画面+音频，无音轨片段注入静音）+ 首尾淡入淡出（视频+音频 afade）；每个片段有可读视频几何时启用，否则回退纯拼接；确定性，不重生成 |
+| `VideoAgent` | videoGeneration | 读设置的 `videoMode` 后从步骤4结果取素材（首帧 / 首帧+尾帧，尾帧缺失时按"复用下镜首帧"现算 / DashScope 参考图列表 ≤5 张、ComfyUI ≤6 张），拼运镜 motion prompt，片段时长取分镜为该镜头规划的 `duration`，per-item 重试 |
+| `EditorAgent` | postProduction | 编译声音计划并尝试生成/混合音轨，再用 ffmpeg 拼接成片：跨场景 crossfade（画面+音频，无音轨片段注入静音）+ 首尾淡入淡出；每个片段有可读视频几何时启用，否则回退纯拼接。字幕 cue 构建能力保留，但当前烧录开关关闭 |
 
 ### 3. 恢复、回滚与控制 (`orchestrator/`)
 
@@ -103,7 +103,7 @@ setActiveProvider(cap, id)     // 切换（localStorage `cine-cutie-providers`�
 |----------|-----------|------|
 | `llm` | text | 任意 OpenAI 兼容 `/chat/completions`（直连或经 server 代理） |
 | `image` | image | DashScope 文生图；条目带 `refs` 且设置中选了图生图模型时逐条走图生图编辑（server `/api/generate/image`） |
-| `video` | video | DashScope i2v / r2v（server `/api/generate/video`）；按生成方式选模型——参考图方式读 `models.refVideo`，另两种读 `models.video`，并逐条转发 `imagePath`/`lastFramePath`/`referenceImages` |
+| `video` | video | DashScope i2v / r2v（server `/api/generate/video`）；按生成方式分别读 `models.video`、`models.lastFrameVideo` 或 `models.refVideo`，并逐条转发 `imagePath`/`lastFramePath`/`referenceImages` |
 | `video-comfy` | video | 仅在设置选择 ComfyUI 时启用；步骤 5 按素材选择 H3 文生视频、首帧、首尾帧或参考图工作流，经 server `/api/generate/video-comfy` 和 SSH 隧道提交；缺图时降级到文生视频 |
 | `render` | render | server ffmpeg 拼接（`/api/render/final`） |
 | `template` | 全部 | 离线降级模板（未配置 API Key 或 LLM 失败时） |
@@ -115,16 +115,16 @@ setActiveProvider(cap, id)     // 切换（localStorage `cine-cutie-providers`�
 ```js
 {
   apiProviders: { openai|deepseek|dashscope|ark|kling|gemini: { endpoint, apiKey } },
-  models: { text: {provider, name}, image: {name}, img2img: {name}, video: {name}, refVideo: {name} },
-  videoMode: 'firstFrame' | 'firstLastFrame' | 'referenceImage',
+  models: { text: {provider, name}, image: {name}, img2img: {name}, video: {name}, lastFrameVideo: {name}, refVideo: {name} },
+  videoMode: 'firstFrame' | 'firstLastFrame' | 'referenceImage' | 'auto',
   jsonMode: bool,
   useProxy: bool   // true 时 LLM 走 server 代理（带 LRU 缓存 + 规避 CORS）
 }
 ```
 
 `videoMode` 决定设置面板里那个"具体生成方式模型"下拉写入哪个槽位：
-`firstFrame`（默认 wanx2.1-i2v-plus）与 `firstLastFrame`（默认 wan2.7-i2v）写 `models.video`，
-`referenceImage`（默认 wan2.7-r2v）写 `models.refVideo`；另一个槽位保留原值。
+`firstFrame`（默认 `wan2.6-i2v`）、`firstLastFrame`（默认 `wan2.7-i2v`）和
+`referenceImage`（默认 `wan2.7-r2v`）分别写 `models.video`、`models.lastFrameVideo`、`models.refVideo`，各槽位独立保留。
 `img2img` 默认 `wan2.6-image`，由 `ReferenceAgent` 在带参考图的条目上走图生图编辑路径。
 `videoMode` 同时被 `ReferenceAgent`（决定步骤 4 产出首帧 / 首尾帧 / 参考图）
 和 `video` provider（决定步骤 5 读哪个模型槽位、每条片段带哪些素材）读取，图片走 `models.image`。
@@ -188,7 +188,7 @@ BLOCK→该步 FAIL，WARN/REVIEW→CONDITIONAL_PASS 并在 UI 提示。
    videoGeneration ─ videoClips: { mode, clips[] }   (按 mode 用步骤4的首帧/首尾帧/参考图保持一致性)
         │  contextKeys: ['script','storyboard','videoClips']
         ▼
-   postProduction ── finalVideo: { finalVideo }  (ffmpeg 拼接)
+   postProduction ── finalVideo: { finalVideo, soundPlan, audioResult }  (ffmpeg 拼接/转场/混音 + DeliveryQC)
         │
         ▼
    showCompletion() → renderExecutionLog()
@@ -220,9 +220,12 @@ BLOCK→该步 FAIL，WARN/REVIEW→CONDITIONAL_PASS 并在 UI 提示。
 | `/api/chat/completions` | POST | LLM 代理（LRU 缓存，`X-Cache` 头） |
 | `/api/generate/image` | POST | DashScope 批量生图（文生图 + 逐条图生图编辑，参考图为同源 `/api/media` 路径） |
 | `/api/upload/prompt` | POST | 解析提示词文件（.docx/.txt/.md，≤20MB，提取纯文本，UTF-8→GBK 回退，>20000 字截断） |
+| `/api/upload/bgm` | POST | 上传后期混音使用的 BGM |
 | `/api/upload` | POST | 图片上传（当前 UI 未使用，保留给视频生成的 uploads 入参） |
 | `/api/generate/video` | POST | DashScope 批量图生视频：模型由请求体传入；本地 `/api/media` 帧图转 Base64 data URI；V1 走 `input.img_url`，`wan2.7` 走 `media` 数组（first_frame/last_frame/reference_image）；每条片段的 `duration` 经 `clampVideoDuration` 按模型档位夹取 |
-| `/api/render/final` | POST | ffmpeg 拼接（copy 失败回退重编码） |
+| `/api/audio/generate` | POST | 生成 TTS/SFX 音轨并记录 provider/model/降级 lineage |
+| `/api/render/final` | POST | ffmpeg 拼接/转场，可选音频 overlay、BGM 和字幕；条件不满足时回退纯拼接 |
+| `/api/compliance/visual` | POST | 对受控媒体执行 OCR、视频抽帧和可选视觉检查 |
 | `/api/generate/video-comfy` | POST | 远程 ComfyUI 生成 |
 | `/api/upload/comfy` | POST | 上传到 ComfyUI input |
 | `/api/comfyui/status` | GET | 隧道 + GPU 状态 |
@@ -250,7 +253,7 @@ ArtifactStore 版本与尝试记录、检查点、RunState，以及**仅模型�
 
 - 前端 `memory.js`：串行队列 + 防抖写入，`memory-status` 事件在保存失败时提示可重试；`frozen` 快照冻结已停止/失败的记录
 - 后端 `server/memory.js` + `/api/memory*`：档案 CRUD + 全文搜索；媒体沿用 `media/`，记录只存引用（JSON 导出不含二进制）
-- 历史面板 `ui/history.js`（右上角 🕘）：独立预览，不修改当前任务；当前不支持从历史断点续跑
+- 历史面板 `ui/history.js`（右上角 🕘）：独立预览；可将已完成、停止、失败或中断的快照恢复为当前工作流，并从可恢复位置继续
 - 详见 [docs/MEMORY.md](MEMORY.md)
 
 ## 国际化 (`i18n.js`)

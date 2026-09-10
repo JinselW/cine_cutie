@@ -15,13 +15,13 @@ Cine-Cutie 是一个端到端的 AI 电影创作系统。输入一句话故事�
 | 3. 分镜生成 | Storyboard Artist | 集/段/镜头层级结构，含运镜参数与逐镜时长 |
 | 4. 图片生成 | Image Director | 按视频模式产出帧图，融合定妆图作图生图参考 |
 | 5. 视频生成 | Video Director | 逐片段视频，自动路由到最佳模型 |
-| 6. 后期合成 | Post-Production Artist | ffmpeg 拼接、转场、混音并根据剧本烧录字幕 → 最终 MP4 |
+| 6. 后期合成 | Post-Production Artist | ffmpeg 拼接、转场、可选音轨生成与混音、成片技术检查 → 最终 MP4 |
 
 ### 角色一致性
 
 每个角色在步骤 2 生成三视图定妆图与正面肖像，后续所有包含该角色的镜头复用同一张图作为参考——图片生成阶段做图生图锁定外貌，视频生成阶段用已锁定的帧图做 i2v 首帧，确保角色形象贯穿全片。支持中/英文名匹配（`enName`），跨语言 prompt 也能正确关联。
 
-### 三种视频生成模式
+### 多模式视频生成
 
 在设置面板统一切换，驱动步骤 4 的帧图规划与步骤 5 的素材选取：
 
@@ -30,6 +30,9 @@ Cine-Cutie 是一个端到端的 AI 电影创作系统。输入一句话故事�
 | 首帧生视频 | 每镜 1 张首帧（N 张） | 首帧 → i2v |
 | 首尾帧生视频 | 首帧 + 尾帧复用下一镜首帧（N+1 张） | 首帧 + 尾帧 → i2v |
 | 参考图生视频 | 每镜 1 张身份参考图（N 张） | 身份参考图组（≤5 张） → r2v |
+| 自动选择 | Prompt Agent 逐镜规划所需帧图 | 按镜头在 i2v / r2v 间选择，并记录降级路径 |
+
+远程 ComfyUI 在缺少可用图片时还可降级到文生视频；其参考图工作流上限为 6 张，DashScope r2v 上限为 5 张。
 
 ### Auto 智能路由
 
@@ -63,7 +66,7 @@ Cine-Cutie 是一个端到端的 AI 电影创作系统。输入一句话故事�
 - **逐片段时长**：分镜为每个镜头规划 3–10 秒，服务端按模型支持的档位自动夹取
 - **运镜指令**：从分镜提取 camera 参数（pan/tilt/zoom/dolly/tracking），自动转为 motion prompt
 - **创作历史 Memory**：自动保存会话与素材引用，支持搜索、预览、重命名、导出（详见 [docs/MEMORY.md](docs/MEMORY.md)）
-- **自动字幕**：按最终镜头顺序和时长，把剧本对白生成 SRT 并由 FFmpeg 烧录到成片
+- **字幕基础设施**：可按最终镜头顺序和时长生成 SRT；当前因视频生成链路默认无对白音轨，烧录开关暂时关闭，避免画面字幕与实际声音不一致
 - **Seed 可复现**：图片和视频生成支持 seed 参数
 - **优雅降级**：未配置 API Key 时自动使用模板生成，仍可体验完整流程
 - **中英双语**：完整 i18n 支持
@@ -76,7 +79,7 @@ Cine-Cutie 是一个端到端的 AI 电影创作系统。输入一句话故事�
 
 - Node.js >= 18
 - DashScope API Key（[阿里云百炼](https://dashscope.console.aliyun.com/) 申请）
-- ffmpeg（用于最终视频拼接，`winget install ffmpeg` 或 `brew install ffmpeg`）
+- ffmpeg（`ffmpeg-static` 通常随依赖安装；也可用 `FFMPEG_BIN` 指向系统 ffmpeg）
 
 ### 安装 & 启动
 
@@ -91,7 +94,7 @@ npm run server
 ### 开发模式
 
 ```bash
-npm run dev     # Vite 开发服务器（前端热更新，默认 5173）
+npm run dev     # Vite 开发服务器（前端热更新，端口 3000）
 npm run server  # 另一个终端启动后端 API（3006）
 ```
 
@@ -102,9 +105,9 @@ npm run server  # 另一个终端启动后端 API（3006）
 | 用途 | 默认模型 |
 |------|---------|
 | 文本及评估 | `qwen-plus`（任意 OpenAI 兼容 API，需自行配置 endpoint + key） |
-| 文生图 | `wanx2.1-t2i-turbo` |
+| 文生图 | `wan2.6-t2i` |
 | 图生图 | `wan2.6-image` |
-| 视频生成 | 按模式选择：首帧 `wan2.7-i2v`、首尾帧 `wan2.7-i2v`、参考图 `wan2.7-r2v` |
+| 视频生成 | 按模式选择：首帧 `wan2.6-i2v`、首尾帧 `wan2.7-i2v`、参考图 `wan2.7-r2v` |
 
 ## Pipeline 流程
 
@@ -143,8 +146,8 @@ npm run server  # 另一个终端启动后端 API（3006）
          │
          ▼
 ┌──────────────────┐
-│  6. 后期合成      │  ffmpeg 拼接所有视频片段 → 最终 MP4
-│    PostProd      │  copy 失败自动回退重编码
+│  6. 后期合成      │  ffmpeg 拼接/转场 + 可用音轨混音 → 最终 MP4
+│    PostProd      │  技术 QC；不满足转场条件时回退纯拼接
 └──────────────────┘
 ```
 
@@ -168,7 +171,12 @@ cine-cutie/
 │   ├── tasks.js                     # 异步任务向后兼容层（委托 TaskStore）
 │   ├── task-store.js                # TaskStore 接口 + InMemory / File 持久化实现
 │   ├── task-controller.js           # 任务调度：并发控制、幂等提交、重启恢复、取消、清理
-│   ├── render.js                    # ffmpeg 视频拼接
+│   ├── render.js                    # ffmpeg 拼接、转场、BGM 与字幕处理
+│   ├── audio-mix.js                 # TTS/SFX 生成、时间线混音与 lineage
+│   ├── audio-providers.js           # 服务端音频 Provider 注册表
+│   ├── visual-compliance.js         # OCR、视频抽帧与可选视觉检查器
+│   ├── ark.js                       # 火山方舟图片/视频任务适配
+│   ├── inference-profiles.js        # 推理档位加载与约束
 │   └── workflows/                   # ComfyUI H3 工作流模板（t2v / 首帧 / 首尾帧 / 参考图）
 │
 ├── src/
@@ -199,7 +207,8 @@ cine-cutie/
 │       │   ├── storyboardAgent.js   # 分镜（集/段/镜头）+ 时长收敛
 │       │   ├── referenceAgent.js    # 按 videoMode 规划帧图 + 图生图参考
 │       │   ├── videoAgent.js        # 按 videoMode 路由取素材 + 运镜 motion
-│       │   ├── editorAgent.js       # ffmpeg 拼接成片
+│       │   ├── editorAgent.js       # 拼接、声音规划/混音与成片交付
+│       │   ├── promptAgent.js       # 图片/视频共用的内部 Prompt 服务
 │       │   ├── qcAgent.js           # Self-Critique 评分 + 硬门禁
 │       │   ├── deliveryQCAgent.js   # 成片技术门禁 + 多模态创意评审
 │       │   ├── deliveryQC.js        # 时长/视频流/黑帧/冻结帧阈值判定
@@ -210,6 +219,8 @@ cine-cutie/
 │       │
 │       ├── artifacts/               # ArtifactStore 版本化产物追踪
 │       ├── compliance/              # IP 数据库 + 四层证据匹配
+│       ├── audio/                   # 声音规划、客户端与 TTS/SFX Provider
+│       ├── prompts/                 # Prompt schema、编译、模式规划与适配
 │       ├── orchestrator/            # agentRegistry / checkpoint / runState / cancellationToken
 │       │
 │       ├── providers/               # 后端 Provider 层
@@ -248,7 +259,10 @@ cine-cutie/
 | `/api/generate/video` | POST | 批量图生视频（V1 走 img_url，wan2.7 走 media 数组） |
 | `/api/generate/video-comfy` | POST | 远程 ComfyUI 生成（H3，经 SSH 隧道） |
 | `/api/upload/prompt` | POST | 解析提示词文件（.docx/.txt/.md，≤20MB） |
-| `/api/render/final` | POST | ffmpeg 拼接视频片段 |
+| `/api/audio/generate` | POST | 生成 TTS/SFX 音频并返回 lineage；不可用时明确降级 |
+| `/api/upload/bgm` | POST | 上传后期使用的 BGM 文件 |
+| `/api/render/final` | POST | ffmpeg 拼接/转场，并按请求混入音频、BGM或烧录字幕 |
+| `/api/compliance/visual` | POST | 对仓库媒体执行 OCR、抽帧及可选视觉检查 |
 | `/api/memory` | GET/POST | 创作历史：摘要列表 + 全文搜索 / 创建记录 |
 | `/api/memory/:id` | GET/PUT/PATCH/DELETE | 读取 / 保存快照 / 重命名 / 删除 |
 | `/api/comfyui/status` | GET | SSH 隧道 + GPU 状态 |
