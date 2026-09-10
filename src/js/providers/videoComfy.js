@@ -154,6 +154,7 @@ const comfyUIProvider = {
                 videoPath: r.path || '',
                 status: r.status === 'ok' ? 'complete' : 'failed',
                 error: r.status === 'ok' ? null : r.error || 'Generation failed',
+                trace: r.trace || null,
               });
             }
           }

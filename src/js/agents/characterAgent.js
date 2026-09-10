@@ -8,7 +8,9 @@ import { createArtifact, ArtifactKind, ArtifactStatus, recordItemAttempt } from 
 import { addAgentMessage } from '../ui/render.js';
 import { t } from '../i18n.js';
 import { reportPhase } from '../progressTracker.js';
+import { checkVisualMediaBatch } from '../compliance/visualCompliance.js';
 import { appendFeedback, appendPromptGuidance } from '../feedback.js';
+import { QCVerdict } from './qcTypes.js';
 
 const MAX_ITEM_ATTEMPTS = 3;
 const MAX_STAGE_RETRIES = 1;
@@ -93,8 +95,18 @@ export class CharacterAgent extends BaseAgent {
     const hasContent = finalData.characters.some(c => c.imagePath || c.sheetPath)
       || finalData.settings.some(s => s.imagePath);
 
+    const visualItems = [
+      ...finalData.characters.flatMap(character => [
+        { id: `${character.id}:sheet`, mediaRef: character.sheetPath },
+        { id: `${character.id}:front`, mediaRef: character.imagePath || character.imageUrl },
+      ]),
+      ...finalData.settings.map(setting => ({ id: setting.id, mediaRef: setting.imagePath || setting.imageUrl })),
+    ].filter(item => item.mediaRef);
+    finalData.visualCompliance = await checkVisualMediaBatch(visualItems, { stage: 'characterDesign', type: 'image', signal: token?.signal });
+    const visualBlocked = finalData.visualCompliance.verdict === QCVerdict.FAIL;
+
     artifact.data = finalData;
-    artifact.status = hasContent ? ArtifactStatus.COMPLETE : ArtifactStatus.FAILED;
+    artifact.status = hasContent && !visualBlocked ? ArtifactStatus.COMPLETE : ArtifactStatus.FAILED;
 
     return {
       artifacts: [artifact],
@@ -102,7 +114,8 @@ export class CharacterAgent extends BaseAgent {
         tokens,
         qualityScore: bestCrit?.score ?? 0,
         consistencyIssues: bestCrit?.consistency?.issues || [],
-        verdict: bestCrit?.verdict ?? null,
+        verdict: visualBlocked ? QCVerdict.FAIL : bestCrit?.verdict ?? null,
+        visualCompliance: finalData.visualCompliance,
         feedbackSatisfied: bestCrit?.feedbackSatisfied ?? !ctx.feedback,
       },
     };
@@ -308,6 +321,7 @@ export class CharacterAgent extends BaseAgent {
       const failedItems = [];
       for (const result of providerResults) {
         recordItemAttempt(artifact, result.id, {
+          ...(result.trace || {}),
           seed: batch.find(b => b.id === result.id)?.seed,
           prompt: batch.find(b => b.id === result.id)?.prompt,
           status: result.status,

@@ -23,7 +23,7 @@ ENV HOST=0.0.0.0 \
 
 # 用发行版 ffmpeg 替代 ffmpeg-static 的二进制下载；FFMPEG_BIN 让 ffmpeg-static 直接返回该路径。
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg \
+    && apt-get install -y --no-install-recommends ffmpeg fonts-noto-cjk tesseract-ocr tesseract-ocr-eng tesseract-ocr-chi-sim \
     && rm -rf /var/lib/apt/lists/*
 
 COPY package.json package-lock.json ./
@@ -32,6 +32,7 @@ RUN npm ci --omit=dev --ignore-scripts --registry=https://registry.npmmirror.com
 
 COPY --from=build /app/dist ./dist
 COPY server ./server
+COPY config ./config
 
 EXPOSE 7860
 CMD ["node", "server/index.js"]

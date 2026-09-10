@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { ensureTunnel } from './ssh-tunnel.js';
+import { createHash } from 'crypto';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -41,6 +42,13 @@ function loadWorkflowTemplate(mode) {
   if (!filename) throw new Error(`Unsupported ComfyUI video mode: ${mode}`);
   const templatePath = path.join(__dirname, 'workflows', filename);
   return JSON.parse(fs.readFileSync(templatePath, 'utf-8'));
+}
+
+export function getWorkflowIdentity(requestedMode, imageCount = 0) {
+  const mode = selectWorkflowMode(requestedMode, imageCount);
+  const filename = WORKFLOW_FILES[mode];
+  const bytes = fs.readFileSync(path.join(__dirname, 'workflows', filename));
+  return { workflowId: filename, workflowHash: createHash('sha256').update(bytes).digest('hex'), workflowMode: mode };
 }
 
 function findNodes(workflow, classType) {
@@ -175,6 +183,21 @@ async function comfyRequest(sshConfig, endpoint, { method = 'GET', body = null, 
   }
   const text = await res.text();
   return text ? JSON.parse(text) : {};
+}
+
+export async function getPromptSnapshot(sshConfig, promptId, { signal } = {}) {
+  const [queue, history] = await Promise.all([
+    comfyRequest(sshConfig, '/queue', { signal }),
+    comfyRequest(sshConfig, `/history/${promptId}`, { signal }),
+  ]);
+  const entry = history[promptId] || null;
+  const pending = Array.isArray(queue?.queue_pending)
+    && queue.queue_pending.some(item => Array.isArray(item) && item.includes(promptId));
+  return {
+    running: isPromptRunning(queue, promptId), pending, completed: !!entry,
+    status: entry?.status?.status_str || null, messages: entry?.status?.messages || [],
+    outputs: entry ? collectVideoOutputs(entry.outputs) : [],
+  };
 }
 
 export function collectVideoOutputs(outputs = {}) {

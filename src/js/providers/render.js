@@ -7,7 +7,7 @@ const renderProvider = {
   name: 'FFmpeg Render',
   capabilities: ['render'],
 
-  async generate({ items, transitions, fadeIn, fadeOut, bgm, signal } = {}) {
+  async generate({ items, transitions, fadeIn, fadeOut, bgm, subtitles, audioOverlay, signal } = {}) {
     const validPaths = (items || [])
       .filter(item => item.videoPath && item.status === 'complete')
       .map(item => item.videoPath);
@@ -21,6 +21,7 @@ const renderProvider = {
     }
 
     const body = { videoPaths: validPaths };
+    if (Array.isArray(subtitles) && subtitles.length) body.subtitles = subtitles;
     if (Array.isArray(transitions) && transitions.length === validPaths.length - 1) {
       body.transitions = transitions;
     }
@@ -31,6 +32,9 @@ const renderProvider = {
       body.bgm = bgm.path;
       body.bgmEnabled = true;
       body.bgmVolume = Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 0.6;
+    }
+    if (audioOverlay && typeof audioOverlay.path === 'string' && audioOverlay.path) {
+      body.audioOverlay = { path: audioOverlay.path, volume: audioOverlay.volume ?? 1.0 };
     }
 
     let taskId = null;
@@ -91,6 +95,7 @@ const renderProvider = {
             status: finalPath ? 'complete' : 'failed',
             error: finalPath ? null : 'No output',
             qcBaseline: taskData.result?.qcBaseline || null,
+            subtitles: taskData.result?.subtitles || null,
           };
         }
         if (taskData.status === 'failed' || taskData.status === 'cancelled') {

@@ -26,7 +26,7 @@ export function host(value) {
 }
 
 const PASS_GATE = { verdict: QCVerdict.PASS, issues: [] };
-const AGENT_EXPORTS = ['ScriptAgent', 'StoryboardAgent', 'CharacterAgent', 'ReferenceAgent', 'VideoAgent', 'EditorAgent'];
+const AGENT_EXPORTS = ['PromptAgent', 'ScriptAgent', 'StoryboardAgent', 'CharacterAgent', 'ReferenceAgent', 'VideoAgent', 'EditorAgent'];
 const RENDER_EXPORTS = ['renderScript', 'renderCharacterDesign', 'renderStoryboard', 'renderReferenceImages', 'renderVideoGeneration', 'renderPostProduction'];
 const NOOP_EXPORTS = ['showGenerating', 'setGenAnim', 'clearCurrentMessages', 'waitForResume', 'setPipelineControls', 'showCompletion', 'resetLog', 'logStepStart', 'logStepComplete', 'initObservability'];
 

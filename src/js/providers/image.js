@@ -214,7 +214,10 @@ async function generateImages(prompts, ids, seeds, refs, externalSignal) {
             path: img?.path || '',
             imageUrl: img?.imageUrl || '',
             status: img?.path ? 'complete' : 'failed',
-            error: img?.path ? null : 'No image returned',
+            // The backend already preserves the upstream provider message (quota,
+            // permission, content policy, model errors, etc.). Do not erase it here.
+            error: img?.path ? null : (img?.error || 'No image returned'),
+            trace: img?.trace || null,
           });
         }
         break;

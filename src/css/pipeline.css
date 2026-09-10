@@ -1,8 +1,11 @@
 .restore-actions{display:flex;justify-content:center;gap:12px;margin-top:16px;animation:fadeUp 0.4s ease both}
 .restore-actions.hidden{display:none}
 
-.pipeline{display:flex;flex-direction:column;align-items:center;gap:8px;margin-bottom:48px}
-.pipeline-row{display:flex;align-items:flex-start;justify-content:center;gap:8px}
+.pipeline{display:flex;flex-direction:column;align-items:center;gap:8px;padding:8px 24px 32px;margin-bottom:24px;border-bottom:1px solid var(--glass-border)}
+.pipeline-row{display:flex;align-items:flex-start;justify-content:center;gap:8px;width:100%;max-width:720px}
+.pipeline-row > .pipe-node{flex-shrink:0}
+.pipeline-row > .pipe-line{flex:1;min-width:12px;max-width:80px}
+.pipeline-row > .pipe-node.done::after{position:absolute;right:-4px;top:-4px;width:18px;height:18px;border:2px solid var(--bg2);border-radius:50%;background:var(--gold);color:var(--bg);display:grid;place-items:center;font-size:.65rem;line-height:1}
 .pipe-step{display:flex;align-items:center;gap:0}
 .pipe-node{
   width:44px;height:44px;border-radius:50%;border:2px solid var(--glass-border);
@@ -58,6 +61,17 @@
 .gen-status .dot:nth-child(3){animation-delay:0.3s}
 .gen-status .msg{color:var(--cream2);font-size:0.95rem}
 .gen-status .sub-msg{color:var(--cream3);font-size:0.82rem;margin-top:4px}
+.generation-status{max-width:560px;margin:0 auto;padding:28px 24px 20px}
+.generation-icon{display:grid;place-items:center;width:64px;height:64px;margin:0 auto 16px;border:1px solid color-mix(in srgb,var(--gold) 28%,var(--glass-border));border-radius:20px;background:color-mix(in srgb,var(--gold) 8%,var(--bg2));font-size:1.8rem;box-shadow:0 8px 24px color-mix(in srgb,var(--gold) 8%,transparent)}
+.generation-status .msg{font-weight:600;color:var(--cream);line-height:1.6}
+.generation-status .progress-wrap{margin:24px auto 20px;text-align:left}
+.generation-status .progress-bar{height:6px;border-radius:999px}
+#stepContent:has(.generation-status) > .agent-msg{max-width:640px;margin:0 auto 12px;padding:14px 20px;align-items:center;justify-content:center;background:color-mix(in srgb,var(--gold) 4%,var(--glass));border-color:color-mix(in srgb,var(--gold) 16%,var(--glass-border));border-radius:14px}
+#stepContent:has(.generation-status) > .agent-msg .agent-text{min-width:0;overflow-wrap:anywhere}
+#stepContent:has(.generation-status) > .agent-msg-danger{border-color:color-mix(in srgb,var(--rose) 45%,var(--glass-border))}
+@media(prefers-reduced-motion:reduce){
+  .pipeline .pipe-node.active,.generation-status .dot{animation:none}
+}
 .pipeline-failure{box-sizing:border-box;min-height:210px;display:flex;flex-direction:column;align-items:center;justify-content:center}
 .pipeline-failure .msg{margin:0 0 10px}
 .pipeline-failure-issues{list-style:none;margin:0 0 26px;padding:0;text-align:center;color:var(--cream);line-height:1.5}

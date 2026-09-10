@@ -31,6 +31,7 @@
 ┌──────────┴──────────────────────────────────────────────────────┐
 │                    Express Backend (server/, :3006)              │
 │  index.js(路由) ─ dashscope.js ─ cache.js ─ tasks.js             │
+│  task-store.js(持久化) ─ task-controller.js(调度/恢复/幂等)       │
 │  render.js(ffmpeg) ─ ssh-tunnel.js + comfyui.js(远程 ComfyUI)    │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -255,3 +256,19 @@ ArtifactStore 版本与尝试记录、检查点、RunState，以及**仅模型�
 ## 国际化 (`i18n.js`)
 
 中英双语，`t(key, params)` 带 `{param}` 插值，`applyLang()` 替换所有 `[data-i18n]` 元素。
+
+## 审核、合规与可追溯性
+
+- 六个用户可见步骤保持不变；Prompt Agent 是按需调用的内部能力，接口与版本约定见 [PROMPT_AGENT.md](PROMPT_AGENT.md)。
+- `interactive`（Co-Create）即审核模式：人工批准步骤时，将决定、时间、操作者和模式写入已接受 Artifact 的 `provenance.review`；自动模式不能伪造人工审核记录。
+- 角色/场景图、镜头参考图、视频片段和最终成片均调用可插拔视觉合规层。本地 Tesseract 提供 OCR，FFmpeg 对视频定时抽帧；视觉相似度与公众人物识别可由外部 provider 提供。未配置或执行失败统一记为 `UNAVAILABLE`，不会伪装为通过。完整接口和门禁语义见 [VISUAL_COMPLIANCE.md](VISUAL_COMPLIANCE.md)。
+- 图片、视频与 ComfyUI 的每次生成尝试在 `itemLineage` 中记录实际 provider、model/modelVersion、workflowId/workflowHash、inputHash、outputHash 和上游任务 ID。失败或上游没有返回的信息保留为空，不填造证据。
+
+## 模型工程与复现证据
+
+- 推理档位：`config/inference-profiles.json`
+- 模型、精度和量化证据说明：[MODEL_ENGINEERING.md](MODEL_ENGINEERING.md)
+- 固定输入基准：`npm run benchmark`，输出 `reports/benchmark.json`
+- 可执行复现 Notebook：`notebooks/reproduce_and_benchmark.ipynb`
+
+本地 benchmark 测量的是工作流编译与证据提取，不冒充 GPU 端到端性能；真实 DGX 吞吐、显存和延迟应在目标机器上补测并写入报告预留字段。

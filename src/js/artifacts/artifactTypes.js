@@ -1,6 +1,7 @@
 export const ARTIFACT_SCHEMA_VERSION = 2;
 
 export const ArtifactKind = Object.freeze({
+  PROMPT_PACKAGE: 'promptPackage',
   SCRIPT: 'script',
   CHARACTER_DESIGN: 'characterDesign',
   STORYBOARD: 'storyboard',
@@ -91,6 +92,19 @@ export function recordItemAttempt(artifact, itemId, attemptData) {
   artifact.itemLineage[itemId].attempts.push({
     attemptNumber: artifact.itemLineage[itemId].attempts.length + 1,
     timestamp: Date.now(),
+    promptPackageId: attemptData.promptPackageId ?? null,
+    promptPackageVersion: attemptData.promptPackageVersion ?? null,
+    plannedMode: attemptData.plannedMode ?? null,
+    executedMode: attemptData.executedMode ?? attemptData.videoMode ?? null,
+    fallbackReason: attemptData.fallbackReason ?? null,
+    provider: attemptData.provider ?? null,
+    model: attemptData.model ?? null,
+    modelVersion: attemptData.modelVersion ?? null,
+    workflowId: attemptData.workflowId ?? null,
+    workflowHash: attemptData.workflowHash ?? null,
+    inputHash: attemptData.inputHash ?? null,
+    outputHash: attemptData.outputHash ?? null,
+    upstreamTaskId: attemptData.upstreamTaskId ?? null,
     seed: attemptData.seed ?? null,
     prompt: attemptData.prompt ?? null,
     referenceId: attemptData.referenceId ?? null,

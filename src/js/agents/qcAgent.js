@@ -1,3 +1,4 @@
+import { validatePromptPackage } from '../prompts/promptSchema.js';
 import { getActiveProvider } from '../providers/registry.js';
 import { chat } from '../providers/llm.js';
 import { addAgentMessage } from '../ui/render.js';
@@ -11,6 +12,13 @@ import { feedbackDirective, normalizeFeedback } from '../feedback.js';
 const CRITIQUE_SYSTEM = 'You are a film production quality reviewer. You evaluate the output of AI film agents for quality, coherence, and creativity. Reply ONLY with valid JSON. No markdown, no commentary, no code fences.';
 
 const CRITERIA = {
+  promptPackage: [
+    'Exactly one complete prompt spec per storyboard shot with consistent duration and legal entity IDs',
+    'Opening and closing frames and adjacent shots preserve continuous action and scene state',
+    'Stable appearance, outfit and setting constraints are present in every prompt',
+    'Visual, motion and audio descriptions are coherent and non-conflicting',
+    'No unauthorized IP, logos, watermarks or contradictory descriptions',
+  ],
   script: [
     'Story has a clear structure with episodes and segments',
     'Characters are visually distinctive with detailed appearance descriptions',
@@ -77,7 +85,7 @@ ${criteria.map((c, i) => `${i + 1}. ${c}`).join('\n')}
 ${contextStr}
 
 OUTPUT TO EVALUATE:
-${dataStr.substring(0, 3000)}
+${stepId === 'promptPackage' ? dataStr : dataStr.substring(0, 3000)}
 ${revision ? `\n${revision}\nTreat satisfaction of this requirement as mandatory. Judge the actual output, not the prompt's intent.` : ''}
 
 OUTPUT JSON SCHEMA:
@@ -255,9 +263,23 @@ export class QCAgent {
   }
 
   async process(ctx) {
+    if (this.stepId === 'promptPackage') {
+      const check = validatePromptPackage(ctx.data, ctx);
+      if (!check.valid) return { score: 0, verdict: QCVerdict.FAIL, source: 'structural', issues: check.errors, suggestions: [] };
+    }
     const consistency = checkConsistency(this.stepId, ctx.data, ctx.entities || {});
     const llm = await this.#runLLM(ctx);
     const isMultimodal = MULTIMODAL_STEPS.has(this.stepId);
+
+    if (this.stepId === 'promptPackage' && llm?.unavailable) {
+      return {
+        score: null,
+        verdict: QCVerdict.FAIL,
+        source: 'unavailable',
+        issues: [llm.error],
+        suggestions: ['Check the configured text API provider, balance, rate limit and network, then retry.'],
+      };
+    }
 
     // Text steps keep their existing semantics: no LLM critique → no score → null.
     if (!isMultimodal && !llm && !normalizeFeedback(ctx.feedback)) return null;
@@ -277,8 +299,12 @@ export class QCAgent {
 
     let raw;
     try {
-      raw = await chat(messages);
-    } catch {
+      raw = await chat(messages, { signal: ctx.signal });
+    } catch (error) {
+      if (this.stepId === 'promptPackage') {
+        const detail = error?.detail ? `: ${error.detail}` : '';
+        return { unavailable: true, error: `${error?.i18nKey || error?.message || 'Prompt QC request failed'}${detail}` };
+      }
       return null;
     }
 

@@ -188,7 +188,9 @@ OUTPUT JSON SCHEMA:
               "duration": "number — integer clip length in seconds, ${minClip}-${maxClip}",
               "description": "string — what happens in this shot",
               "camera": "string — camera movement: 'static', 'pan-left', 'pan-right', 'zoom-in', 'zoom-out', 'tracking', 'tilt-up'",
-              "prompt": "string — detailed English image generation prompt describing this exact frame, including characters, setting, lighting, mood, and camera angle",
+              "entryState": "string — subject positions, action and scene state at shot opening",
+              "exitState": "string — subject positions, action and scene state at shot closing, consistent with the next shot",
+              "prompt": "string — legacy English frame description for compatibility; final generation prompts are authored by the Prompt Engineer",
               "audio_description": "string — detailed English description of all audio elements for this shot: dialogue (character says...), sound effects (footsteps, door closing, glass breaking), ambient sounds (rain, wind, crowd noise), and music mood if any. Be specific about what can be heard."
             }
           ]
@@ -219,36 +221,6 @@ SHOT-TO-SHOT CONTINUITY — CRITICAL:
 - If a character is sitting in shot 1, they should still be sitting (or in the process of standing up) in shot 2 — not suddenly in a different location
 - End each segment on a visual that naturally leads into the next segment`;
     }
-  },
-
-  autoModeEval: {
-    system: `You are a video production director. For each storyboard shot, decide the best video generation mode.
-
-Available modes:
-- "firstFrame": Single first frame → video. Reliable, good for simple motion or static scenes.
-- "firstLastFrame": First + last frames → video. Best for shots with clear start/end compositions or transitions.
-- "referenceImage": Reference images → video. Best when character identity/consistency is critical and good reference images exist.
-
-Return JSON: { "assignments": [{ "shot_id": "...", "mode": "...", "reason": "..." }, ...] }
-
-Rules:
-- Prefer "firstFrame" for most shots — it is the most reliable.
-- Use "referenceImage" only when the shot prominently features a main character AND character design has good reference images.
-- Use "firstLastFrame" sparingly for shots with strong narrative arc (clear start and end state).
-- A "firstLastFrame" shot requires two independently generated images for that same shot: its own opening frame and its own closing frame.
-- Never reuse the first frame of the next shot as the current shot's last frame.
-- Return assignments for ALL shots in order.`,
-    buildUser(ctx) {
-      const shots = [];
-      for (const ep of (ctx.storyboard?.episodes || []))
-        for (const seg of (ep.segments || []))
-          for (const shot of (seg.shots || []))
-            shots.push({ shot_id: shot.shot_id, type: shot.type, description: shot.description, prompt: shot.prompt, camera: shot.camera });
-      const chars = (ctx.characterDesign?.characters || []).map(c => ({
-        name: c.name, hasSheet: !!(c.sheetPath || c.sheetUrl), hasPortrait: !!(c.imagePath || c.imageUrl),
-      }));
-      return `CHARACTER REFERENCES:\n${JSON.stringify(chars)}\n\nSHOTS (${shots.length}):\n${JSON.stringify(shots)}\n\nAssign a video mode to each shot.`;
-    },
   },
 };
 

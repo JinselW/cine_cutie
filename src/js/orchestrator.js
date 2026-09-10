@@ -1,3 +1,4 @@
+import { PromptAgent } from './agents/promptAgent.js';
 import { STEPS, dataKeyOf, producerStepOfDataKey } from './config.js';
 import { configureMemory, beginMemory, attachMemory, saveMemory, recordMemoryMessage } from './memory.js';
 import { state, resetState } from './state.js';
@@ -101,8 +102,9 @@ class Orchestrator {
     registerAgent('script', new ScriptAgent());
     registerAgent('storyboard', new StoryboardAgent());
     registerAgent('characterDesign', new CharacterAgent());
-    registerAgent('referenceImages', new ReferenceAgent());
-    registerAgent('videoGeneration', new VideoAgent());
+    const promptAgent = new PromptAgent();
+    registerAgent('referenceImages', new ReferenceAgent({ promptAgent }));
+    registerAgent('videoGeneration', new VideoAgent({ promptAgent }));
     registerAgent('postProduction', new EditorAgent());
     initObservability(this.#store);
     configureMemory(() => ({
@@ -123,6 +125,24 @@ class Orchestrator {
 
   get runState() {
     return this.#runState;
+  }
+
+  recordReviewDecision(stepId, decision = 'approved') {
+    if (state.mode !== 'interactive') return null;
+    const artifact = this.#store.getAcceptedByStep(stepId);
+    if (!artifact) return null;
+    const review = {
+      decision,
+      reviewedAt: Date.now(),
+      actor: 'human',
+      mode: 'interactive',
+    };
+    artifact.provenance = { ...(artifact.provenance || {}), review };
+    artifact.updatedAt = review.reviewedAt;
+    recordMemoryMessage('system', `Human review: ${stepId} ${decision}`, stepId);
+    this.#persistWorkflow();
+    saveMemory('running');
+    return structuredClone(review);
   }
 
   async startPipeline() {
@@ -334,6 +354,10 @@ class Orchestrator {
     }
     if (missing.length > 0) throw new MissingUpstreamError(step.id, missing);
 
+    if (step.id === 'referenceImages' || step.id === 'videoGeneration') {
+      const current = this.#store.getAcceptedByStep(step.id) || (step.id === 'referenceImages' ? this.#store.getLatestByStep(step.id) : null);
+      if (current?.data?.promptPackage) ctx.promptPackage = current.data.promptPackage;
+    }
     return ctx;
   }
 
@@ -894,6 +918,10 @@ export function clearSession() {
 
 export function persistWorkflow() {
   return getOrchestrator().persistWorkflow();
+}
+
+export function recordReviewDecision(stepId, decision) {
+  return getOrchestrator().recordReviewDecision(stepId, decision);
 }
 
 export function pausePipeline() {

@@ -1,3 +1,4 @@
+import { PromptAgent } from './promptAgent.js';
 import { BaseAgent } from './baseAgent.js';
 import { RetryAgent, ItemRetryStrategy } from './retryAgent.js';
 import { QCAgent, SCORE_THRESHOLD, reportScore, reportRetry } from './qcAgent.js';
@@ -10,56 +11,46 @@ import { t } from '../i18n.js';
 import { reportPhase } from '../progressTracker.js';
 import { buildVideoModeCandidates, isVideoModelUnavailableError } from '../videoModePlanning.js';
 import { escapeHtml } from '../utils.js';
-import { appendFeedback, appendPromptGuidance } from '../feedback.js';
+import { checkVisualMediaBatch } from '../compliance/visualCompliance.js';
+import { QCVerdict } from './qcTypes.js';
 
 const MAX_ITEM_ATTEMPTS = 3;
 const MAX_STAGE_RETRIES = 1;
 // 参考生视频模型最多接受 5 张参考图
 const MAX_REFERENCE_IMAGES = 5;
-// 分镜没给建议时长时的兜底：5 秒是所有视频模型都接受的档位
-const DEFAULT_CLIP_DURATION = 5;
-
-function applyVisualRetryFeedback(items, critique, userFeedback) {
-  for (const item of items) {
-    item.seed = (item.seed ?? 42) + 13;
-    item.prompt = appendPromptGuidance(item.prompt, {
-      feedback: userFeedback,
-      suggestions: critique.suggestions || [],
-    });
-  }
-}
-
-const CAMERA_MOTION_MAP = Object.freeze({
-  'pan-left': 'camera slowly pans left',
-  'pan-right': 'camera slowly pans right',
-  'tilt-up': 'camera slowly tilts up',
-  'tilt-down': 'camera slowly tilts down',
-  'zoom-in': 'camera slowly zooms in',
-  'zoom-out': 'camera slowly zooms out',
-  'dolly-in': 'camera dollies in',
-  'dolly-out': 'camera dollies out',
-  'static': 'static camera, subtle motion',
-  'tracking': 'camera tracks the subject smoothly',
-});
 
 export class VideoAgent extends BaseAgent {
   #retryAgent;
   #qcAgent;
 
-  constructor() {
+  #promptAgent;
+
+  constructor({ promptAgent = new PromptAgent() } = {}) {
     super({ name: 'Video Director', stepId: 'videoGeneration' });
+    this.#promptAgent = promptAgent;
     this.#retryAgent = new RetryAgent();
     this.#qcAgent = new QCAgent({ stepId: 'videoGeneration' });
   }
 
   async run(ctx, _token) {
+    ctx = { ...ctx, triggeredBy: 'VideoAgent', signal: _token?.signal };
+    if (!this.#storyboardShots(ctx).length && ctx.uploads) {
+      ctx.storyboard = { episodes: [{ segments: [{ shots: Array.from({ length: Math.max(1, Math.ceil((ctx.totalDuration || 30) / 5)) }, (_, i) => ({ shot_id: 'upload_clip_' + i, duration: 5, description: ctx.userInput || 'Uploaded scene' })) }] }] };
+    }
+    // A stale package must never be reused, but it must not abort the step either: the
+    // video stage cannot author prompts, so it rebuilds them deterministically and says so.
+    const candidates = [ctx.promptPackage, ctx.referenceImages?.promptPackage].filter(Boolean);
+    const reusable = candidates.find(candidate => this.#promptAgent.compatible(candidate, ctx));
+    if (!reusable && candidates.length) addAgentMessage('✍️', t('promptAgent.videoPackageRebuilt'));
+    ctx.promptPackage = reusable ? structuredClone(reusable) : this.#promptAgent.migrateLegacy(ctx);
+    addAgentMessage('✍️', t('promptAgent.videoUsingPackage', { version: ctx.promptPackage.version }));
     const hasUploads = ctx.uploads && (ctx.uploads.firstFrame || ctx.uploads.lastFrame || ctx.uploads.referenceImages?.length > 0);
 
     if (hasUploads) {
       return this.#runWithUploads(ctx, _token);
     }
 
-    const refImages = ctx.referenceImages;
+    const refImages = ctx.referenceImages || { shots: ctx.promptPackage.data.shots.map(s => ({ shot_id: s.shotId, videoMode: s.mode })) };
     if (!refImages?.shots?.length) return this.#emptyResult(ctx);
 
     const mode = this.#videoMode();
@@ -90,6 +81,7 @@ export class VideoAgent extends BaseAgent {
       const results = await this.#generateItems(items, artifact, ctx, _token);
       const data = this.#assembleResult(results, refImages, mode);
 
+      data.promptPackage = structuredClone(ctx.promptPackage);
       reportPhase('validating');
       const crit = await this.#qcAgent.process({ data, entities: ctx.entities || {}, ...ctx });
       reportScore(crit.score, '🎥');
@@ -99,15 +91,21 @@ export class VideoAgent extends BaseAgent {
       if (crit.source === 'structural') break;
 
       reportRetry(crit.score, attempt + 1, MAX_STAGE_RETRIES, '🎥');
-      applyVisualRetryFeedback(items, crit, ctx.feedback);
+      for (const item of items) item.seed += 13;
     }
 
     const finalData = bestData || { mode, clips: [] };
     const complete = finalData.clips.filter(c => c.status === 'complete').length;
     const fallbackClips = finalData.clips.filter(c => c.plannedVideoMode && c.plannedVideoMode !== c.videoMode).length;
 
-    artifact.data = finalData;
-    artifact.status = complete > 0 ? ArtifactStatus.COMPLETE : ArtifactStatus.FAILED;
+    finalData.visualCompliance = await checkVisualMediaBatch(finalData.clips
+      .filter(clip => clip.status === 'complete' && clip.videoPath)
+      .map(clip => ({ id: clip.shot_id, mediaRef: clip.videoPath, type: 'video' })),
+    { stage: 'videoGeneration', type: 'video', signal: _token?.signal });
+    const visualBlocked = finalData.visualCompliance.verdict === QCVerdict.FAIL;
+
+    artifact.data = { ...finalData, promptPackage: finalData.promptPackage || ctx.promptPackage };
+    artifact.status = complete > 0 && !visualBlocked ? ArtifactStatus.COMPLETE : ArtifactStatus.FAILED;
 
     return {
       artifacts: [artifact],
@@ -120,7 +118,8 @@ export class VideoAgent extends BaseAgent {
         fallbackUsed: fallbackClips > 0,
         qualityScore: bestCrit?.score ?? 0,
         consistencyIssues: bestCrit?.consistency?.issues || [],
-        verdict: bestCrit?.verdict ?? null,
+        verdict: visualBlocked ? QCVerdict.FAIL : bestCrit?.verdict ?? null,
+        visualCompliance: finalData.visualCompliance,
         feedbackSatisfied: bestCrit?.feedbackSatisfied ?? !ctx.feedback,
       },
     };
@@ -134,18 +133,14 @@ export class VideoAgent extends BaseAgent {
     const items = [];
 
     for (let i = 0; i < shotCount; i++) {
-      const sbShot = allStoryboardShots[i];
-      const prompt = sbShot?.description || sbShot?.prompt || `Scene ${i + 1}`;
-      const camera = sbShot?.camera || '';
-      const motion = CAMERA_MOTION_MAP[camera] || 'subtle natural motion';
-      const audio = sbShot?.audio_description || '';
-      const parts = [prompt, motion];
-      if (audio) parts.push(audio);
-      const videoPrompt = appendFeedback(parts.join(', '), ctx.feedback);
-
+      const spec = ctx.promptPackage.data.shots[i];
+      if (!spec) continue;
+      const adapted = this.#promptAgent.adaptForProvider({ promptPackage: ctx.promptPackage, shotId: spec.shotId, provider: getActiveProvider('video')?.id, executedMode: uploads.referenceImages?.length ? 'referenceImage' : uploads.lastFrame ? 'firstLastFrame' : 'firstFrame' });
       items.push({
+        ...adapted,
+        shotId: spec.shotId,
         id: `upload_clip_${i}`,
-        prompt: videoPrompt,
+        prompt: adapted.prompt,
         imageUrl: uploads.firstFrame?.serverPath || uploads.referenceImages?.[0]?.serverPath || '',
         seed: 42,
         referenceId: 'uploads',
@@ -173,6 +168,7 @@ export class VideoAgent extends BaseAgent {
         const r = resultById.get(item.id);
         return {
           shot_id: item.id,
+          promptShotId: item.shotId, plannedMode: item.plannedMode, executedMode: item.videoMode, fallbackReason: item.fallbackReason,
           videoPath: r?.videoPath || '',
           status: r?.status === 'complete' ? 'complete' : 'failed',
         };
@@ -188,6 +184,7 @@ export class VideoAgent extends BaseAgent {
       const results = await this.#generateItemsWithUploads(items, artifact, ctx, _token);
       const data = assemble(results);
 
+      data.promptPackage = structuredClone(ctx.promptPackage);
       reportPhase('validating');
       const crit = await this.#qcAgent.process({ data, entities: ctx.entities || {}, ...ctx });
       reportScore(crit.score, '🎥');
@@ -197,14 +194,20 @@ export class VideoAgent extends BaseAgent {
       if (crit.source === 'structural') break;
 
       reportRetry(crit.score, attempt + 1, MAX_STAGE_RETRIES, '🎥');
-      applyVisualRetryFeedback(items, crit, ctx.feedback);
+      for (const item of items) item.seed += 13;
     }
 
     const finalData = bestData || { clips: [] };
     const complete = finalData.clips.filter(c => c.status === 'complete').length;
 
-    artifact.data = finalData;
-    artifact.status = complete > 0 ? ArtifactStatus.COMPLETE : ArtifactStatus.FAILED;
+    finalData.visualCompliance = await checkVisualMediaBatch(finalData.clips
+      .filter(clip => clip.status === 'complete' && clip.videoPath)
+      .map(clip => ({ id: clip.shot_id, mediaRef: clip.videoPath, type: 'video' })),
+    { stage: 'videoGeneration', type: 'video', signal: _token?.signal });
+    const visualBlocked = finalData.visualCompliance.verdict === QCVerdict.FAIL;
+
+    artifact.data = { ...finalData, promptPackage: finalData.promptPackage || ctx.promptPackage };
+    artifact.status = complete > 0 && !visualBlocked ? ArtifactStatus.COMPLETE : ArtifactStatus.FAILED;
 
     return {
       artifacts: [artifact],
@@ -214,7 +217,8 @@ export class VideoAgent extends BaseAgent {
         failedClips: finalData.clips.filter(c => c.status === 'failed').length,
         qualityScore: bestCrit?.score ?? 0,
         consistencyIssues: bestCrit?.consistency?.issues || [],
-        verdict: bestCrit?.verdict ?? null,
+        verdict: visualBlocked ? QCVerdict.FAIL : bestCrit?.verdict ?? null,
+        visualCompliance: finalData.visualCompliance,
         feedbackSatisfied: bestCrit?.feedbackSatisfied ?? !ctx.feedback,
       },
     };
@@ -239,7 +243,7 @@ export class VideoAgent extends BaseAgent {
     return Boolean(cfg.videoModel);
   }
 
-  #setNextMode(item) {
+  #setNextMode(item, ctx) {
     if (!Array.isArray(item.modeCandidates)) return false;
     const nextIndex = (item.modeIndex || 0) + 1;
     if (nextIndex >= item.modeCandidates.length) return false;
@@ -250,6 +254,7 @@ export class VideoAgent extends BaseAgent {
       ? item.referenceImages?.[0] || null
       : item.imagePath || item.imageUrl || null;
     this.#reportModeFallback(item.id, previousMode, item.videoMode);
+    this.#adaptItem(item, ctx);
     return true;
   }
 
@@ -273,17 +278,16 @@ export class VideoAgent extends BaseAgent {
 
   #buildItems(refImages, ctx, mode) {
     const characters = ctx.characterDesign?.characters || [];
-    const sbShots = this.#storyboardShots(ctx);
-    const sbById = new Map(sbShots.map(s => [s.shot_id, s]));
     const shots = refImages.shots || [];
     const items = [];
     const allowsTextFallback = getActiveProvider('video')?.id === 'video-comfy';
 
     for (let i = 0; i < shots.length; i++) {
       const shot = shots[i];
-      const preferredMode = mode === 'auto' ? (shot.videoMode || 'firstFrame') : mode;
-      const matchedChar = this.#matchCharacter(shot, characters);
-      const sbShot = sbById.get(shot.shot_id) || sbShots[i];
+      const spec = ctx.promptPackage.data.shots.find(s => s.shotId === shot.shot_id);
+      if (!spec) continue;
+      const preferredMode = spec.mode;
+      const matchedChar = characters.find(c => spec.bindings.characterIds.includes(c.id));
       const first = this.#firstFrameFor(shot, matchedChar);
       const referenceImages = this.#referenceListFor(shot, matchedChar);
       const usableMedia = value => {
@@ -306,8 +310,8 @@ export class VideoAgent extends BaseAgent {
       if (shotMode !== preferredMode) this.#reportModeFallback(shot.shot_id, preferredMode, shotMode);
       const base = {
         id: shot.shot_id,
-        prompt: appendFeedback(this.#buildVideoPrompt(shot, sbShot), ctx.feedback),
-        duration: this.#clipDuration(sbShot),
+        ...this.#promptAgent.adaptForProvider({ promptPackage: ctx.promptPackage, shotId: spec.shotId, provider: getActiveProvider('video')?.id, executedMode: shotMode }),
+        duration: spec.duration,
         seed: 42,
         plannedVideoMode: preferredMode,
         videoMode: shotMode,
@@ -319,22 +323,6 @@ export class VideoAgent extends BaseAgent {
       items.push({ ...base, referenceId: shotMode === 'referenceImage' ? referenceImages[0] : (first?.path || first?.url || null) });
     }
     return items;
-  }
-
-  // 分镜给的是建议秒数；服务端还会按所选模型支持的档位再夹一次
-  #clipDuration(sbShot) {
-    const seconds = Math.round(Number(sbShot?.duration));
-    return Number.isFinite(seconds) && seconds > 0 ? seconds : DEFAULT_CLIP_DURATION;
-  }
-
-  #matchCharacter(shot, characters) {
-    const shotText = ((shot.prompt || '') + ' ' + (shot.description || '')).toLowerCase();
-    for (const c of characters) {
-      if (!c.imageUrl && !c.imagePath) continue;
-      const names = [c.name, c.enName].filter(Boolean).map(n => String(n).toLowerCase());
-      if (names.some(n => n.length > 1 && shotText.includes(n))) return c;
-    }
-    return null;
   }
 
   // 步骤4的帧图已按定妆图做过图生图，优先用它当首帧；帧图缺失时才退回角色正面图
@@ -359,14 +347,9 @@ export class VideoAgent extends BaseAgent {
     return [...new Set(refs)].slice(0, MAX_REFERENCE_IMAGES);
   }
 
-  #buildVideoPrompt(shot, storyboardShot) {
-    const base = shot.prompt || `Scene of ${shot.shot_id}`;
-    const camera = storyboardShot?.camera || '';
-    const motion = CAMERA_MOTION_MAP[camera] || 'subtle natural motion';
-    const audio = storyboardShot?.audio_description || '';
-    const parts = [base, motion];
-    if (audio) parts.push(audio);
-    return parts.join(', ');
+  #adaptItem(item, ctx) {
+    Object.assign(item, this.#promptAgent.adaptForProvider({ promptPackage: ctx.promptPackage,
+      shotId: item.shotId || item.id, provider: getActiveProvider('video')?.id, executedMode: item.videoMode }));
   }
 
   async #generateItems(items, artifact, ctx, token) {
@@ -400,6 +383,11 @@ export class VideoAgent extends BaseAgent {
       const failedItems = [];
       for (const result of providerResults) {
         recordItemAttempt(artifact, result.id, {
+          ...(result.trace || {}),
+          promptPackageId: ctx.promptPackage.id, promptPackageVersion: ctx.promptPackage.version,
+          plannedMode: ctx.promptPackage.data.shots.find(s => s.shotId === (pending.find(i => i.id === result.id)?.shotId || result.id))?.mode,
+          executedMode: pending.find(i => i.id === result.id)?.videoMode || pending.find(i => i.id === result.id)?.shotMode,
+          fallbackReason: pending.find(i => i.id === result.id)?.fallbackReason,
           seed: batch.find(b => b.id === result.id)?.seed,
           prompt: batch.find(b => b.id === result.id)?.prompt,
           videoMode: batch.find(b => b.id === result.id)?.videoMode,
@@ -414,6 +402,7 @@ export class VideoAgent extends BaseAgent {
           const item = idx >= 0 ? pending[idx] : null;
           results.set(result.id, {
             ...result,
+            plannedMode: item?.plannedMode, executedMode: item?.videoMode, fallbackReason: item?.fallbackReason,
             plannedVideoMode: item?.plannedVideoMode,
             videoMode: item?.videoMode,
           });
@@ -422,7 +411,7 @@ export class VideoAgent extends BaseAgent {
           const item = pending.find(p => p.id === result.id);
           const canChangeMode = getConfig().videoMode === 'auto' || provider.id === 'video-comfy';
           const shouldChangeMode = result.status === 'skipped' || isVideoModelUnavailableError(result.error);
-          if (!(canChangeMode && shouldChangeMode && item && this.#setNextMode(item)) && result.status !== 'skipped') {
+          if (!(canChangeMode && shouldChangeMode && item && this.#setNextMode(item, ctx)) && result.status !== 'skipped') {
             failedItems.push({ itemId: result.id, error: result.error });
           }
         }
@@ -446,8 +435,10 @@ export class VideoAgent extends BaseAgent {
           if (!item) continue;
 
           if (plan.overrides.seed != null) item.seed = plan.overrides.seed;
-          if (plan.overrides.promptOverrides?.[plan.itemId]) {
-            item.prompt = plan.overrides.promptOverrides[plan.itemId];
+          if (plan.strategy === ItemRetryStrategy.REWRITE_PROMPT) {
+            try { ctx.promptPackage = await this.#promptAgent.reviseShotPrompt({ ...ctx, shotId: item.id, reason: failedItems.find(f => f.itemId === item.id)?.error }); }
+            catch (error) { if (!error.promptPackage) throw error; }
+            this.#adaptItem(item, ctx);
           }
           if (plan.overrides.referenceOverrides?.[plan.itemId]) {
             item.imageUrl = plan.overrides.referenceOverrides[plan.itemId];
@@ -466,6 +457,7 @@ export class VideoAgent extends BaseAgent {
           videoPath: '',
           status: 'failed',
           error: 'Max retries exceeded',
+          plannedMode: item.plannedMode, executedMode: item.videoMode, fallbackReason: item.fallbackReason,
           plannedVideoMode: item.plannedVideoMode,
           videoMode: item.videoMode,
         });
@@ -490,6 +482,8 @@ export class VideoAgent extends BaseAgent {
       const batch = pending.map(item => ({
         id: item.id,
         prompt: item.prompt,
+        duration: item.duration,
+        videoMode: item.videoMode,
         imageUrl: item.imageUrl,
         seed: item.seed,
       }));
@@ -504,6 +498,11 @@ export class VideoAgent extends BaseAgent {
       for (const result of providerResults) {
         const src = batch.find(b => b.id === result.id);
         recordItemAttempt(artifact, result.id, {
+          ...(result.trace || {}),
+          promptPackageId: ctx.promptPackage.id, promptPackageVersion: ctx.promptPackage.version,
+          plannedMode: ctx.promptPackage.data.shots.find(s => s.shotId === (pending.find(i => i.id === result.id)?.shotId || result.id))?.mode,
+          executedMode: pending.find(i => i.id === result.id)?.videoMode || pending.find(i => i.id === result.id)?.shotMode,
+          fallbackReason: pending.find(i => i.id === result.id)?.fallbackReason,
           seed: src?.seed,
           prompt: src?.prompt,
           referenceId: src?.imageUrl,
@@ -517,7 +516,15 @@ export class VideoAgent extends BaseAgent {
           if (idx >= 0) pending.splice(idx, 1);
         } else if (result.status !== 'skipped' && attempt < MAX_ITEM_ATTEMPTS - 1) {
           const item = pending.find(p => p.id === result.id);
-          if (item) item.seed = (item.seed ?? 42) + 13 * (attempt + 1) + 1;
+          if (item) {
+            const [plan] = this.#retryAgent.planItemRetry([{ itemId: item.id, error: result.error }], artifact.itemLineage, { feedback: ctx.feedback });
+            if (plan.strategy === ItemRetryStrategy.REWRITE_PROMPT) {
+              try { ctx.promptPackage = await this.#promptAgent.reviseShotPrompt({ ...ctx, shotId: item.shotId, reason: result.error }); }
+              catch (error) { if (!error.promptPackage) throw error; }
+              this.#adaptItem(item, ctx);
+            }
+            if (plan.overrides.seed != null) item.seed = plan.overrides.seed;
+          }
         }
       }
     }
@@ -554,6 +561,7 @@ export class VideoAgent extends BaseAgent {
       if (result) {
         return {
           shot_id: shot.shot_id,
+          plannedMode: result.plannedMode, executedMode: result.executedMode, fallbackReason: result.fallbackReason,
           plannedVideoMode: result.plannedVideoMode || shot.videoMode || 'firstFrame',
           videoMode: result.videoMode || shot.videoMode || 'firstFrame',
           videoModeReason: shot.videoModeReason || '',
@@ -562,7 +570,7 @@ export class VideoAgent extends BaseAgent {
         };
       }
       if (!shot.imagePath && !shot.imageUrl) {
-        return { shot_id: shot.shot_id, plannedVideoMode: shot.videoMode || 'firstFrame', videoMode: shot.videoMode || 'firstFrame', videoPath: '', status: 'skipped' };
+        return { shot_id: shot.shot_id, plannedMode: shot.videoMode || 'firstFrame', executedMode: null, fallbackReason: 'No usable input media or configured model', plannedVideoMode: shot.videoMode || 'firstFrame', videoMode: shot.videoMode || 'firstFrame', videoPath: '', status: 'skipped' };
       }
       return { shot_id: shot.shot_id, plannedVideoMode: shot.videoMode || 'firstFrame', videoMode: shot.videoMode || 'firstFrame', videoPath: '', status: 'failed' };
     });
@@ -587,7 +595,7 @@ export class VideoAgent extends BaseAgent {
       artifacts: [createArtifact({
         kind: ArtifactKind.VIDEO_CLIP,
         stepId: 'videoGeneration',
-        data: { mode, clips },
+        data: { mode, clips, promptPackage: ctx.promptPackage },
         status: ArtifactStatus.FAILED,
         sourceArtifactIds,
       })],

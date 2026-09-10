@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "defaultProfile": "balanced",
+  "profiles": {
+    "fast": {
+      "description": "比赛现场快速预览；使用 H3 Lightning 8-step LoRA 和较低像素预算。",
+      "enableLightning": true,
+      "megapixels": 0.4,
+      "maxConcurrentGpuJobs": 1
+    },
+    "balanced": {
+      "description": "默认成片配置；在统一内存设备上兼顾速度与清晰度。",
+      "enableLightning": true,
+      "megapixels": 0.7,
+      "maxConcurrentGpuJobs": 1
+    },
+    "quality": {
+      "description": "质量优先；关闭 Lightning，并提高像素预算。运行前应确认显存余量。",
+      "enableLightning": false,
+      "megapixels": 1.0,
+      "maxConcurrentGpuJobs": 1
+    }
+  },
+  "modelEngineering": {
+    "videoBackbone": "MiniMax H3 workflow-managed checkpoint",
+    "videoBackboneQuantization": "INT8 ConvRot (filename evidence: *_int8_convrot.safetensors)",
+    "textEncoderQuantization": "NVFP4 AWQ (filename evidence: *_nvfp4_awq.safetensors)",
+    "videoVaePrecision": "FP16",
+    "audioVaePrecision": "FP32",
+    "acceleration": "BF16 Lightning 8-step LoRA when enableLightning=true",
+    "disclaimer": "Precision claims are derived from checked-in workflow asset names. Benchmark runtime must verify the actually installed ComfyUI models."
+  }
+}

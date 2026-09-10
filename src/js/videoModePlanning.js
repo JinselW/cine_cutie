@@ -4,29 +4,6 @@ export const VIDEO_MODES_BY_SHOT = Object.freeze([
   'referenceImage',
 ]);
 
-const VALID_MODES = new Set(VIDEO_MODES_BY_SHOT);
-
-export function normalizeShotModeAssignments(shots, assignments) {
-  const byId = new Map();
-  for (const assignment of (Array.isArray(assignments) ? assignments : [])) {
-    const id = assignment?.shot_id;
-    if (id == null || !VALID_MODES.has(assignment?.mode)) continue;
-    byId.set(String(id), {
-      mode: assignment.mode,
-      reason: typeof assignment.reason === 'string' ? assignment.reason.trim() : '',
-    });
-  }
-
-  return shots.map(shot => {
-    const selected = byId.get(String(shot?.shot_id));
-    return {
-      shot,
-      mode: selected?.mode || 'firstFrame',
-      reason: selected?.reason || '',
-    };
-  });
-}
-
 export function buildVideoModeCandidates(preferred, assets, { allowText = false } = {}) {
   const available = new Set();
   const hasFirst = Boolean(assets?.imagePath || assets?.imageUrl);

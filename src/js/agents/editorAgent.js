@@ -6,6 +6,9 @@ import { chat, getConfig, isConfigured, parseJson } from '../providers/llm.js';
 import { createArtifact, ArtifactKind, ArtifactStatus } from '../artifacts/artifactTypes.js';
 import { QCVerdict } from './qcTypes.js';
 import { reportPhase } from '../progressTracker.js';
+import { buildFinalComplianceReport } from '../compliance/finalReport.js';
+import { compileSoundPlan } from '../audio/soundPlan.js';
+import { generateAudioOverlay } from '../audio/audioClient.js';
 
 const SCENE_TRANSITION = 0.5;
 const FADE_IO = 0.5;
@@ -27,6 +30,80 @@ function buildSceneMap(storyboard) {
   return map;
 }
 
+export function buildAudioTracks(soundPlan, clips, transitions = []) {
+  if (!soundPlan?.shots?.length || !clips?.length) return [];
+  const durations = clips.map(c => Math.max(0.1, Number(c.duration) || 5));
+  const starts = [0];
+  for (let i = 1; i < clips.length; i++) {
+    const overlap = transitions[i - 1]?.type === 'crossfade'
+      ? Math.max(0, Number(transitions[i - 1]?.duration) || 0) : 0;
+    starts[i] = Math.max(starts[i - 1], starts[i - 1] + durations[i - 1] - overlap);
+  }
+  const tracks = [];
+  for (let i = 0; i < clips.length && i < soundPlan.shots.length; i++) {
+    const shot = soundPlan.shots[i];
+    const offset = starts[i];
+    const duration = durations[i];
+    if (shot.dialogue || shot.narratorText) {
+      tracks.push({
+        type: 'tts',
+        text: shot.dialogue || shot.narratorText,
+        duration,
+        voiceProfile: shot.voiceProfile,
+        speakerId: shot.speakerId,
+        offset,
+      });
+    }
+    if (shot.ambiencePrompt || (shot.soundEffects && shot.soundEffects.length)) {
+      tracks.push({
+        type: 'sfx',
+        prompt: [shot.ambiencePrompt, ...(shot.soundEffects || [])].filter(Boolean).join('; '),
+        duration,
+        offset,
+      });
+    }
+  }
+  return tracks;
+}
+
+export function buildSubtitleCues(storyboard, script, clips, transitions = []) {
+  const shotInfo = new Map();
+  for (let epIdx = 0; epIdx < (storyboard?.episodes || []).length; epIdx++) {
+    const episode = storyboard.episodes[epIdx];
+    for (let segIdx = 0; segIdx < (episode.segments || []).length; segIdx++) {
+      for (const shot of (episode.segments[segIdx].shots || [])) {
+        shotInfo.set(String(shot.shot_id), { shot, epIdx, segIdx, key: `${epIdx}-${segIdx}` });
+      }
+    }
+  }
+  const durations = clips.map(clip => Math.max(0.1, Number(clip.duration ?? shotInfo.get(String(clip.shot_id))?.shot?.duration ?? 5) || 5));
+  const starts = [0];
+  for (let index = 1; index < clips.length; index++) {
+    const overlap = transitions[index - 1]?.type === 'crossfade'
+      ? Math.max(0, Number(transitions[index - 1]?.duration) || 0) : 0;
+    starts[index] = Math.max(starts[index - 1], starts[index - 1] + durations[index - 1] - overlap);
+  }
+  const cues = [];
+  for (let index = 0; index < clips.length;) {
+    const info = shotInfo.get(String(clips[index].shot_id));
+    const explicit = info?.shot?.subtitle || info?.shot?.caption || info?.shot?.dialogue;
+    if (explicit) {
+      const end = starts[index + 1] ?? (starts[index] + durations[index]);
+      cues.push({ start: starts[index], end, text: String(explicit).trim() });
+      index++;
+      continue;
+    }
+    const key = info?.key;
+    let endIndex = index + 1;
+    while (key && endIndex < clips.length && shotInfo.get(String(clips[endIndex].shot_id))?.key === key) endIndex++;
+    const end = starts[endIndex] ?? (starts[endIndex - 1] + durations[endIndex - 1]);
+    const text = info ? script?.episodes?.[info.epIdx]?.segments?.[info.segIdx]?.dialogue : '';
+    if (String(text || '').trim()) cues.push({ start: starts[index], end, text: String(text).trim() });
+    index = endIndex;
+  }
+  return cues;
+}
+
 export class EditorAgent extends BaseAgent {
   #qcAgent;
 
@@ -45,6 +122,9 @@ export class EditorAgent extends BaseAgent {
     const finalData = result;
     const hasFinal = !!finalData.finalVideo;
 
+    if (result?.soundPlan) finalData.soundPlan = result.soundPlan;
+    if (result?.audioResult) finalData.audioResult = result.audioResult;
+
     // Delivery QC combines deterministic media checks with multimodal creative review.
     reportPhase('validating');
     const crit = await this.#qcAgent.process({ data: finalData, entities: ctx.entities || {}, ...ctx });
@@ -60,6 +140,19 @@ export class EditorAgent extends BaseAgent {
       repairPlan: crit.repairPlan || null,
       failureReasons: crit.issues || [],
     };
+    finalData.complianceReport = await buildFinalComplianceReport({
+      userInput: ctx.userInput,
+      data: {
+        script: ctx.script,
+        characterDesign: ctx.characterDesign,
+        storyboard: ctx.storyboard,
+        referenceImages: ctx.referenceImages,
+        videoClips: ctx.videoClips,
+      },
+      uploads: ctx.uploads,
+      finalVideo: finalData.finalVideo,
+      signal: _token?.signal,
+    });
 
     const sourceArtifactIds = ctx.sourceArtifactIds?.videoGeneration ? [ctx.sourceArtifactIds.videoGeneration] : [];
 
@@ -77,6 +170,7 @@ export class EditorAgent extends BaseAgent {
         qualityScore: crit.score,
         consistencyIssues: crit.consistency?.issues || [],
         qcBaseline: finalData.qcBaseline,
+        complianceReport: finalData.complianceReport,
         verdict: crit.verdict ?? (hasFinal ? null : QCVerdict.FAIL),
         feedbackSatisfied: crit.feedbackSatisfied ?? !ctx.feedback,
       },
@@ -117,6 +211,18 @@ export class EditorAgent extends BaseAgent {
           : { type: 'cut', duration: 0 });
       }
 
+      const soundPlan = compileSoundPlan({
+        storyboard: ctx.storyboard,
+        script: ctx.script,
+        characterDesign: ctx.characterDesign,
+      });
+
+      const audioTracks = buildAudioTracks(soundPlan, valid, transitions);
+      let audioResult = null;
+      if (audioTracks.length > 0) {
+        audioResult = await generateAudioOverlay({ tracks: audioTracks, signal: token?.signal });
+      }
+
       const items = valid.map(c => ({ id: c.shot_id, videoPath: c.videoPath, status: c.status }));
       const configuredBgm = getConfig().bgm || {};
       const bgm = {
@@ -130,6 +236,8 @@ export class EditorAgent extends BaseAgent {
         fadeIn: editPlan.fadeIn,
         fadeOut: editPlan.fadeOut,
         bgm,
+        subtitles: buildSubtitleCues(ctx.storyboard, ctx.script, valid, transitions),
+        audioOverlay: audioResult?.mixedAudioPath ? { path: audioResult.mixedAudioPath } : null,
         signal: token?.signal,
       });
       return {
@@ -137,8 +245,11 @@ export class EditorAgent extends BaseAgent {
         finalVideo: result.finalVideo,
         status: result.status,
         bgm: bgm?.enabled ? { enabled: true, path: bgm.path || '', volume: bgm.volume ?? 0.6 } : null,
+        subtitles: result.subtitles || null,
         qcBaseline: result.qcBaseline || null,
         editPlan,
+        soundPlan,
+        audioResult,
       };
     } catch {
       return null;

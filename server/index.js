@@ -6,13 +6,19 @@ import { createMemoryRouter } from './memory.js';
 import { LRUCache } from './cache.js';
 import { submitImageTask, submitImageEditTask, parseImageResultUrl, submitVideoTask, submitVideoTaskV2, submitLegacyReferenceVideoTask, pollTask, downloadFile, detectVideoMode, hasVideoUploads, fileToDataUri } from './dashscope.js';
 import { isArkModel, isArkVideoModel, isArkImageModel, submitArkVideoTask, submitArkImageTask, pollArkTask, parseArkVideoUrl } from './ark.js';
-import { createTask, getTask, updateTask, cancelTask, isTaskCancelled, cleanupTasks } from './tasks.js';
-import { concatVideos, checkFfmpeg, renderWithTransitions, probeStreams, probeAudioQuality, probeVisualDefects, applyBgm, sanitizeVolume } from './render.js';
-import { submitWorkflow, pollUntilDone, downloadOutput, uploadImageToComfy, checkComfyUIStatus, getComfyMonitorStatus, selectWorkflowMode, cancelPrompt, MAX_COMFY_REFERENCE_IMAGES } from './comfyui.js';
+import { getTask, updateTask, isTaskCancelled, listTasks, initTaskStore } from './tasks.js';
+import { TaskController } from './task-controller.js';
+import { FileTaskStore, InMemoryTaskStore } from './task-store.js';
+import { concatVideos, checkFfmpeg, renderWithTransitions, probeStreams, probeAudioQuality, probeVisualDefects, applyBgm, applySubtitles, sanitizeVolume } from './render.js';
+import { generateAudioAsset, mixAudioTimeline, applyAudioOverlay, buildAudioLineageEntry } from './audio-mix.js';
+import { submitWorkflow, pollUntilDone, downloadOutput, uploadImageToComfy, checkComfyUIStatus, getComfyMonitorStatus, selectWorkflowMode, cancelPrompt, getWorkflowIdentity, MAX_COMFY_REFERENCE_IMAGES } from './comfyui.js';
 import { ensureTunnel, closeTunnel, getTunnelStatus, deleteComfyInputFiles, getDgxMetrics } from './ssh-tunnel.js';
+import { resolveInferenceOptions } from './inference-profiles.js';
+import { inspectMedia } from './visual-compliance.js';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
+import { createHash } from 'crypto';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -21,6 +27,14 @@ const PORT = process.env.PORT || 3006;
 
 const MEDIA_DIR = process.env.MEDIA_DIR || path.join(__dirname, '..', 'media');
 fs.mkdirSync(MEDIA_DIR, { recursive: true });
+
+function fileSha256(filePath) {
+  return createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
+}
+
+function valueSha256(value) {
+  return createHash('sha256').update(JSON.stringify(value)).digest('hex');
+}
 
 const UPLOADS_DIR = path.join(MEDIA_DIR, 'uploads');
 fs.mkdirSync(UPLOADS_DIR, { recursive: true });
@@ -54,8 +68,19 @@ function cleanupMedia() {
 cleanupMedia();
 setInterval(cleanupMedia, 24 * 60 * 60 * 1000);
 
-// Clean up completed tasks older than 1 hour, every 10 minutes
-setInterval(() => cleanupTasks(3600000), 10 * 60 * 1000);
+// Task controller: persistent task state, recovery, idempotency, concurrency
+const TASK_STORE_DIR = process.env.TASK_STORE_DIR || path.join(__dirname, '..', 'data', 'tasks');
+const taskStore = process.env.NODE_ENV === 'test'
+  ? new InMemoryTaskStore()
+  : new FileTaskStore(TASK_STORE_DIR);
+initTaskStore(taskStore);
+
+const controller = new TaskController({
+  store: taskStore,
+  maxConcurrency: Number(process.env.TASK_MAX_CONCURRENCY) || 4,
+  perOwnerLimit: Number(process.env.TASK_PER_OWNER_LIMIT) || 2,
+  retentionMs: (Number(process.env.TASK_RETENTION_HOURS) || 1) * 3600000,
+});
 
 function isPathWithinDir(filePath, allowedDir) {
   if (typeof filePath !== 'string' || !filePath) return false;
@@ -198,6 +223,24 @@ async function extractPromptText(file) {
 }
 
 app.use(express.json({ limit: '10mb' }));
+
+app.post('/api/compliance/visual', async (req, res) => {
+  const { mediaRef, type = 'image', intervalSeconds, maxFrames } = req.body || {};
+  const filePath = safeResolveMediaPath(mediaRef);
+  if (!filePath) return res.status(400).json({ error: 'mediaRef must identify an existing server media file' });
+  if (!['image', 'video'].includes(type)) return res.status(400).json({ error: 'type must be image or video' });
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  req.once('aborted', abort);
+  res.once('close', () => { if (!res.writableEnded) abort(); });
+  try {
+    const result = await inspectMedia(filePath, { type, source: mediaRef, intervalSeconds, maxFrames, signal: controller.signal });
+    return res.json(result);
+  } catch (error) {
+    if (error.name === 'AbortError') return;
+    return res.status(500).json({ error: error.message });
+  }
+});
 app.use('/api/memory', createMemoryRouter(process.env.MEMORY_DIR || path.join(__dirname, '..', 'data', 'memory')));
 
 app.use((req, res, next) => {
@@ -294,116 +337,137 @@ app.post('/api/generate/image', async (req, res) => {
     return res.status(400).json({ error: `Too many prompts (max ${MAX_PROMPTS})` });
   }
 
-  const task = createTask('image', { total: prompts.length });
+  const idempotencyKey = req.headers['idempotency-key'] || null;
+  const owner = req.headers['x-owner'] || null;
+  const requestHash = valueSha256({ prompts, model, size, seed, seeds, refs, img2imgModel, img2imgSize });
 
-  (async () => {
-    const results = [];
-    console.log(`[ImageBatch] task=${task.id} starting ${prompts.length} images`);
-    for (let i = 0; i < prompts.length; i++) {
-      if (isTaskCancelled(task.id)) break;
-      const itemSeed = Array.isArray(seeds) && seeds[i] != null ? seeds[i] : seed;
-      const itemRefs = Array.isArray(refs) ? refs[i] : null;
-      let lastError = null;
-      for (let retry = 0; retry <= 2; retry++) {
-        if (isTaskCancelled(task.id)) { lastError = 'Cancelled'; break; }
-        if (retry > 0) {
-          console.log(`[ImageBatch] task=${task.id} image ${i + 1} retry ${retry}/2 after 3s`);
-          await new Promise(r => setTimeout(r, 3000));
-        }
-        try {
-          console.log(`[ImageBatch] task=${task.id} image ${i + 1}/${prompts.length}`);
-          updateTask(task.id, { status: 'running', current: i + 1, progress: Math.round((i / prompts.length) * 100) });
+  const result = await controller.submitTask({
+    type: 'image',
+    requestHash,
+    idempotencyKey,
+    owner,
+    total: prompts.length,
+    requestSummary: { model, provider, promptCount: prompts.length },
+    worker: async (task) => {
+      const results = [];
+      console.log(`[ImageBatch] task=${task.id} starting ${prompts.length} images`);
+      for (let i = 0; i < prompts.length; i++) {
+        if (isTaskCancelled(task.id)) break;
+        const itemSeed = Array.isArray(seeds) && seeds[i] != null ? seeds[i] : seed;
+        const itemRefs = Array.isArray(refs) ? refs[i] : null;
+        let lastError = null;
+        let upstreamTaskId = null;
+        const effectiveImageModel = itemRefs?.length ? (img2imgModel || model) : model;
+        const imageTrace = outputPath => ({
+          provider, model: effectiveImageModel, modelVersion: effectiveImageModel,
+          workflowId: null, workflowHash: null,
+          inputHash: valueSha256({ prompt: prompts[i], seed: itemSeed, refs: itemRefs || [], model: effectiveImageModel }),
+          outputHash: outputPath ? fileSha256(outputPath) : null,
+          upstreamTaskId,
+        });
+        for (let retry = 0; retry <= 2; retry++) {
+          if (isTaskCancelled(task.id)) { lastError = 'Cancelled'; break; }
+          if (retry > 0) {
+            console.log(`[ImageBatch] task=${task.id} image ${i + 1} retry ${retry}/2 after 3s`);
+            await new Promise(r => setTimeout(r, 3000));
+          }
+          try {
+            console.log(`[ImageBatch] task=${task.id} image ${i + 1}/${prompts.length}`);
+            updateTask(task.id, { status: 'running', current: i + 1, progress: Math.round((i / prompts.length) * 100), provider });
 
-          let imageUrl;
-          if (provider === 'ark') {
-            const refUrls = [];
-            if (itemRefs?.length) {
-              for (const ref of itemRefs) {
-                const localPath = resolveMediaRef(ref);
-                if (localPath) refUrls.push(await fileToDataUri(localPath));
+            let imageUrl;
+            if (provider === 'ark') {
+              const refUrls = [];
+              if (itemRefs?.length) {
+                for (const ref of itemRefs) {
+                  const localPath = resolveMediaRef(ref);
+                  if (localPath) refUrls.push(await fileToDataUri(localPath));
+                }
               }
-            }
-            imageUrl = await submitArkImageTask(prompts[i], {
-              model: itemRefs?.length && img2imgModel ? img2imgModel : model,
-              size: img2imgSize || size,
-              apiKey: mediaApiKey,
-              imageUrls: refUrls.length ? refUrls : undefined,
-            });
-          } else {
-            let taskId;
-            if (itemRefs?.length && img2imgModel) {
-              const dataUris = [];
-              for (const ref of itemRefs) {
-                const localPath = resolveMediaRef(ref);
-                if (localPath) dataUris.push(await fileToDataUri(localPath));
-              }
-              if (dataUris.length === 0) {
-                throw new Error(`Reference images not found on server: ${itemRefs.join(', ')}`);
-              }
-              taskId = await submitImageEditTask(prompts[i], dataUris, {
-                model: img2imgModel, size: img2imgSize || size, apiKey: mediaApiKey, seed: itemSeed
+              imageUrl = await submitArkImageTask(prompts[i], {
+                model: itemRefs?.length && img2imgModel ? img2imgModel : model,
+                size: img2imgSize || size,
+                apiKey: mediaApiKey,
+                imageUrls: refUrls.length ? refUrls : undefined,
               });
             } else {
-              taskId = await submitImageTask(prompts[i], { model, size, apiKey: mediaApiKey, seed: itemSeed });
+              let taskId;
+              if (itemRefs?.length && img2imgModel) {
+                const dataUris = [];
+                for (const ref of itemRefs) {
+                  const localPath = resolveMediaRef(ref);
+                  if (localPath) dataUris.push(await fileToDataUri(localPath));
+                }
+                if (dataUris.length === 0) {
+                  throw new Error(`Reference images not found on server: ${itemRefs.join(', ')}`);
+                }
+                taskId = await submitImageEditTask(prompts[i], dataUris, {
+                  model: img2imgModel, size: img2imgSize || size, apiKey: mediaApiKey, seed: itemSeed
+                });
+              } else {
+                taskId = await submitImageTask(prompts[i], { model, size, apiKey: mediaApiKey, seed: itemSeed });
+              }
+              upstreamTaskId = taskId;
+              updateTask(task.id, { upstreamTaskId });
+
+              let pollResult;
+              for (let attempt = 0; attempt < 120; attempt++) {
+                if (isTaskCancelled(task.id)) { lastError = 'Cancelled'; break; }
+                await new Promise(r => setTimeout(r, 3000));
+                pollResult = await pollTask(taskId, mediaApiKey);
+                const status = pollResult.output?.task_status;
+                if (status === 'SUCCEEDED' || status === 'FAILED') break;
+              }
+
+              if (lastError === 'Cancelled') break;
+
+              if (pollResult?.output?.task_status === 'SUCCEEDED') {
+                imageUrl = parseImageResultUrl(pollResult);
+              } else {
+                const errMsg = pollResult?.output?.message || 'Task failed';
+                lastError = errMsg;
+                console.log(`[ImageBatch] task=${task.id} image ${i + 1} FAILED: ${errMsg}`);
+              }
             }
 
-            let pollResult;
-            for (let attempt = 0; attempt < 120; attempt++) {
-              if (isTaskCancelled(task.id)) { lastError = 'Cancelled'; break; }
-              await new Promise(r => setTimeout(r, 3000));
-              pollResult = await pollTask(taskId, mediaApiKey);
-              const status = pollResult.output?.task_status;
-              if (status === 'SUCCEEDED' || status === 'FAILED') break;
+            if (imageUrl) {
+              const filename = `img_${task.id}_${i}.png`;
+              const savePath = path.join(MEDIA_DIR, filename);
+              await downloadFile(imageUrl, savePath);
+              results.push({ index: i, status: 'ok', path: `/api/media/${filename}`, imageUrl, prompt: prompts[i], trace: imageTrace(savePath) });
+              console.log(`[ImageBatch] task=${task.id} image ${i + 1} OK`);
+              lastError = null;
+              break;
+            } else if (!lastError) {
+              lastError = 'No image URL in response';
+              console.log(`[ImageBatch] task=${task.id} image ${i + 1} FAILED: no URL`);
             }
-
-            if (lastError === 'Cancelled') break;
-
-            if (pollResult?.output?.task_status === 'SUCCEEDED') {
-              imageUrl = parseImageResultUrl(pollResult);
-            } else {
-              const errMsg = pollResult?.output?.message || 'Task failed';
-              lastError = errMsg;
-              console.log(`[ImageBatch] task=${task.id} image ${i + 1} FAILED: ${errMsg}`);
-            }
+          } catch (err) {
+            lastError = err.message;
+            console.log(`[ImageBatch] task=${task.id} image ${i + 1} ERROR: ${err.message}`);
           }
-
-          if (imageUrl) {
-            const filename = `img_${task.id}_${i}.png`;
-            const savePath = path.join(MEDIA_DIR, filename);
-            await downloadFile(imageUrl, savePath);
-            results.push({ index: i, status: 'ok', path: `/api/media/${filename}`, imageUrl, prompt: prompts[i] });
-            console.log(`[ImageBatch] task=${task.id} image ${i + 1} OK`);
-            lastError = null;
-            break;
-          } else if (!lastError) {
-            lastError = 'No image URL in response';
-            console.log(`[ImageBatch] task=${task.id} image ${i + 1} FAILED: no URL`);
-          }
-        } catch (err) {
-          lastError = err.message;
-          console.log(`[ImageBatch] task=${task.id} image ${i + 1} ERROR: ${err.message}`);
+        }
+        if (lastError && lastError !== 'Cancelled') {
+          results.push({ index: i, status: 'error', error: lastError, trace: imageTrace(null) });
         }
       }
-      if (lastError && lastError !== 'Cancelled') {
-        results.push({ index: i, status: 'error', error: lastError });
-      }
-    }
 
-    const successCount = results.filter(r => r.status === 'ok').length;
-    const cancelled = isTaskCancelled(task.id);
-    const finalStatus = cancelled ? 'cancelled' : 'completed';
-    console.log(`[ImageBatch] task=${task.id} ${finalStatus}: ${successCount}/${prompts.length} succeeded`);
-    updateTask(task.id, {
-      status: finalStatus,
-      progress: cancelled ? Math.round((successCount / prompts.length) * 100) : 100,
-      result: { images: results, total: prompts.length, success: successCount }
-    });
-  })().catch(err => {
-    console.error(`[ImageBatch] task=${task.id} FATAL: ${err.message}`);
-    updateTask(task.id, { status: 'failed', error: err.message });
+      const successCount = results.filter(r => r.status === 'ok').length;
+      const cancelled = isTaskCancelled(task.id);
+      const finalStatus = cancelled ? 'cancelled' : 'completed';
+      console.log(`[ImageBatch] task=${task.id} ${finalStatus}: ${successCount}/${prompts.length} succeeded`);
+      updateTask(task.id, {
+        status: finalStatus,
+        progress: cancelled ? Math.round((successCount / prompts.length) * 100) : 100,
+        result: { images: results, total: prompts.length, success: successCount }
+      });
+    },
   });
 
-  res.json({ taskId: task.id });
+  if (result.status === 'duplicate') return res.json({ taskId: result.task.id, duplicate: true });
+  if (result.status === 'conflict') return res.status(409).json({ error: 'Idempotency key conflict', existingTaskId: result.existingTask.id });
+
+  res.json({ taskId: result.task.id });
 });
 
 app.post('/api/upload/bgm', bgmUpload.single('file'), (req, res) => {
@@ -483,31 +547,51 @@ app.post('/api/generate/video', async (req, res) => {
     return res.status(400).json({ error: `${effectiveModel} accepts no reference images — pick wan2.6-r2v or wan2.7-r2v in Settings` });
   }
 
-  const task = createTask('video', { total: clips.length });
+  const idempotencyKey = req.headers['idempotency-key'] || null;
+  const owner = req.headers['x-owner'] || null;
+  const requestHash = valueSha256({ clips, model, duration, resolution, seed, aspectRatio, mode: clientMode, audio });
 
-  (async () => {
-    const results = [];
-    console.log(`[VideoBatch] task=${task.id} starting ${clips.length} clips, mode=${mode}, videoMode=${clientMode || 'n/a'}, model=${effectiveModel}`);
-    for (let i = 0; i < clips.length; i++) {
-      if (isTaskCancelled(task.id)) break;
-      const clip = clips[i];
+  const result = await controller.submitTask({
+    type: 'video',
+    requestHash,
+    idempotencyKey,
+    owner,
+    total: clips.length,
+    requestSummary: { model, provider, clipCount: clips.length, mode: clientMode || mode },
+    worker: async (task) => {
+      const results = [];
+      console.log(`[VideoBatch] task=${task.id} starting ${clips.length} clips, mode=${mode}, videoMode=${clientMode || 'n/a'}, model=${effectiveModel}`);
+      for (let i = 0; i < clips.length; i++) {
+        if (isTaskCancelled(task.id)) break;
+        const clip = clips[i];
+        let upstreamTaskId = null;
+        const videoTrace = outputPath => ({
+          provider, model: effectiveModel, modelVersion: effectiveModel,
+          workflowId: null, workflowHash: null,
+          inputHash: valueSha256({
+            prompt: clip.prompt, seed: clip.seed ?? seed, duration: clip.duration ?? duration,
+            model: effectiveModel, mode: clientMode || mode,
+          }),
+          outputHash: outputPath ? fileSha256(outputPath) : null,
+          upstreamTaskId,
+        });
 
-      let lastError = null;
-      for (let retry = 0; retry <= 2; retry++) {
-        if (isTaskCancelled(task.id)) { lastError = 'Cancelled'; break; }
-        if (retry > 0) {
-          console.log(`[VideoBatch] task=${task.id} clip ${i + 1} retry ${retry}/2 after 5s`);
-          await new Promise(r => setTimeout(r, 5000));
-        }
-        try {
-          console.log(`[VideoBatch] task=${task.id} clip ${i + 1}/${clips.length}`);
-          updateTask(task.id, { status: 'running', current: i + 1, progress: Math.round((i / clips.length) * 100) });
+        let lastError = null;
+        for (let retry = 0; retry <= 2; retry++) {
+          if (isTaskCancelled(task.id)) { lastError = 'Cancelled'; break; }
+          if (retry > 0) {
+            console.log(`[VideoBatch] task=${task.id} clip ${i + 1} retry ${retry}/2 after 5s`);
+            await new Promise(r => setTimeout(r, 5000));
+          }
+          try {
+            console.log(`[VideoBatch] task=${task.id} clip ${i + 1}/${clips.length}`);
+            updateTask(task.id, { status: 'running', current: i + 1, progress: Math.round((i / clips.length) * 100), provider });
 
-          let taskId;
+            let taskId;
 
-          if (provider === 'ark') {
-            const contentItems = [];
-            const addImage = (url, role) => { if (url) contentItems.push({ type: 'image_url', image_url: { url }, role }); };
+            if (provider === 'ark') {
+              const contentItems = [];
+              const addImage = (url, role) => { if (url) contentItems.push({ type: 'image_url', image_url: { url }, role }); };
 
             if (hasUploads) {
               if (uploads.firstFrame?.localPath) addImage(await fileToDataUri(uploads.firstFrame.localPath), 'first_frame');
@@ -535,204 +619,296 @@ app.post('/api/generate/video', async (req, res) => {
               apiKey: mediaApiKey, seed: clip.seed ?? seed, ratio: aspectRatio,
             });
           } else if (hasUploads) {
-            if (mode === 'r2v') {
-              const referenceUrls = [];
-              for (const ref of (uploads.referenceImages || []).slice(0, MAX_VIDEO_REFS)) {
-                if (ref.localPath) referenceUrls.push(await fileToDataUri(ref.localPath));
-              }
-              if (!referenceUrls.length) {
-                lastError = null;
-                results.push({ index: i, status: 'error', error: 'No valid reference media' });
-                break;
-              }
-              taskId = isV2Model(effectiveModel)
-                ? await submitVideoTaskV2(clip.prompt || 'Scene animation', referenceUrls.map(url => ({ type: 'reference_image', url })), {
-                  model: effectiveModel, duration: clip.duration ?? duration, resolution, apiKey, seed: clip.seed ?? seed, aspectRatio,
-                })
-                : await submitLegacyReferenceVideoTask(clip.prompt || 'character1 in a cinematic scene', referenceUrls, {
-                  model: effectiveModel, duration: clip.duration ?? duration, resolution, apiKey, seed: clip.seed ?? seed, aspectRatio, audio,
-                });
-            } else if (isV2Model(effectiveModel)) {
-              const mediaArray = [];
-              if (uploads.firstFrame?.localPath) {
-                const dataUri = await fileToDataUri(uploads.firstFrame.localPath);
-                mediaArray.push({ type: 'first_frame', url: dataUri });
-              }
-              if (uploads.lastFrame?.localPath) {
-                const dataUri = await fileToDataUri(uploads.lastFrame.localPath);
-                mediaArray.push({ type: 'last_frame', url: dataUri });
-              }
-              if (uploads.referenceImages?.length > 0) {
-                for (const ref of uploads.referenceImages) {
-                  if (ref.localPath) {
-                    const dataUri = await fileToDataUri(ref.localPath);
-                    mediaArray.push({ type: 'reference_image', url: dataUri });
+              if (isV2Model(effectiveModel)) {
+                const mediaArray = [];
+                if (uploads.firstFrame?.localPath) {
+                  const dataUri = await fileToDataUri(uploads.firstFrame.localPath);
+                  mediaArray.push({ type: 'first_frame', url: dataUri });
+                }
+                if (uploads.lastFrame?.localPath) {
+                  const dataUri = await fileToDataUri(uploads.lastFrame.localPath);
+                  mediaArray.push({ type: 'last_frame', url: dataUri });
+                }
+                if (uploads.referenceImages?.length > 0) {
+                  for (const ref of uploads.referenceImages) {
+                    if (ref.localPath) {
+                      const dataUri = await fileToDataUri(ref.localPath);
+                      mediaArray.push({ type: 'reference_image', url: dataUri });
+                    }
                   }
                 }
-              }
 
-              if (mediaArray.length === 0) {
-                lastError = null;
-                results.push({ index: i, status: 'error', error: 'No valid upload media' });
-                break;
-              }
+                if (mediaArray.length === 0) {
+                  lastError = null;
+                  results.push({ index: i, status: 'error', error: 'No valid upload media', trace: videoTrace(null) });
+                  break;
+                }
 
-              console.log(`[VideoBatch V2] task=${task.id} clip ${i + 1} media=${mediaArray.length} items`);
-              taskId = await submitVideoTaskV2(clip.prompt || 'Scene animation', mediaArray, {
-                model: effectiveModel, duration: clip.duration ?? duration, resolution, apiKey, seed: clip.seed ?? seed, aspectRatio, audio
-              });
-            } else {
-              const firstUrl = await fileToDataUri(uploads.firstFrame.localPath);
-              if (uploads.lastFrame?.localPath) {
-                console.warn(`[VideoBatch] task=${task.id} clip ${i + 1}: ${effectiveModel} only takes a first frame (input.img_url) — the uploaded last frame was ignored; choose a wan2.7 model in Settings for first+last frame video`);
-              }
-              console.log(`[VideoBatch] task=${task.id} clip ${i + 1} uploaded img_url=${firstUrl.slice(0, 60)}…`);
-              taskId = await submitVideoTask(clip.prompt || 'Scene animation', firstUrl, {
-                model: effectiveModel, duration: clip.duration ?? duration, resolution, apiKey, seed: clip.seed ?? seed, aspectRatio, audio
-              });
-            }
-          } else {
-            const clipRefs = Array.isArray(clip.referenceImages) ? clip.referenceImages.slice(0, MAX_VIDEO_REFS) : [];
-            const clipSeed = clip.seed ?? seed;
-            const clipDuration = clip.duration ?? duration;
-            const firstRef = clip.imagePath || clip.imageUrl;
-            const lastRef = clip.lastFramePath || clip.lastFrameUrl;
-
-            if (clipRefs.length) {
-              const referenceUrls = [];
-              for (const ref of clipRefs) {
-                const url = await toDashScopeImage(ref);
-                if (url) referenceUrls.push(url);
-              }
-              if (!referenceUrls.length) {
-                lastError = null;
-                results.push({ index: i, status: 'error', error: `Reference images not found on server: ${clipRefs.join(', ')}` });
-                console.log(`[VideoBatch] task=${task.id} clip ${i + 1} SKIPPED: no usable reference image`);
-                break;
-              }
-
-              console.log(`[VideoBatch r2v] task=${task.id} clip ${i + 1} refs=${referenceUrls.length}`);
-              if (isV2Model(effectiveModel)) {
-                taskId = await submitVideoTaskV2(
-                  clip.prompt || 'Scene animation',
-                  referenceUrls.map(url => ({ type: 'reference_image', url })),
-                  { model: effectiveModel, duration: clipDuration, resolution, apiKey, seed: clipSeed, aspectRatio },
-                );
-              } else if (isLegacyReferenceVideoModel(effectiveModel)) {
-                taskId = await submitLegacyReferenceVideoTask(clip.prompt || 'character1 in a cinematic scene', referenceUrls, {
-                  model: effectiveModel, duration: clipDuration, resolution, apiKey, seed: clipSeed, aspectRatio, audio,
+                console.log(`[VideoBatch V2] task=${task.id} clip ${i + 1} media=${mediaArray.length} items`);
+                taskId = await submitVideoTaskV2(clip.prompt || 'Scene animation', mediaArray, {
+                  model: effectiveModel, duration: clip.duration ?? duration, resolution, apiKey, seed: clip.seed ?? seed, aspectRatio, audio
                 });
               } else {
-                lastError = null;
-                results.push({ index: i, status: 'error', error: `${effectiveModel} is not a supported reference-to-video model` });
-                break;
+                const firstUrl = await fileToDataUri(uploads.firstFrame.localPath);
+                if (uploads.lastFrame?.localPath) {
+                  console.warn(`[VideoBatch] task=${task.id} clip ${i + 1}: ${effectiveModel} only takes a first frame (input.img_url) — the uploaded last frame was ignored; choose a wan2.7 model in Settings for first+last frame video`);
+                }
+                console.log(`[VideoBatch] task=${task.id} clip ${i + 1} uploaded img_url=${firstUrl.slice(0, 60)}…`);
+                taskId = await submitVideoTask(clip.prompt || 'Scene animation', firstUrl, {
+                  model: effectiveModel, duration: clip.duration ?? duration, resolution, apiKey, seed: clip.seed ?? seed, aspectRatio, audio
+                });
               }
             } else {
-              const firstUrl = await toDashScopeImage(firstRef);
-              if (!firstUrl) {
-                lastError = null;
-                results.push({ index: i, status: 'error', error: firstRef ? `First frame not found on server: ${firstRef}` : 'No first frame provided' });
-                console.log(`[VideoBatch] task=${task.id} clip ${i + 1} SKIPPED: no usable first frame`);
-                break;
-              }
+              const clipRefs = Array.isArray(clip.referenceImages) ? clip.referenceImages.slice(0, MAX_VIDEO_REFS) : [];
+              const clipSeed = clip.seed ?? seed;
+              const clipDuration = clip.duration ?? duration;
+              const firstRef = clip.imagePath || clip.imageUrl;
+              const lastRef = clip.lastFramePath || clip.lastFrameUrl;
 
-              if (isV2Model(effectiveModel)) {
-                const media = [{ type: 'first_frame', url: firstUrl }];
-                const lastUrl = await toDashScopeImage(lastRef);
-                if (lastUrl) media.push({ type: 'last_frame', url: lastUrl });
-                else if (lastRef) console.warn(`[VideoBatch] task=${task.id} clip ${i + 1} last frame unavailable (${lastRef}), using the first frame only`);
+              if (clipRefs.length) {
+                if (!isV2Model(effectiveModel)) {
+                  lastError = null;
+                  results.push({ index: i, status: 'error', error: `${effectiveModel} accepts no reference images — pick a wan2.7 r2v model in Settings`, trace: videoTrace(null) });
+                  console.log(`[VideoBatch] task=${task.id} clip ${i + 1} ERROR: ${effectiveModel} is not a reference-to-video model`);
+                  break;
+                }
 
-                console.log(`[VideoBatch V2] task=${task.id} clip ${i + 1} media=${media.length} items`);
+                const media = [];
+                for (const ref of clipRefs) {
+                  const url = await toDashScopeImage(ref);
+                  if (url) media.push({ type: 'reference_image', url });
+                }
+                if (!media.length) {
+                  lastError = null;
+                  results.push({ index: i, status: 'error', error: `Reference images not found on server: ${clipRefs.join(', ')}`, trace: videoTrace(null) });
+                  console.log(`[VideoBatch] task=${task.id} clip ${i + 1} SKIPPED: no usable reference image`);
+                  break;
+                }
+
+                console.log(`[VideoBatch r2v] task=${task.id} clip ${i + 1} refs=${media.length}`);
                 taskId = await submitVideoTaskV2(clip.prompt || 'Scene animation', media, {
                   model: effectiveModel, duration: clipDuration, resolution, apiKey, seed: clipSeed, aspectRatio, audio
                 });
               } else {
-                if (lastRef) {
-                  console.warn(`[VideoBatch] task=${task.id} clip ${i + 1}: ${effectiveModel} only takes a first frame (input.img_url) — the last frame was ignored; choose a wan2.7 model in Settings for first+last frame video`);
+                const firstUrl = await toDashScopeImage(firstRef);
+                if (!firstUrl) {
+                  lastError = null;
+                  results.push({ index: i, status: 'error', error: firstRef ? `First frame not found on server: ${firstRef}` : 'No first frame provided', trace: videoTrace(null) });
+                  console.log(`[VideoBatch] task=${task.id} clip ${i + 1} SKIPPED: no usable first frame`);
+                  break;
                 }
-                console.log(`[VideoBatch] task=${task.id} clip ${i + 1} img_url=${firstUrl.slice(0, 60)}…`);
-                taskId = await submitVideoTask(clip.prompt, firstUrl, {
-                  model: effectiveModel, duration: clipDuration, resolution, apiKey, seed: clipSeed, aspectRatio, audio
-                });
+
+                if (isV2Model(effectiveModel)) {
+                  const media = [{ type: 'first_frame', url: firstUrl }];
+                  const lastUrl = await toDashScopeImage(lastRef);
+                  if (lastUrl) media.push({ type: 'last_frame', url: lastUrl });
+                  else if (lastRef) console.warn(`[VideoBatch] task=${task.id} clip ${i + 1} last frame unavailable (${lastRef}), using the first frame only`);
+
+                  console.log(`[VideoBatch V2] task=${task.id} clip ${i + 1} media=${media.length} items`);
+                  taskId = await submitVideoTaskV2(clip.prompt || 'Scene animation', media, {
+                    model: effectiveModel, duration: clipDuration, resolution, apiKey, seed: clipSeed, aspectRatio, audio
+                  });
+                } else {
+                  if (lastRef) {
+                    console.warn(`[VideoBatch] task=${task.id} clip ${i + 1}: ${effectiveModel} only takes a first frame (input.img_url) — the last frame was ignored; choose a wan2.7 model in Settings for first+last frame video`);
+                  }
+                  console.log(`[VideoBatch] task=${task.id} clip ${i + 1} img_url=${firstUrl.slice(0, 60)}…`);
+                  taskId = await submitVideoTask(clip.prompt, firstUrl, {
+                    model: effectiveModel, duration: clipDuration, resolution, apiKey, seed: clipSeed, aspectRatio, audio
+                  });
+                }
               }
             }
-          }
 
-          let pollResult;
-          if (provider === 'ark') {
-            for (let attempt = 0; attempt < 240; attempt++) {
-              if (isTaskCancelled(task.id)) { lastError = 'Cancelled'; break; }
-              await new Promise(r => setTimeout(r, 5000));
-              pollResult = await pollArkTask(taskId, mediaApiKey);
-              const s = (pollResult.status || '').toLowerCase();
-              if (s === 'succeeded' || s === 'failed' || s === 'cancelled') break;
-            }
-          } else {
-            for (let attempt = 0; attempt < 240; attempt++) {
-              if (isTaskCancelled(task.id)) { lastError = 'Cancelled'; break; }
-              await new Promise(r => setTimeout(r, 5000));
-              pollResult = await pollTask(taskId, mediaApiKey);
-              const status = pollResult.output?.task_status;
-              if (status === 'SUCCEEDED' || status === 'FAILED') break;
-            }
-          }
-
-          if (lastError === 'Cancelled') break;
-
-          const isDone = provider === 'ark'
-            ? (pollResult?.status || '').toLowerCase() === 'succeeded'
-            : pollResult?.output?.task_status === 'SUCCEEDED';
-
-          if (isDone) {
-            const videoUrl = provider === 'ark' ? parseArkVideoUrl(pollResult) : pollResult.output.video_url;
-            if (videoUrl) {
-              const filename = `vid_${task.id}_${i}.mp4`;
-              const savePath = path.join(MEDIA_DIR, filename);
-              await downloadFile(videoUrl, savePath);
-              results.push({ index: i, status: 'ok', path: `/api/media/${filename}`, prompt: clip.prompt });
-              console.log(`[VideoBatch] task=${task.id} clip ${i + 1} OK`);
-              lastError = null;
-              break;
+            upstreamTaskId = taskId || upstreamTaskId;
+            updateTask(task.id, { upstreamTaskId });
+            let pollResult;
+            if (provider === 'ark') {
+              for (let attempt = 0; attempt < 240; attempt++) {
+                if (isTaskCancelled(task.id)) { lastError = 'Cancelled'; break; }
+                await new Promise(r => setTimeout(r, 5000));
+                pollResult = await pollArkTask(taskId, mediaApiKey);
+                const s = (pollResult.status || '').toLowerCase();
+                if (s === 'succeeded' || s === 'failed' || s === 'cancelled') break;
+              }
             } else {
-              lastError = 'No video URL in response';
-              console.log(`[VideoBatch] task=${task.id} clip ${i + 1} FAILED: no video URL`);
+              for (let attempt = 0; attempt < 240; attempt++) {
+                if (isTaskCancelled(task.id)) { lastError = 'Cancelled'; break; }
+                await new Promise(r => setTimeout(r, 5000));
+                pollResult = await pollTask(taskId, mediaApiKey);
+                const status = pollResult.output?.task_status;
+                if (status === 'SUCCEEDED' || status === 'FAILED') break;
+              }
             }
-          } else {
-            const errMsg = provider === 'ark'
-              ? (pollResult?.error?.message || pollResult?.status || 'Task failed')
-              : (pollResult?.output?.message || 'Task failed');
-            lastError = errMsg;
-            console.log(`[VideoBatch] task=${task.id} clip ${i + 1} FAILED: ${errMsg}`);
+
+            if (lastError === 'Cancelled') break;
+
+            const isDone = provider === 'ark'
+              ? (pollResult?.status || '').toLowerCase() === 'succeeded'
+              : pollResult?.output?.task_status === 'SUCCEEDED';
+
+            if (isDone) {
+              const videoUrl = provider === 'ark' ? parseArkVideoUrl(pollResult) : pollResult.output.video_url;
+              if (videoUrl) {
+                const filename = `vid_${task.id}_${i}.mp4`;
+                const savePath = path.join(MEDIA_DIR, filename);
+                await downloadFile(videoUrl, savePath);
+                upstreamTaskId = taskId || upstreamTaskId;
+                results.push({ index: i, status: 'ok', path: `/api/media/${filename}`, prompt: clip.prompt, trace: videoTrace(savePath) });
+                console.log(`[VideoBatch] task=${task.id} clip ${i + 1} OK`);
+                lastError = null;
+                break;
+              } else {
+                lastError = 'No video URL in response';
+                console.log(`[VideoBatch] task=${task.id} clip ${i + 1} FAILED: no video URL`);
+              }
+            } else {
+              const errMsg = provider === 'ark'
+                ? (pollResult?.error?.message || pollResult?.status || 'Task failed')
+                : (pollResult?.output?.message || 'Task failed');
+              lastError = errMsg;
+              console.log(`[VideoBatch] task=${task.id} clip ${i + 1} FAILED: ${errMsg}`);
+            }
+          } catch (err) {
+            lastError = err.message;
+            console.log(`[VideoBatch] task=${task.id} clip ${i + 1} ERROR: ${err.message}`);
           }
-        } catch (err) {
-          lastError = err.message;
-          console.log(`[VideoBatch] task=${task.id} clip ${i + 1} ERROR: ${err.message}`);
+        }
+        if (lastError && lastError !== 'Cancelled') {
+          results.push({ index: i, status: 'error', error: lastError, trace: videoTrace(null) });
         }
       }
-      if (lastError && lastError !== 'Cancelled') {
-        results.push({ index: i, status: 'error', error: lastError });
-      }
-    }
 
-    const successCount = results.filter(r => r.status === 'ok').length;
-    const cancelled = isTaskCancelled(task.id);
-    const finalStatus = cancelled ? 'cancelled' : 'completed';
-    console.log(`[VideoBatch] task=${task.id} ${finalStatus}: ${successCount}/${clips.length} succeeded`);
-    updateTask(task.id, {
-      status: finalStatus,
-      progress: cancelled ? Math.round((successCount / clips.length) * 100) : 100,
-      result: { clips: results, total: clips.length, success: successCount }
-    });
-  })().catch(err => {
-    console.error(`[VideoBatch] task=${task.id} FATAL: ${err.message}`);
-    updateTask(task.id, { status: 'failed', error: err.message });
+      const successCount = results.filter(r => r.status === 'ok').length;
+      const cancelled = isTaskCancelled(task.id);
+      const finalStatus = cancelled ? 'cancelled' : 'completed';
+      console.log(`[VideoBatch] task=${task.id} ${finalStatus}: ${successCount}/${clips.length} succeeded`);
+      updateTask(task.id, {
+        status: finalStatus,
+        progress: cancelled ? Math.round((successCount / clips.length) * 100) : 100,
+        result: { clips: results, total: clips.length, success: successCount }
+      });
+    },
   });
 
-  res.json({ taskId: task.id });
+  if (result.status === 'duplicate') return res.json({ taskId: result.task.id, duplicate: true });
+  if (result.status === 'conflict') return res.status(409).json({ error: 'Idempotency key conflict', existingTaskId: result.existingTask.id });
+
+  res.json({ taskId: result.task.id });
+});
+
+app.post('/api/audio/generate', async (req, res) => {
+  const { tracks } = req.body;
+  if (!Array.isArray(tracks) || tracks.length === 0) {
+    return res.status(400).json({ error: 'Missing tracks array' });
+  }
+
+  const hasFfmpeg = await checkFfmpeg();
+  if (!hasFfmpeg) {
+    return res.status(500).json({ error: 'ffmpeg not found on server' });
+  }
+
+  const idempotencyKey = req.headers['idempotency-key'] || null;
+  const owner = req.headers['x-owner'] || null;
+  const requestHash = valueSha256(tracks);
+
+  const result = await controller.submitTask({
+    type: 'audio',
+    requestHash,
+    idempotencyKey,
+    owner,
+    total: tracks.length,
+    requestSummary: { trackCount: tracks.length },
+    worker: async (task) => {
+      updateTask(task.id, { status: 'running', phase: 'generating', progress: 0 });
+
+      const generated = [];
+      for (let i = 0; i < tracks.length; i++) {
+        if (isTaskCancelled(task.id)) {
+          updateTask(task.id, { status: 'cancelled' });
+          return;
+        }
+        const t = tracks[i];
+        const type = t.type === 'tts' ? 'tts' : 'sfx';
+        const duration = Math.max(0.1, Math.min(60, Number(t.duration) || 5));
+        const outputFilename = `audio_${Date.now()}_${i}.m4a`;
+        const outputPath = path.join(MEDIA_DIR, outputFilename);
+
+        try {
+          const asset = await generateAudioAsset({
+            type,
+            text: typeof t.text === 'string' ? t.text.slice(0, 2000) : null,
+            prompt: typeof t.prompt === 'string' ? t.prompt.slice(0, 500) : null,
+            duration,
+            voiceProfile: typeof t.voiceProfile === 'string' ? t.voiceProfile : null,
+            speakerId: typeof t.speakerId === 'string' ? t.speakerId : null,
+            outputPath,
+            taskId: task.id,
+          });
+          generated.push({
+            index: i,
+            status: 'ok',
+            audioPath: `/api/media/${path.basename(outputPath)}`,
+            localPath: outputPath,
+            duration: asset.duration,
+            offset: Number(t.offset) || 0,
+            degraded: asset.degraded,
+            fallbackReason: asset.fallbackReason || null,
+            lineage: asset.lineage,
+          });
+        } catch (err) {
+          generated.push({ index: i, status: 'error', error: err.message });
+        }
+        updateTask(task.id, { progress: Math.round(((i + 1) / tracks.length) * 80) });
+      }
+
+      const successCount = generated.filter(r => r.status === 'ok').length;
+      let mixedPath = null;
+      let mixedLocalPath = null;
+
+      if (successCount > 0 && !isTaskCancelled(task.id)) {
+        try {
+          mixedLocalPath = path.join(MEDIA_DIR, `audio_mixed_${Date.now()}.m4a`);
+          const mixTracks = generated.filter(r => r.status === 'ok').map(r => ({
+            audioPath: r.localPath,
+            duration: r.duration,
+            offset: r.offset,
+          }));
+          await mixAudioTimeline(mixTracks, mixedLocalPath, { taskId: task.id });
+          mixedPath = `/api/media/${path.basename(mixedLocalPath)}`;
+        } catch (err) {
+          console.error(`[AudioGen] mix failed: ${err.message}`);
+        }
+      }
+
+      const cancelled = isTaskCancelled(task.id);
+      updateTask(task.id, {
+        status: cancelled ? 'cancelled' : 'completed',
+        progress: 100,
+        result: {
+          tracks: generated.map(r => ({ ...r, localPath: undefined })),
+          mixedAudioPath: mixedPath,
+          total: tracks.length,
+          success: successCount,
+        },
+      });
+
+      for (const r of generated) {
+        if (r.localPath && r.status === 'ok') {
+          try { fs.unlinkSync(r.localPath); } catch {}
+        }
+      }
+    },
+  });
+
+  if (result.status === 'duplicate') return res.json({ taskId: result.task.id, duplicate: true });
+  if (result.status === 'conflict') return res.status(409).json({ error: 'Idempotency key conflict', existingTaskId: result.existingTask.id });
+
+  res.json({ taskId: result.task.id });
 });
 
 app.post('/api/render/final', async (req, res) => {
-  const { videoPaths, transitions, fadeIn, fadeOut, bgm, bgmEnabled, bgmVolume } = req.body;
+  const { videoPaths, transitions, fadeIn, fadeOut, bgm, bgmEnabled, bgmVolume, subtitles, audioOverlay } = req.body;
 
   if (!Array.isArray(videoPaths) || videoPaths.length === 0) {
     return res.status(400).json({ error: 'Missing videoPaths array' });
@@ -743,139 +919,171 @@ app.post('/api/render/final', async (req, res) => {
     return res.status(500).json({ error: 'ffmpeg not found on server' });
   }
 
-  const task = createTask('render', { total: videoPaths.length });
+  const idempotencyKey = req.headers['idempotency-key'] || null;
+  const owner = req.headers['x-owner'] || null;
+  const requestHash = valueSha256({ videoPaths, transitions, fadeIn, fadeOut, bgm, bgmEnabled, bgmVolume, subtitles, audioOverlay });
 
-  (async () => {
-    updateTask(task.id, { status: 'running', phase: 'preparing', progress: 0 });
+  const result = await controller.submitTask({
+    type: 'render',
+    requestHash,
+    idempotencyKey,
+    owner,
+    total: videoPaths.length,
+    requestSummary: { clipCount: videoPaths.length, transitions: !!transitions?.length, bgm: !!bgm, subtitles: !!subtitles?.length, audioOverlay: !!audioOverlay?.path },
+    worker: async (task) => {
+      updateTask(task.id, { status: 'running', phase: 'preparing', progress: 0 });
 
-    if (isTaskCancelled(task.id)) {
-      updateTask(task.id, { status: 'cancelled', progress: 0 });
-      return;
-    }
-
-    const localPaths = videoPaths.map(p => {
-      if (typeof p !== 'string' || !p) return null;
-      // Only accept /api/media/ paths and resolve safely
-      const resolved = safeResolveMediaPath(p);
-      if (!resolved) return null;
-      return resolved;
-    }).filter(Boolean);
-
-    if (localPaths.length !== videoPaths.length) {
-      updateTask(task.id, { status: 'failed', error: 'Invalid video path: must be within media directory' });
-      return;
-    }
-
-    for (const lp of localPaths) {
-      if (!fs.existsSync(lp)) {
-        updateTask(task.id, { status: 'failed', error: `File not found: ${lp}` });
+      if (isTaskCancelled(task.id)) {
+        updateTask(task.id, { status: 'cancelled', progress: 0 });
         return;
       }
-    }
 
-    updateTask(task.id, { phase: 'rendering', progress: 0 });
+      const localPaths = videoPaths.map(p => {
+        if (typeof p !== 'string' || !p) return null;
+        const resolved = safeResolveMediaPath(p);
+        if (!resolved) return null;
+        return resolved;
+      }).filter(Boolean);
 
-    if (isTaskCancelled(task.id)) {
-      updateTask(task.id, { status: 'cancelled', progress: 0 });
-      return;
-    }
-
-    const outputFilename = `final_${Date.now()}.mp4`;
-    const outputPath = path.join(MEDIA_DIR, outputFilename);
-
-    const wantsFx = !!(fadeIn || fadeOut)
-      || (Array.isArray(transitions) && transitions.some(t => t && t.type === 'crossfade'));
-    const transitionsAligned = Array.isArray(transitions) && transitions.length === localPaths.length - 1;
-    // transition chain needs every clip to have a readable video geometry + a valid positive duration; audio-less clips get silence injected
-    const streams = wantsFx ? await Promise.all(localPaths.map(probeStreams)) : null;
-    const geometryOk = !!streams && streams.every(s => s.hasVideo && s.width > 0 && s.height > 0 && Number.isFinite(s.duration) && s.duration > 0);
-    const useFx = wantsFx && localPaths.length >= 1 && geometryOk && (!Array.isArray(transitions) || transitionsAligned);
-
-    let lastProgress = 0;
-    const onProgress = (progress) => {
-      if (progress <= lastProgress || isTaskCancelled(task.id)) return;
-      lastProgress = progress;
-      updateTask(task.id, { phase: 'rendering', progress });
-    };
-
-    let bgmOutput = null;
-    let adopted = false;
-    try {
-      if (useFx) {
-        await renderWithTransitions(localPaths, transitions, outputPath, {
-          onProgress,
-          fadeIn: !!fadeIn,
-          fadeOut: !!fadeOut,
-          taskId: task.id,
-        });
-      } else {
-        await concatVideos(localPaths, outputPath, { onProgress, taskId: task.id });
+      if (localPaths.length !== videoPaths.length) {
+        updateTask(task.id, { status: 'failed', error: 'Invalid video path: must be within media directory' });
+        return;
       }
 
-      // BGM is an additive audio mix on top of the assembled video (video stream is copied).
-      const bgmLocal = (bgmEnabled && typeof bgm === 'string') ? safeResolveMediaPath(bgm) : null;
-      if (bgmLocal) {
-        bgmOutput = path.join(MEDIA_DIR, `final_${Date.now()}_bgm.mp4`);
-        updateTask(task.id, { phase: 'rendering', progress: 90 });
-        await applyBgm(outputPath, bgmLocal, bgmOutput, {
-          bgmVolume: sanitizeVolume(bgmVolume),
-          taskId: task.id,
-        });
-        adopted = true;
-      }
-
-      const cancelled = isTaskCancelled(task.id);
-      const finalStatus = cancelled ? 'cancelled' : 'completed';
-      const finalOutput = adopted ? bgmOutput : outputPath;
-      const media = await probeStreams(finalOutput);
-      const audioQuality = media.hasAudio ? await probeAudioQuality(finalOutput) : { integratedLufs: null, truePeakDbfs: null };
-      const visualDefects = await probeVisualDefects(finalOutput);
-      updateTask(task.id, {
-        status: finalStatus,
-        progress: finalStatus === 'completed' ? 100 : (cancelled ? 90 : 0),
-        result: {
-          path: `/api/media/${path.basename(finalOutput)}`,
-          filename: path.basename(finalOutput),
-          qcBaseline: {
-            durationSeconds: media.duration,
-            hasAudio: media.hasAudio,
-            integratedLufs: audioQuality.integratedLufs,
-            truePeakDbfs: audioQuality.truePeakDbfs,
-            blackDurationSeconds: visualDefects.blackDurationSeconds,
-            freezeDurationSeconds: visualDefects.freezeDurationSeconds,
-            width: media.width,
-            height: media.height,
-            fps: media.fps,
-            clipCount: localPaths.length,
-            transitionCount: useFx && Array.isArray(transitions)
-              ? transitions.filter(t => t?.type === 'crossfade').length : 0,
-            bgmApplied: adopted,
-            renderMode: useFx ? 'transitions' : 'concat',
-          },
+      for (const lp of localPaths) {
+        if (!fs.existsSync(lp)) {
+          updateTask(task.id, { status: 'failed', error: `File not found: ${lp}` });
+          return;
         }
-      });
-    } catch (err) {
-      const cancelled = isTaskCancelled(task.id);
-      updateTask(task.id, cancelled ? { status: 'cancelled', progress: 90 } : { status: 'failed', error: err.message });
-    } finally {
-      // On success the base concat/transition output is dropped when BGM was adopted; on failure/cancel
-      // both the base and any partial BGM output are removed so media/ is not littered.
-      const done = getTask(task.id)?.status === 'completed';
-      const toRemove = done ? (adopted ? [outputPath] : []) : [outputPath, ...(bgmOutput ? [bgmOutput] : [])];
-      for (const p of toRemove) {
-        try { if (p && fs.existsSync(p)) fs.unlinkSync(p); } catch {}
       }
-    }
-  })().catch(err => {
-    const cancelled = isTaskCancelled(task.id);
-    updateTask(task.id, cancelled ? { status: 'cancelled', progress: 90 } : { status: 'failed', error: err.message });
+
+      updateTask(task.id, { phase: 'rendering', progress: 0 });
+
+      if (isTaskCancelled(task.id)) {
+        updateTask(task.id, { status: 'cancelled', progress: 0 });
+        return;
+      }
+
+      const outputFilename = `final_${Date.now()}.mp4`;
+      const outputPath = path.join(MEDIA_DIR, outputFilename);
+
+      const wantsFx = !!(fadeIn || fadeOut)
+        || (Array.isArray(transitions) && transitions.some(t => t && t.type === 'crossfade'));
+      const transitionsAligned = Array.isArray(transitions) && transitions.length === localPaths.length - 1;
+      const streams = wantsFx ? await Promise.all(localPaths.map(probeStreams)) : null;
+      const geometryOk = !!streams && streams.every(s => s.hasVideo && s.width > 0 && s.height > 0 && Number.isFinite(s.duration) && s.duration > 0);
+      const useFx = wantsFx && localPaths.length >= 1 && geometryOk && (!Array.isArray(transitions) || transitionsAligned);
+
+      let lastProgress = 0;
+      const onProgress = (progress) => {
+        if (progress <= lastProgress || isTaskCancelled(task.id)) return;
+        lastProgress = progress;
+        updateTask(task.id, { phase: 'rendering', progress });
+      };
+
+      let bgmOutput = null;
+      let subtitleOutput = null;
+      let audioOverlayOutput = null;
+      let finalOutput = outputPath;
+      try {
+        if (useFx) {
+          await renderWithTransitions(localPaths, transitions, outputPath, {
+            onProgress,
+            fadeIn: !!fadeIn,
+            fadeOut: !!fadeOut,
+            taskId: task.id,
+          });
+        } else {
+          await concatVideos(localPaths, outputPath, { onProgress, taskId: task.id });
+        }
+
+        const overlayLocal = (audioOverlay && typeof audioOverlay.path === 'string') ? safeResolveMediaPath(audioOverlay.path) : null;
+        if (overlayLocal && fs.existsSync(overlayLocal)) {
+          audioOverlayOutput = path.join(MEDIA_DIR, `final_${Date.now()}_audio.mp4`);
+          updateTask(task.id, { phase: 'rendering', progress: 85 });
+          await applyAudioOverlay(outputPath, overlayLocal, audioOverlayOutput, {
+            overlayVolume: Number.isFinite(Number(audioOverlay.volume)) ? Number(audioOverlay.volume) : 1.0,
+            taskId: task.id,
+          });
+          finalOutput = audioOverlayOutput;
+        }
+
+        const bgmLocal = (bgmEnabled && typeof bgm === 'string') ? safeResolveMediaPath(bgm) : null;
+        if (bgmLocal) {
+          bgmOutput = path.join(MEDIA_DIR, `final_${Date.now()}_bgm.mp4`);
+          updateTask(task.id, { phase: 'rendering', progress: 90 });
+          await applyBgm(finalOutput, bgmLocal, bgmOutput, {
+            bgmVolume: sanitizeVolume(bgmVolume),
+            taskId: task.id,
+          });
+          finalOutput = bgmOutput;
+        }
+
+        const safeCues = Array.isArray(subtitles) ? subtitles.slice(0, 200).filter(cue =>
+          Number.isFinite(Number(cue?.start)) && Number.isFinite(Number(cue?.end))
+          && Number(cue.end) > Number(cue.start) && typeof cue?.text === 'string' && cue.text.trim()
+        ).map(cue => ({ start: Number(cue.start), end: Number(cue.end), text: cue.text.slice(0, 500) })) : [];
+        if (safeCues.length) {
+          subtitleOutput = path.join(MEDIA_DIR, `final_${Date.now()}_subtitled.mp4`);
+          updateTask(task.id, { phase: 'rendering', progress: 94 });
+          finalOutput = await applySubtitles(finalOutput, safeCues, subtitleOutput, { taskId: task.id });
+        }
+
+        const cancelled = isTaskCancelled(task.id);
+        const finalStatus = cancelled ? 'cancelled' : 'completed';
+        const media = await probeStreams(finalOutput);
+        const audioQuality = media.hasAudio ? await probeAudioQuality(finalOutput) : { integratedLufs: null, truePeakDbfs: null };
+        const visualDefects = await probeVisualDefects(finalOutput);
+        updateTask(task.id, {
+          status: finalStatus,
+          progress: finalStatus === 'completed' ? 100 : (cancelled ? 90 : 0),
+          result: {
+            path: `/api/media/${path.basename(finalOutput)}`,
+            filename: path.basename(finalOutput),
+            qcBaseline: {
+              durationSeconds: media.duration,
+              hasAudio: media.hasAudio,
+              integratedLufs: audioQuality.integratedLufs,
+              truePeakDbfs: audioQuality.truePeakDbfs,
+              blackDurationSeconds: visualDefects.blackDurationSeconds,
+              freezeDurationSeconds: visualDefects.freezeDurationSeconds,
+              width: media.width,
+              height: media.height,
+              fps: media.fps,
+              clipCount: localPaths.length,
+              transitionCount: useFx && Array.isArray(transitions)
+                ? transitions.filter(t => t?.type === 'crossfade').length : 0,
+              bgmApplied: !!bgmOutput,
+              subtitlesApplied: !!subtitleOutput,
+              audioOverlayApplied: !!audioOverlayOutput,
+              renderMode: useFx ? 'transitions' : 'concat',
+            },
+            subtitles: subtitleOutput ? { applied: true, cueCount: safeCues.length } : null,
+          }
+        });
+      } catch (err) {
+        const cancelled = isTaskCancelled(task.id);
+        updateTask(task.id, cancelled ? { status: 'cancelled', progress: 90 } : { status: 'failed', error: err.message });
+      } finally {
+        const done = getTask(task.id)?.status === 'completed';
+        const candidates = [outputPath, audioOverlayOutput, bgmOutput, subtitleOutput].filter(Boolean);
+        const toRemove = done ? candidates.filter(p => p !== finalOutput) : candidates;
+        for (const p of toRemove) {
+          try { if (p && fs.existsSync(p)) fs.unlinkSync(p); } catch {}
+        }
+      }
+    },
   });
 
-  res.json({ taskId: task.id });
+  if (result.status === 'duplicate') return res.json({ taskId: result.task.id, duplicate: true });
+  if (result.status === 'conflict') return res.status(409).json({ error: 'Idempotency key conflict', existingTaskId: result.existingTask.id });
+
+  res.json({ taskId: result.task.id });
 });
 
 app.post('/api/generate/video-comfy', async (req, res) => {
   const { clips, sshConfig: clientSsh, aspectRatio, megapixels, enableLightning, uploads } = req.body;
+  const inference = resolveInferenceOptions({ megapixels, enableLightning }, req.body.inferenceProfile);
 
   if (!clientSsh?.host || !clientSsh?.user) {
     return res.status(400).json({ error: 'Missing SSH config (host, user required)' });
@@ -904,169 +1112,201 @@ app.post('/api/generate/video-comfy', async (req, res) => {
     }
   }
 
-  const task = createTask('video-comfy', { total: clips.length });
-  const remoteImageCache = new Map();
-  let tunnelEstablished = false;
+  const idempotencyKey = req.headers['idempotency-key'] || null;
+  const owner = req.headers['x-owner'] || null;
+  const requestHash = valueSha256({ clips, sshConfig: clientSsh, aspectRatio, megapixels, enableLightning, uploads, inferenceProfile: inference.profile });
 
-  (async () => {
-    const results = [];
-    console.log(`[ComfyUI] task=${task.id} starting ${clips.length} clips`);
-    updateTask(task.id, { status: 'running', phase: 'connecting', progress: 0 });
+  const result = await controller.submitTask({
+    type: 'video-comfy',
+    requestHash,
+    idempotencyKey,
+    owner,
+    total: clips.length,
+    requestSummary: { clipCount: clips.length, provider: 'comfyui', inferenceProfile: inference.profile },
+    worker: async (task) => {
+      const remoteImageCache = new Map();
+      let tunnelEstablished = false;
 
-    if (isTaskCancelled(task.id)) {
-      updateTask(task.id, { status: 'cancelled', progress: 0 });
-      return;
-    }
+      try {
+        const results = [];
+        console.log(`[ComfyUI] task=${task.id} starting ${clips.length} clips`);
+        updateTask(task.id, { status: 'running', phase: 'connecting', progress: 0 });
 
-    try {
-      const tunnel = await ensureTunnel(sshConfig);
-      tunnelEstablished = true;
-      console.log(`[ComfyUI] tunnel ready at localhost:${tunnel.port}`);
-    } catch (err) {
-      updateTask(task.id, { status: 'failed', phase: 'failed', error: `SSH tunnel failed: ${err.message}` });
-      return;
-    }
+        if (isTaskCancelled(task.id)) {
+          updateTask(task.id, { status: 'cancelled', progress: 0 });
+          return;
+        }
 
-    for (let i = 0; i < clips.length; i++) {
-      if (isTaskCancelled(task.id)) break;
-      const clip = clips[i];
-      let lastError = null;
-
-      // Item-level retries are owned by VideoAgent. Submitting again here would
-      // multiply long-running GPU jobs and hide the failed attempt from lineage.
-      for (let retry = 0; retry < 1; retry++) {
-        if (isTaskCancelled(task.id)) { lastError = 'Cancelled'; break; }
         try {
-          updateTask(task.id, {
-            status: 'running', phase: 'uploading', current: i + 1,
-            progress: Math.round((i / clips.length) * 100),
-          });
-
-          const requestedRefs = Array.isArray(clip.images) ? clip.images.slice(0, MAX_COMFY_REFERENCE_IMAGES) : [];
-          const legacyRefs = uploads?.referenceImages?.map(ref => ref.localPath).filter(Boolean) || [];
-          const localImagePaths = requestedRefs.length
-            ? requestedRefs.map(ref => resolveMediaRef(ref))
-            : legacyRefs;
-          if (requestedRefs.length && localImagePaths.some(filePath => !filePath)) {
-            throw new Error('One or more ComfyUI input images are missing from the media directory');
-          }
-
-          const mode = selectWorkflowMode(clip.mode, localImagePaths.filter(Boolean).length);
-          const imageFiles = [];
-          for (const localPath of localImagePaths.filter(Boolean)) {
-            let remoteName = remoteImageCache.get(localPath);
-            if (!remoteName) {
-              remoteName = `cine_${task.id}_${i}_${imageFiles.length}_${Date.now()}${path.extname(localPath) || '.png'}`;
-              await uploadImageToComfy(sshConfig, localPath, remoteName);
-              remoteImageCache.set(localPath, remoteName);
-            }
-            imageFiles.push(remoteName);
-          }
-
-          const comfyAbort = new AbortController();
-          let promptId;
-          let promptFinished = false;
-          let remoteCancellation = null;
-          const cancelRemote = () => {
-            comfyAbort.abort();
-            if (promptId && !remoteCancellation) remoteCancellation = cancelPrompt(sshConfig, promptId);
-            return remoteCancellation;
-          };
-          const cancelWatcher = setInterval(() => {
-            if (isTaskCancelled(task.id)) void cancelRemote();
-          }, 1000);
-
-          try {
-            promptId = await submitWorkflow(sshConfig, {
-              mode,
-              prompt: clip.prompt || 'Scene animation',
-              seed: clip.seed ?? Math.floor(Math.random() * 1e15),
-              duration: clip.duration ?? 5,
-              imageFiles,
-              enableLightning: enableLightning || false,
-              aspectRatio: aspectRatio || '16:9',
-              megapixels: Number.isFinite(megapixels) ? megapixels : undefined,
-              signal: comfyAbort.signal,
-            });
-
-            console.log(`[ComfyUI] task=${task.id} clip ${i + 1} submitted, mode=${mode}, images=${imageFiles.length}, duration=${clip.duration ?? 5}s, prompt_id=${promptId}`);
-            updateTask(task.id, {
-              phase: 'generating', current: i + 1, promptId,
-              workflowMode: mode, clipStartedAt: Date.now(),
-            });
-
-            const result = await pollUntilDone(sshConfig, promptId, { timeoutMs: 600000, signal: comfyAbort.signal });
-            promptFinished = true;
-
-            if (comfyAbort.signal.aborted || isTaskCancelled(task.id)) {
-              lastError = 'Cancelled';
-              console.log(`[ComfyUI] task=${task.id} clip ${i + 1} CANCELLED`);
-              break;
-            }
-
-            if (result.status === 'success' && result.outputs.length > 0) {
-              updateTask(task.id, { phase: 'downloading' });
-              const output = result.outputs[0];
-              const downloaded = await downloadOutput(sshConfig, output, MEDIA_DIR);
-              results.push({ index: i, status: 'ok', path: `/api/media/${downloaded.localName}`, prompt: clip.prompt });
-              console.log(`[ComfyUI] task=${task.id} clip ${i + 1} OK → ${downloaded.localName}`);
-              lastError = null;
-              updateTask(task.id, {
-                phase: 'clip-complete', promptId: null,
-                progress: Math.round(((i + 1) / clips.length) * 100),
-              });
-            } else {
-              lastError = result.message || 'No output from ComfyUI';
-              console.log(`[ComfyUI] task=${task.id} clip ${i + 1} FAILED: ${lastError}`);
-            }
-          } finally {
-            clearInterval(cancelWatcher);
-            if (!promptFinished && promptId) await cancelRemote();
-            else if (remoteCancellation) await remoteCancellation;
-          }
-
-          if (lastError === 'Cancelled') break;
-          if (!lastError) break;
+          const tunnel = await ensureTunnel(sshConfig);
+          tunnelEstablished = true;
+          console.log(`[ComfyUI] tunnel ready at localhost:${tunnel.port}`);
         } catch (err) {
-          if (err.name === 'AbortError' || err.message === 'Cancelled') {
-            lastError = 'Cancelled';
-            console.log(`[ComfyUI] task=${task.id} clip ${i + 1} CANCELLED`);
-            break;
+          updateTask(task.id, { status: 'failed', phase: 'failed', error: `SSH tunnel failed: ${err.message}` });
+          return;
+        }
+
+        for (let i = 0; i < clips.length; i++) {
+          if (isTaskCancelled(task.id)) break;
+          const clip = clips[i];
+          let lastError = null;
+          let attemptTrace = null;
+
+          for (let retry = 0; retry < 1; retry++) {
+            if (isTaskCancelled(task.id)) { lastError = 'Cancelled'; break; }
+            try {
+              updateTask(task.id, {
+                status: 'running', phase: 'uploading', current: i + 1,
+                progress: Math.round((i / clips.length) * 100),
+              });
+
+              const requestedRefs = Array.isArray(clip.images) ? clip.images.slice(0, MAX_COMFY_REFERENCE_IMAGES) : [];
+              const legacyRefs = uploads?.referenceImages?.map(ref => ref.localPath).filter(Boolean) || [];
+              const localImagePaths = requestedRefs.length
+                ? requestedRefs.map(ref => resolveMediaRef(ref))
+                : legacyRefs;
+              if (requestedRefs.length && localImagePaths.some(filePath => !filePath)) {
+                throw new Error('One or more ComfyUI input images are missing from the media directory');
+              }
+
+              const mode = selectWorkflowMode(clip.mode, localImagePaths.filter(Boolean).length);
+              attemptTrace = {
+                provider: 'comfyui', model: 'MiniMax H3', modelVersion: 'workflow-managed',
+                ...getWorkflowIdentity(mode, localImagePaths.filter(Boolean).length),
+                inputHash: valueSha256({
+                  prompt: clip.prompt, seed: clip.seed, duration: clip.duration, mode,
+                  images: requestedRefs,
+                  inferenceProfile: inference.profile,
+                  enableLightning: inference.enableLightning,
+                  megapixels: inference.megapixels,
+                }),
+                outputHash: null,
+                upstreamTaskId: null,
+              };
+              const imageFiles = [];
+              for (const localPath of localImagePaths.filter(Boolean)) {
+                let remoteName = remoteImageCache.get(localPath);
+                if (!remoteName) {
+                  remoteName = `cine_${task.id}_${i}_${imageFiles.length}_${Date.now()}${path.extname(localPath) || '.png'}`;
+                  await uploadImageToComfy(sshConfig, localPath, remoteName);
+                  remoteImageCache.set(localPath, remoteName);
+                }
+                imageFiles.push(remoteName);
+              }
+
+              const comfyAbort = new AbortController();
+              let promptId;
+              let promptFinished = false;
+              let remoteCancellation = null;
+              const cancelRemote = () => {
+                comfyAbort.abort();
+                if (promptId && !remoteCancellation) remoteCancellation = cancelPrompt(sshConfig, promptId);
+                return remoteCancellation;
+              };
+              const cancelWatcher = setInterval(() => {
+                if (isTaskCancelled(task.id)) void cancelRemote();
+              }, 1000);
+
+              try {
+                promptId = await submitWorkflow(sshConfig, {
+                  mode,
+                  prompt: clip.prompt || 'Scene animation',
+                  seed: clip.seed ?? Math.floor(Math.random() * 1e15),
+                  duration: clip.duration ?? 5,
+                  imageFiles,
+                  enableLightning: inference.enableLightning,
+                  aspectRatio: aspectRatio || '16:9',
+                  megapixels: inference.megapixels,
+                  signal: comfyAbort.signal,
+                });
+                attemptTrace.upstreamTaskId = promptId;
+                updateTask(task.id, { promptId, provider: 'comfyui' });
+
+                console.log(`[ComfyUI] task=${task.id} clip ${i + 1} submitted, mode=${mode}, images=${imageFiles.length}, duration=${clip.duration ?? 5}s, prompt_id=${promptId}`);
+                updateTask(task.id, {
+                  phase: 'generating', current: i + 1,
+                  workflowMode: mode, inferenceProfile: inference.profile, clipStartedAt: Date.now(),
+                });
+
+                const pollResult = await pollUntilDone(sshConfig, promptId, { timeoutMs: 600000, signal: comfyAbort.signal });
+                promptFinished = true;
+
+                if (comfyAbort.signal.aborted || isTaskCancelled(task.id)) {
+                  lastError = 'Cancelled';
+                  console.log(`[ComfyUI] task=${task.id} clip ${i + 1} CANCELLED`);
+                  break;
+                }
+
+                if (pollResult.status === 'success' && pollResult.outputs.length > 0) {
+                  updateTask(task.id, { phase: 'downloading' });
+                  const output = pollResult.outputs[0];
+                  const downloaded = await downloadOutput(sshConfig, output, MEDIA_DIR);
+                  results.push({ index: i, status: 'ok', path: `/api/media/${downloaded.localName}`, prompt: clip.prompt, trace: {
+                    ...attemptTrace, outputHash: fileSha256(downloaded.savePath),
+                  } });
+                  console.log(`[ComfyUI] task=${task.id} clip ${i + 1} OK → ${downloaded.localName}`);
+                  lastError = null;
+                  updateTask(task.id, {
+                    phase: 'clip-complete', promptId: null,
+                    progress: Math.round(((i + 1) / clips.length) * 100),
+                  });
+                } else {
+                  lastError = pollResult.message || 'No output from ComfyUI';
+                  console.log(`[ComfyUI] task=${task.id} clip ${i + 1} FAILED: ${lastError}`);
+                }
+              } finally {
+                clearInterval(cancelWatcher);
+                if (!promptFinished && promptId) await cancelRemote();
+                else if (remoteCancellation) await remoteCancellation;
+              }
+
+              if (lastError === 'Cancelled') break;
+              if (!lastError) break;
+            } catch (err) {
+              if (err.name === 'AbortError' || err.message === 'Cancelled') {
+                lastError = 'Cancelled';
+                console.log(`[ComfyUI] task=${task.id} clip ${i + 1} CANCELLED`);
+                break;
+              }
+              lastError = err.message;
+              console.log(`[ComfyUI] task=${task.id} clip ${i + 1} ERROR: ${err.message}`);
+            }
           }
-          lastError = err.message;
-          console.log(`[ComfyUI] task=${task.id} clip ${i + 1} ERROR: ${err.message}`);
+
+          if (lastError && lastError !== 'Cancelled') {
+            results.push({ index: i, status: 'error', error: lastError, trace: attemptTrace });
+          }
+        }
+
+        const successCount = results.filter(r => r.status === 'ok').length;
+        const cancelled = isTaskCancelled(task.id);
+        const finalStatus = cancelled ? 'cancelled' : 'completed';
+        console.log(`[ComfyUI] task=${task.id} ${finalStatus}: ${successCount}/${clips.length} succeeded`);
+        updateTask(task.id, {
+          status: finalStatus,
+          phase: finalStatus,
+          promptId: null,
+          progress: cancelled ? Math.round((successCount / clips.length) * 100) : 100,
+          result: { clips: results, total: clips.length, success: successCount }
+        });
+      } catch (err) {
+        console.error(`[ComfyUI] task=${task.id} FATAL: ${err.message}`);
+        updateTask(task.id, { status: 'failed', phase: 'failed', promptId: null, error: err.message });
+      } finally {
+        if (!tunnelEstablished) return;
+        try {
+          await deleteComfyInputFiles(sshConfig, [...remoteImageCache.values()]);
+        } catch (err) {
+          console.warn(`[ComfyUI] task=${task.id} input cleanup failed: ${err.message}`);
         }
       }
-
-      if (lastError && lastError !== 'Cancelled') {
-        results.push({ index: i, status: 'error', error: lastError });
-      }
-    }
-
-    const successCount = results.filter(r => r.status === 'ok').length;
-    const cancelled = isTaskCancelled(task.id);
-    const finalStatus = cancelled ? 'cancelled' : 'completed';
-    console.log(`[ComfyUI] task=${task.id} ${finalStatus}: ${successCount}/${clips.length} succeeded`);
-    updateTask(task.id, {
-      status: finalStatus,
-      phase: finalStatus,
-      promptId: null,
-      progress: cancelled ? Math.round((successCount / clips.length) * 100) : 100,
-      result: { clips: results, total: clips.length, success: successCount }
-    });
-  })().catch(err => {
-    console.error(`[ComfyUI] task=${task.id} FATAL: ${err.message}`);
-    updateTask(task.id, { status: 'failed', phase: 'failed', promptId: null, error: err.message });
-  }).finally(async () => {
-    if (!tunnelEstablished) return;
-    try {
-      await deleteComfyInputFiles(sshConfig, [...remoteImageCache.values()]);
-    } catch (err) {
-      console.warn(`[ComfyUI] task=${task.id} input cleanup failed: ${err.message}`);
-    }
+    },
   });
 
-  res.json({ taskId: task.id });
+  if (result.status === 'duplicate') return res.json({ taskId: result.task.id, duplicate: true });
+  if (result.status === 'conflict') return res.status(409).json({ error: 'Idempotency key conflict', existingTaskId: result.existingTask.id });
+
+  res.json({ taskId: result.task.id });
 });
 
 app.post('/api/upload/comfy', upload.array('files', 10), async (req, res) => {
@@ -1167,10 +1407,20 @@ app.get('/api/task/:id', (req, res) => {
   res.json(task);
 });
 
-app.post('/api/task/:id/cancel', (req, res) => {
-  const task = cancelTask(req.params.id);
+app.post('/api/task/:id/cancel', async (req, res) => {
+  const task = await controller.cancelTask(req.params.id);
   if (!task) return res.status(404).json({ error: 'Task not found' });
   res.json({ ok: true, status: task.status });
+});
+
+app.get('/api/tasks', (req, res) => {
+  const tasks = listTasks();
+  res.json({ tasks });
+});
+
+app.get('/api/tasks/health', async (req, res) => {
+  const health = await controller.getHealth();
+  res.json(health);
 });
 
 app.get('/api/media/uploads/:filename', (req, res) => {
@@ -1204,9 +1454,22 @@ app.get('*', (req, res) => {
 });
 
 const HOST = process.env.HOST || '127.0.0.1';
-app.listen(PORT, HOST, () => {
-  console.log(`Cine-Cutie server running at http://${HOST}:${PORT}`);
-  console.log(`Serving static files from dist/`);
-  console.log(`Media files in ${MEDIA_DIR}`);
-  console.log(`Cache: LRU, max ${cache.maxSize} entries`);
+controller.init().then(() => {
+  const recovery = controller.recoveryResults;
+  if (recovery.length > 0) {
+    console.log(`[TaskRecovery] recovered ${recovery.length} task(s) from previous session`);
+    for (const r of recovery) {
+      console.log(`  task=${r.taskId} action=${r.action}`);
+    }
+  }
+  app.listen(PORT, HOST, () => {
+    console.log(`Cine-Cutie server running at http://${HOST}:${PORT}`);
+    console.log(`Serving static files from dist/`);
+    console.log(`Media files in ${MEDIA_DIR}`);
+    console.log(`Cache: LRU, max ${cache.maxSize} entries`);
+    console.log(`Task store: ${taskStore.constructor.name} (max ${controller.getHealth().then(h => h.queue.maxConcurrency).catch(() => '?')} concurrent)`);
+  });
+}).catch(err => {
+  console.error('[TaskController] init failed:', err);
+  process.exit(1);
 });

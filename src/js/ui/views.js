@@ -119,7 +119,10 @@ export function clearPendingAdvance() {
 function bindFeedback(stepId, approveCallback, edit = null) {
   const approveBtn = $('#approveBtn');
   const reviseBtn = $('#reviseBtn');
-  if (approveBtn) approveBtn.addEventListener('click', approveCallback);
+  if (approveBtn) approveBtn.addEventListener('click', () => {
+    if (typeof window.__approveStep === 'function') window.__approveStep(stepId, approveCallback);
+    else approveCallback();
+  });
   if (reviseBtn) reviseBtn.addEventListener('click', () => {
     const feedback = $('#feedbackInput')?.value.trim();
     if (!feedback) { alert(t('ui.alertFeedback')); return; }
@@ -472,6 +475,48 @@ export function renderPostProduction(data, onAdvance, readOnly = false) {
         </div>`).join('')}</div>` : `<p class="delivery-qc-legacy">${t('deliveryQC.legacy')}</p>`}
       ${qc.repairPlan ? `<div class="delivery-qc-repair"><strong>${t('deliveryQC.repair')}</strong> ${escapeHtml(t('steps.' + qc.repairPlan.targetStep + '.label'))} — ${escapeHtml(qc.repairPlan.reason || '')}</div>` : ''}
     </section>` : '';
+  const compliance = data.complianceReport;
+  const complianceReport = compliance ? `
+    <section class="delivery-qc delivery-qc-${String(compliance.verdict || 'CONDITIONAL_PASS').toLowerCase()}">
+      <div class="delivery-qc-head">
+        <div><span class="delivery-qc-icon">⚖</span> <strong>${t('complianceReport.title')}</strong></div>
+        <span class="delivery-qc-verdict">${escapeHtml(t('deliveryQC.verdict.' + compliance.verdict))}</span>
+      </div>
+      <div class="delivery-qc-grid">${(compliance.checks || []).map(check => `
+        <div class="delivery-qc-check"><span class="delivery-qc-check-mark">${check.verdict === 'PASS' ? '✓' : check.verdict === 'FAIL' ? '×' : '!'}</span>
+          <div><strong>${escapeHtml(check.name)}</strong><small>${escapeHtml(check.status)}${check.visual?.scope?.sampledFrames != null ? ` · ${escapeHtml(String(check.visual.scope.sampledFrames))} frames` : ''}</small>
+            ${check.visual?.checks?.length ? `<small>${escapeHtml(check.visual.checks.map(item => `${item.checker?.name || item.id}: ${item.status}${item.reason ? ` (${item.reason})` : ''}`).join(' · '))}</small>` : ''}
+            ${(check.issues || []).length ? `<small>${escapeHtml(check.issues.join('；'))}</small>` : ''}</div>
+        </div>`).join('')}</div>
+      <p class="delivery-qc-legacy">${escapeHtml(t('complianceReport.summary', {
+        findings: compliance.summary?.findingCount || 0,
+        blocks: compliance.summary?.blockingFindings || 0,
+      }))}</p>
+      ${(compliance.recommendations || []).length ? `<div class="delivery-qc-repair"><strong>${t('complianceReport.review')}</strong> ${escapeHtml(compliance.recommendations.join('；'))}</div>` : ''}
+      ${(compliance.sourceRights || []).length ? `<details><summary>${escapeHtml(t('complianceReport.sourceRights'))}</summary><div class="delivery-qc-grid">${compliance.sourceRights.map(asset => `<div class="delivery-qc-check"><span class="delivery-qc-check-mark">${asset.status === 'DECLARED' ? '✓' : '!'}</span><div><strong>${escapeHtml(asset.name || asset.kind)}</strong><small>${escapeHtml(`${asset.status} · source: ${asset.source || 'unknown'} · license: ${asset.license || 'unknown'}`)}</small></div></div>`).join('')}</div></details>` : ''}
+      ${compliance.sha256 ? `<small title="${escapeHtml(compliance.sha256)}">SHA-256: ${escapeHtml(compliance.sha256.slice(0, 16))}…</small>` : ''}
+    </section>` : '';
+
+  const soundPlan = data.soundPlan;
+  const audioResult = data.audioResult;
+  const soundPlanReport = soundPlan?.shots?.length ? `
+    <section class="delivery-qc delivery-qc-pass">
+      <div class="delivery-qc-head">
+        <div><span class="delivery-qc-icon">♪</span> <strong>${t('soundPlan.title')}</strong></div>
+        <span class="delivery-qc-verdict">${audioResult ? `${audioResult.success || 0}/${audioResult.total || 0} ${t('soundPlan.generated')}` : t('soundPlan.noAudio')}</span>
+      </div>
+      <div class="delivery-qc-grid">${soundPlan.shots.map((shot, i) => {
+        const hasText = shot.dialogue || shot.narratorText;
+        const hasSfx = shot.ambiencePrompt || (shot.soundEffects && shot.soundEffects.length);
+        return `<div class="delivery-qc-check delivery-qc-check-pass">
+          <span class="delivery-qc-check-mark">${hasText || hasSfx ? '✓' : '—'}</span>
+          <div><strong>${escapeHtml(shot.shotId || `shot_${i}`)}</strong>
+            <small>${hasText ? `${shot.speakerId ? t('soundPlan.dialogue') : t('soundPlan.narration')}: ${escapeHtml((shot.dialogue || shot.narratorText || '').slice(0, 60))}` : ''}${hasSfx ? ` · ${t('soundPlan.ambience')}: ${escapeHtml((shot.ambiencePrompt || '').slice(0, 40))}` : ''}</small>
+            <small>${shot.musicMood ? `${t('soundPlan.music')}: ${escapeHtml(shot.musicMood)}` : ''} · ${shot.duration || '?'}s</small>
+          </div>
+        </div>`;
+      }).join('')}</div>
+    </section>` : '';
 
   el.innerHTML = `
     <div class="result-card">
@@ -486,6 +531,8 @@ export function renderPostProduction(data, onAdvance, readOnly = false) {
           </div>`
         : `<div style="color:var(--cream3);font-size:0.85rem;text-align:center;padding:40px 0">${data.status === 'no-clips' ? t('ui.postProdNoClips') : data.status === 'failed' ? t('ui.postProdFailed') : '—'}</div>`}
       ${qcReport}
+      ${complianceReport}
+      ${soundPlanReport}
     </div>
     ${readOnly ? '' : '<div class="action-row" id="actionRow"></div>'}
   `;

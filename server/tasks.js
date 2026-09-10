@@ -1,62 +1,42 @@
-const tasks = new Map();
-let nextId = 1;
+import { InMemoryTaskStore } from './task-store.js';
+
+let _store = null;
+
+export function initTaskStore(store) {
+  _store = store;
+}
+
+export function getStore() {
+  if (!_store) {
+    _store = new InMemoryTaskStore();
+  }
+  return _store;
+}
 
 export function createTask(type, metadata = {}) {
-  const id = `task_${nextId++}`;
-  const task = {
-    id,
-    type,
-    status: 'pending',
-    progress: 0,
-    total: 0,
-    current: 0,
-    result: null,
-    error: null,
-    createdAt: Date.now(),
-    updatedAt: Date.now(),
-    ...metadata
-  };
-  tasks.set(id, task);
-  return task;
+  return getStore().createTask(type, metadata);
 }
 
 export function getTask(id) {
-  return tasks.get(id) || null;
+  return getStore().getTask(id);
 }
 
 export function updateTask(id, patch) {
-  const task = tasks.get(id);
-  if (!task) return null;
-  Object.assign(task, patch, { updatedAt: Date.now() });
-  return task;
+  return getStore().updateTask(id, patch);
 }
 
 export function cancelTask(id) {
-  const task = tasks.get(id);
-  if (!task) return null;
-  if (task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled') {
-    return task;
-  }
-  task.cancelled = true;
-  task.status = 'cancelled';
-  task.updatedAt = Date.now();
-  return task;
+  return getStore().cancelTask(id);
 }
 
 export function isTaskCancelled(id) {
-  const task = tasks.get(id);
-  return !!task?.cancelled;
+  return getStore().isTaskCancelled(id);
 }
 
 export function listTasks() {
-  return [...tasks.values()].sort((a, b) => b.createdAt - a.createdAt);
+  return getStore().listTasks();
 }
 
 export function cleanupTasks(maxAge = 3600000) {
-  const now = Date.now();
-  for (const [id, task] of tasks) {
-    if (now - task.updatedAt > maxAge && (task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled')) {
-      tasks.delete(id);
-    }
-  }
+  return getStore().cleanup(maxAge);
 }

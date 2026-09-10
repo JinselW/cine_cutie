@@ -213,6 +213,20 @@
 - `docs/SCORING.md`：本文档
 - 测试：`test/ip-compliance.test.js`、`test/memory.test.js`、`test/orchestrator-gate.test.js`、`smoke_test.mjs`
 
+### 5.5 可提交的复现与审计证据
+
+| 证据 | 入口 | 可验证内容 |
+|------|------|------------|
+| 统一验证 | `npm run verify` | 构建、全量单测和 smoke test |
+| 固定基准 | `npm run benchmark` | 工作流 SHA-256、精度/量化声明、确定性编译延迟 |
+| Notebook | `notebooks/reproduce_and_benchmark.ipynb` | 从干净环境执行验证、生成报告并独立复核哈希 |
+| 推理配置 | `config/inference-profiles.json` | fast/balanced/quality 档位和并发上限 |
+| 审核证据 | Artifact `provenance.review` | 人工批准决定、时间、操作者与审核模式 |
+| 生成 lineage | Artifact `itemLineage[].attempts[]` | provider/model/workflow/input/output 哈希和任务关联 |
+| 最终合规报告 | `finalVideo.complianceReport` | 文本扫描、素材权利提示、限制、结论与报告哈希 |
+
+演示时建议先运行 `npm run verify` 和 `npm run benchmark`，再在 Co-Create 模式逐步批准一次完整任务，最后展示执行日志、lineage 与最终合规报告。GPU 性能数字必须来自目标 DGX 实测；仓库不会以本地编译耗时替代推理吞吐。
+
 ---
 
 ## 关键文件索引

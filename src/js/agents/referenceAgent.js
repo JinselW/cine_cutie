@@ -1,15 +1,15 @@
+import { PromptAgent } from './promptAgent.js';
 import { BaseAgent } from './baseAgent.js';
 import { RetryAgent, ItemRetryStrategy } from './retryAgent.js';
 import { QCAgent, SCORE_THRESHOLD, reportScore, reportRetry } from './qcAgent.js';
 import { getActiveProvider } from '../providers/registry.js';
-import { getConfig, chat, parseJson } from '../providers/llm.js';
-import { STYLE_HINTS, buildMessages } from '../providers/prompts.js';
+import { getConfig } from '../providers/llm.js';
 import { createArtifact, ArtifactKind, ArtifactStatus, recordItemAttempt } from '../artifacts/artifactTypes.js';
 import { addAgentMessage } from '../ui/render.js';
 import { t } from '../i18n.js';
 import { reportPhase } from '../progressTracker.js';
-import { normalizeShotModeAssignments } from '../videoModePlanning.js';
-import { appendFeedback, appendPromptGuidance } from '../feedback.js';
+import { checkVisualMediaBatch } from '../compliance/visualCompliance.js';
+import { QCVerdict } from './qcTypes.js';
 
 const MAX_ITEM_ATTEMPTS = 3;
 const MAX_STAGE_RETRIES = 1;
@@ -22,22 +22,15 @@ export const FrameRole = Object.freeze({
   REFERENCE: 'reference_image',
 });
 
-function applyVisualRetryFeedback(items, critique, userFeedback) {
-  for (const item of items) {
-    item.seed = (item.seed ?? 42) + 7;
-    item.prompt = appendPromptGuidance(item.prompt, {
-      feedback: userFeedback,
-      suggestions: critique.suggestions || [],
-    });
-  }
-}
-
 export class ReferenceAgent extends BaseAgent {
   #retryAgent;
   #qcAgent;
 
-  constructor() {
+  #promptAgent;
+
+  constructor({ promptAgent = new PromptAgent() } = {}) {
     super({ name: 'Image Director', stepId: 'referenceImages' });
+    this.#promptAgent = promptAgent;
     this.#retryAgent = new RetryAgent();
     this.#qcAgent = new QCAgent({ stepId: 'referenceImages' });
   }
@@ -47,12 +40,19 @@ export class ReferenceAgent extends BaseAgent {
     const pairs = this.#extractShots(ctx);
     if (!pairs.length) return this.#emptyResult(ctx, mode);
 
-    let shotModes = null;
-    if (mode === 'auto') {
-      shotModes = await this.#evaluateShotModes(pairs, ctx, _token?.signal);
+    ctx = { ...ctx, triggeredBy: 'ReferenceAgent', signal: _token?.signal };
+    try {
+      ctx.promptPackage = await this.#promptAgent.prepareShotPrompts(ctx);
+    } catch (error) {
+      if (!error.promptPackage) throw error;
+      return { artifacts: [createArtifact({ kind: ArtifactKind.REFERENCE_IMAGE, stepId: 'referenceImages',
+        status: ArtifactStatus.FAILED, sourceArtifactIds: error.promptPackage.sourceArtifactIds,
+        data: { mode, shots: [], extraFrames: [], promptPackage: error.promptPackage } })],
+        metadata: { qualityScore: error.promptPackage.provenance.qc?.score ?? 0, verdict: 'FAIL' } };
     }
-
-    const items = this.#buildItems(pairs, ctx, mode, shotModes);
+    addAgentMessage('✍️', t('promptAgent.imageUsingPackage', { version: ctx.promptPackage.version }));
+    const shotModes = ctx.promptPackage.data.shots.map(s => ({ mode: s.mode, reason: s.modeReason }));
+    const items = this.#buildItems(pairs, ctx);
     const sourceArtifactIds = [
       ctx.sourceArtifactIds?.script,
       ctx.sourceArtifactIds?.storyboard,
@@ -75,6 +75,7 @@ export class ReferenceAgent extends BaseAgent {
       const results = await this.#generateItems(items, artifact, ctx, _token);
       const data = this.#assembleResult(results, pairs, mode, items, shotModes);
 
+      data.promptPackage = structuredClone(ctx.promptPackage);
       reportPhase('validating');
       const crit = await this.#qcAgent.process({ data, entities: ctx.entities || {}, ...ctx });
       reportScore(crit.score, '🖼️');
@@ -84,15 +85,21 @@ export class ReferenceAgent extends BaseAgent {
       if (crit.source === 'structural') break;
 
       reportRetry(crit.score, attempt + 1, MAX_STAGE_RETRIES, '🖼️');
-      applyVisualRetryFeedback(items, crit, ctx.feedback);
+      for (const item of items) item.seed += 7;
     }
 
     const finalData = bestData || { mode, shots: [], extraFrames: [] };
     const complete = finalData.shots.filter(s => s.status === 'complete' || s.imagePath).length;
 
-    artifact.data = finalData;
+    const visualItems = [...(finalData.shots || []), ...(finalData.extraFrames || [])]
+      .map(item => ({ id: item.shot_id || item.id, mediaRef: item.imagePath || item.imageUrl }))
+      .filter(item => item.mediaRef);
+    finalData.visualCompliance = await checkVisualMediaBatch(visualItems, { stage: 'referenceImages', type: 'image', signal: _token?.signal });
+    const visualBlocked = finalData.visualCompliance.verdict === QCVerdict.FAIL;
+
+    artifact.data = { ...finalData, promptPackage: finalData.promptPackage || ctx.promptPackage };
     const comfyTextFallback = complete === 0 && getActiveProvider('video')?.id === 'video-comfy';
-    artifact.status = complete > 0 || comfyTextFallback ? ArtifactStatus.COMPLETE : ArtifactStatus.FAILED;
+    artifact.status = (complete > 0 || comfyTextFallback) && !visualBlocked ? ArtifactStatus.COMPLETE : ArtifactStatus.FAILED;
 
     return {
       artifacts: [artifact],
@@ -103,7 +110,8 @@ export class ReferenceAgent extends BaseAgent {
         totalFrames: items.length,
         qualityScore: bestCrit?.score ?? 0,
         consistencyIssues: bestCrit?.consistency?.issues || [],
-        verdict: bestCrit?.verdict ?? null,
+        verdict: visualBlocked ? QCVerdict.FAIL : bestCrit?.verdict ?? null,
+        visualCompliance: finalData.visualCompliance,
         feedbackSatisfied: bestCrit?.feedbackSatisfied ?? !ctx.feedback,
         comfyTextFallback,
       },
@@ -114,21 +122,6 @@ export class ReferenceAgent extends BaseAgent {
     const mode = getConfig().videoMode;
     if (mode === 'auto') return 'auto';
     return mode === 'firstLastFrame' || mode === 'referenceImage' ? mode : 'firstFrame';
-  }
-
-  async #evaluateShotModes(pairs, ctx, signal) {
-    const messages = buildMessages('autoModeEval', ctx);
-    if (!messages) return pairs.map(p => ({ shot: p.shot, mode: 'firstFrame' }));
-
-    let raw;
-    try {
-      raw = await chat(messages, { signal });
-    } catch {
-      return pairs.map(p => ({ shot: p.shot, mode: 'firstFrame' }));
-    }
-
-    const parsed = parseJson(raw);
-    return normalizeShotModeAssignments(pairs.map(p => p.shot), parsed?.assignments);
   }
 
   #extractShots(ctx) {
@@ -156,112 +149,34 @@ export class ReferenceAgent extends BaseAgent {
       });
     });
 
-    const maxClips = Math.ceil((ctx.totalDuration || 30) / 5);
-    if (pairs.length > maxClips) pairs.length = maxClips;
     return pairs;
   }
 
-  #buildItems(pairs, ctx, mode, shotModes) {
+  #buildItems(pairs, ctx) {
     const items = [];
-
     pairs.forEach((pair, index) => {
-      const shotMode = shotModes ? shotModes[index].mode
-        : (mode === 'referenceImage' ? 'referenceImage' : mode === 'firstLastFrame' ? 'firstLastFrame' : 'firstFrame');
-      const role = shotMode === 'referenceImage' ? FrameRole.REFERENCE : FrameRole.FIRST;
-      items.push({
-        id: pair.shot.shot_id,
-        role,
-        index,
-        shotMode,
-        ...this.#frameSpec(pair, ctx, role),
-      });
-
-      if (shotMode === 'firstLastFrame') {
-        items.push({
-          id: `${pair.shot.shot_id}${LAST_FRAME_SUFFIX}`,
-          role: FrameRole.LAST,
-          index,
-          shotMode,
-          ...this.#frameSpec(pair, ctx, FrameRole.LAST),
-        });
+      const spec = ctx.promptPackage.data.shots.find(s => s.shotId === pair.shot.shot_id);
+      const roles = spec.mode === 'firstLastFrame' ? [FrameRole.FIRST, FrameRole.LAST]
+        : [spec.mode === 'referenceImage' ? FrameRole.REFERENCE : FrameRole.FIRST];
+      for (const role of roles) {
+        const item = { id: spec.shotId + (role === FrameRole.LAST ? LAST_FRAME_SUFFIX : ''), shotId: spec.shotId, role, index, shotMode: spec.mode, seed: 42 };
+        this.#refreshItem(item, ctx);
+        items.push(item);
       }
     });
-
     return items;
   }
 
-  #frameSpec(pair, ctx, role) {
-    const genre = ctx.genre || ctx.script?.genre;
-    const styleHint = STYLE_HINTS[genre] || genre || 'cinematic film look';
-    const matched = this.#matchEntities(pair, ctx);
-    const refs = this.#collectRefs(matched);
-    return {
-      prompt: appendFeedback(this.#buildFramePrompt(pair, matched, { styleHint, refs, role }), ctx.feedback),
-      refs,
-      seed: 42,
-    };
-  }
-
-  #matchEntities(pair, ctx) {
-    const design = ctx.characterDesign || {};
-    const characters = design.characters || [];
-    const settings = design.settings || [];
-    const corpus = [
-      pair.shot.prompt, pair.shot.description,
-      pair.beat.segmentTitle, pair.beat.segmentDescription, pair.beat.episodeSummary,
-    ].join(' ').toLowerCase();
-
-    const hit = entity => [entity.name, entity.enName]
-      .filter(Boolean)
-      .some(n => String(n).toLowerCase().length > 1 && corpus.includes(String(n).toLowerCase()));
-
-    const matchedChars = characters.filter(hit);
-    const matchedSettings = settings.filter(hit);
-    return {
-      characters: (matchedChars.length ? matchedChars : characters.length === 1 ? characters : []).slice(0, 2),
-      settings: (matchedSettings.length ? matchedSettings : settings.length === 1 ? settings : []).slice(0, 1),
-    };
-  }
-
-  #collectRefs({ characters, settings }) {
-    const refs = [];
-    for (const c of characters) refs.push(c.imagePath || c.sheetPath);
-    for (const s of settings) refs.push(s.imagePath);
-    return [...new Set(refs.filter(r => typeof r === 'string' && r.startsWith('/api/media/')))].slice(0, MAX_REFS);
-  }
-
-  #buildFramePrompt(pair, matched, { styleHint, refs, role }) {
-    const shot = pair.shot;
-    const base = shot.prompt || `${shot.description || pair.beat.segmentDescription || 'Scene'}, ${shot.type || 'medium'} shot`;
-
-    const parts = [styleHint, base];
-    for (const entity of [...matched.characters, ...matched.settings]) {
-      if (entity.visualTag) parts.push(entity.visualTag);
-    }
-    if (pair.beat.segmentTitle) parts.push(`story beat: ${pair.beat.segmentTitle}`);
-    if (role === FrameRole.LAST) {
-      parts.push('the action has settled into its final composition, closing frame of this shot');
-    } else if (role === FrameRole.REFERENCE) {
-      parts.push('clean composition that locks the identity of the character and the setting');
-    }
-    parts.push('high quality, 4k');
-
-    let prompt = parts.join(', ');
-    if (refs.length) prompt = `${this.#identityClause(refs, matched)} Now render: ${prompt}`;
-    return prompt;
-  }
-
-  #identityClause(refs, matched) {
-    const lookup = new Map();
-    for (const c of matched.characters) lookup.set(c.imagePath || c.sheetPath, `the character ${c.enName || c.name}`);
-    for (const s of matched.settings) lookup.set(s.imagePath, `the location ${s.name}`);
-
-    const labels = refs.map((ref, i) => `image ${i + 1} = ${lookup.get(ref) || 'visual reference'}`);
-    return (
-      `REFERENCE FIDELITY (${labels.join('; ')}). `
-      + 'Reproduce exactly the face, hairstyle, outfit, colors and proportions of the referenced character, '
-      + 'and the layout, materials and lighting of the referenced location. Do not invent extra characters or change costumes.'
-    );
+  #refreshItem(item, ctx) {
+    const spec = ctx.promptPackage.data.shots.find(s => s.shotId === item.shotId);
+    const adapted = this.#promptAgent.adaptForProvider({ promptPackage: ctx.promptPackage, shotId: spec.shotId, provider: getActiveProvider('image')?.id, media: 'image', frameRole: item.role, triggeredBy: 'ReferenceAgent' });
+    item.prompt = adapted.prompt;
+    item.fallbackReason = adapted.fallbackReason;
+    item.refs = spec.bindings.referenceAssetIds.map(id => {
+      const entityId = id.replace(/\.(sheet|plate)$/, '');
+      const entity = [...(ctx.characterDesign?.characters || []), ...(ctx.characterDesign?.settings || [])].find(e => e.id === entityId);
+      return entity?.imagePath || entity?.sheetPath;
+    }).filter(path => typeof path === 'string' && path.startsWith('/api/media/')).slice(0, MAX_REFS);
   }
 
   async #generateItems(items, artifact, ctx, token) {
@@ -289,6 +204,11 @@ export class ReferenceAgent extends BaseAgent {
       for (const result of providerResults) {
         const source = batch.find(b => b.id === result.id);
         recordItemAttempt(artifact, result.id, {
+          ...(result.trace || {}),
+          promptPackageId: ctx.promptPackage.id, promptPackageVersion: ctx.promptPackage.version,
+          plannedMode: ctx.promptPackage.data.shots.find(s => s.shotId === (pending.find(i => i.id === result.id)?.shotId || result.id))?.mode,
+          executedMode: pending.find(i => i.id === result.id)?.videoMode || pending.find(i => i.id === result.id)?.shotMode,
+          fallbackReason: pending.find(i => i.id === result.id)?.fallbackReason,
           seed: source?.seed,
           prompt: source?.prompt,
           referenceId: source?.refs?.[0] || null,
@@ -310,7 +230,7 @@ export class ReferenceAgent extends BaseAgent {
         for (const item of items) {
           lineage[item.id] = artifact.itemLineage[item.id];
         }
-        const plans = this.#retryAgent.planItemRetry(failedItems, lineage, { feedback: ctx.feedback });
+        const plans = this.#retryAgent.planItemRetry(failedItems, lineage, { feedback: ctx.feedback, availableReferences: [...new Set(items.flatMap(i => i.refs))].map(id => ({ id })) });
 
         for (const plan of plans) {
           if (plan.strategy === ItemRetryStrategy.GIVE_UP) continue;
@@ -318,9 +238,16 @@ export class ReferenceAgent extends BaseAgent {
           if (!item) continue;
 
           if (plan.overrides.seed != null) item.seed = plan.overrides.seed;
-          if (plan.overrides.promptOverrides?.[plan.itemId]) {
-            item.prompt = plan.overrides.promptOverrides[plan.itemId];
+          if (plan.strategy === ItemRetryStrategy.REWRITE_PROMPT) {
+            try { ctx.promptPackage = await this.#promptAgent.reviseShotPrompt({ ...ctx, shotId: item.shotId, reason: failedItems.find(f => f.itemId === plan.itemId)?.error }); }
+            catch (error) { if (!error.promptPackage) throw error; }
+            for (const sibling of items.filter(i => i.shotId === item.shotId)) {
+              this.#refreshItem(sibling, ctx);
+              results.delete(sibling.id);
+              if (!pending.includes(sibling)) pending.push(sibling);
+            }
           }
+          if (plan.overrides.referenceOverrides?.[plan.itemId]) item.refs = [plan.overrides.referenceOverrides[plan.itemId]];
         }
       }
     }
@@ -346,12 +273,13 @@ export class ReferenceAgent extends BaseAgent {
 
       const shot = {
         shot_id: pair.shot.shot_id,
+        plannedMode: shotMode, executedMode: shotMode, fallbackReason: items.find(item => item.id === pair.shot.shot_id)?.fallbackReason || null,
         videoMode: shotMode,
         videoModeReason: shotModes?.[i]?.reason || '',
         role,
         imagePath: result.path || '',
         imageUrl: result.imageUrl || '',
-        prompt: result.prompt || pair.shot.prompt || '',
+        prompt: items.find(item => item.id === pair.shot.shot_id)?.prompt || '',
         refs: refsById.get(pair.shot.shot_id) || [],
         status: result.status || 'failed',
       };

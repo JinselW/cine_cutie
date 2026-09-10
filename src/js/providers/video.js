@@ -190,6 +190,7 @@ const videoProvider = {
                 videoPath: r.path || '',
                 status: ok ? 'complete' : 'failed',
                 error: ok ? null : (r.error || 'Generation failed'),
+                trace: r.trace || null,
               });
             }
           }
@@ -276,6 +277,7 @@ const videoProvider = {
           videoPath: r.path || '',
           status: r.status === 'ok' ? 'complete' : 'failed',
           error: r.status === 'ok' ? null : 'Generation failed',
+          trace: r.trace || null,
         });
       }
     }

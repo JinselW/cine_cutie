@@ -18,6 +18,46 @@ export function parseFfmpegProgress(output = '') {
   return matches.length ? Number(matches[matches.length - 1][1]) / 1_000_000 : 0;
 }
 
+function srtTime(value) {
+  const ms = Math.max(0, Math.round(Number(value || 0) * 1000));
+  const hours = Math.floor(ms / 3600000);
+  const minutes = Math.floor((ms % 3600000) / 60000);
+  const seconds = Math.floor((ms % 60000) / 1000);
+  const millis = ms % 1000;
+  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')},${String(millis).padStart(3, '0')}`;
+}
+
+export function formatSrt(cues = []) {
+  return cues.filter(cue => Number(cue?.end) > Number(cue?.start) && String(cue?.text || '').trim())
+    .map((cue, index) => `${index + 1}\n${srtTime(cue.start)} --> ${srtTime(cue.end)}\n${String(cue.text).replace(/\r?\n/g, ' ').trim()}\n`)
+    .join('\n');
+}
+
+function subtitleFilterPath(filePath) {
+  return filePath.replace(/\\/g, '/').replace(/:/g, '\\:').replace(/'/g, "\\'");
+}
+
+export async function applySubtitles(inputPath, cues, outputPath, { onProgress, taskId } = {}) {
+  const srt = formatSrt(cues);
+  if (!srt) return inputPath;
+  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+  const subtitlePath = `${outputPath}.srt`;
+  fs.writeFileSync(subtitlePath, `\uFEFF${srt}`, 'utf8');
+  const info = await probeStreams(inputPath);
+  const cancelCheck = taskId ? () => isTaskCancelled(taskId) : null;
+  try {
+    await runFfmpeg([
+      '-y', '-i', inputPath,
+      '-vf', `subtitles='${subtitleFilterPath(subtitlePath)}':force_style='FontName=Noto Sans CJK SC,FontSize=18,Outline=2,Shadow=1,MarginV=28'`,
+      '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p',
+      '-c:a', 'copy', outputPath,
+    ], { durationSeconds: info.duration, onProgress, cancelCheck });
+    return outputPath;
+  } finally {
+    try { fs.unlinkSync(subtitlePath); } catch {}
+  }
+}
+
 export function parseVisualDefects(output = '') {
   const text = String(output);
   const sumDurations = pattern => [...text.matchAll(pattern)]

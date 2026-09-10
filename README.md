@@ -15,7 +15,7 @@ Cine-Cutie 是一个端到端的 AI 电影创作系统。输入一句话故事�
 | 3. 分镜生成 | Storyboard Artist | 集/段/镜头层级结构，含运镜参数与逐镜时长 |
 | 4. 图片生成 | Image Director | 按视频模式产出帧图，融合定妆图作图生图参考 |
 | 5. 视频生成 | Video Director | 逐片段视频，自动路由到最佳模型 |
-| 6. 后期合成 | Post-Production Artist | ffmpeg 拼接所有片段 → 最终 MP4 |
+| 6. 后期合成 | Post-Production Artist | ffmpeg 拼接、转场、混音并根据剧本烧录字幕 → 最终 MP4 |
 
 ### 角色一致性
 
@@ -41,6 +41,7 @@ Cine-Cutie 是一个端到端的 AI 电影创作系统。输入一句话故事�
 - **Per-item 自动重试**：媒体项按失败类型选择策略（RETRY_SAME / REWRITE_PROMPT / CHANGE_SEED / SWAP_REFERENCE / GIVE_UP，最多 3 次），文本步追加 critique 反馈重跑
 - **成片技术门禁**：DeliveryQC 检查时长、视频流完整性、黑帧、冻结帧、音频，不合格定位修复
 - **IP 合规审查**：内置 IP 库 + 四层证据匹配（exact → alias → fuzzy → keyword）+ 策略裁决（BLOCK/WARN/REVIEW/ALLOW），每步输出过合规门禁
+- **视觉合规审查**：本地 Tesseract OCR 检查画面文字、品牌词与常见水印，FFmpeg 对视频和最终成片定时抽帧；视觉相似度与公众人物识别通过可选 provider 接入，未配置时明确要求人工复核
 - **跨步骤实体追踪**：自动提取角色名、外貌、场景等实体，注入后续步骤确保一致性
 
 ### 会话控制
@@ -62,6 +63,7 @@ Cine-Cutie 是一个端到端的 AI 电影创作系统。输入一句话故事�
 - **逐片段时长**：分镜为每个镜头规划 3–10 秒，服务端按模型支持的档位自动夹取
 - **运镜指令**：从分镜提取 camera 参数（pan/tilt/zoom/dolly/tracking），自动转为 motion prompt
 - **创作历史 Memory**：自动保存会话与素材引用，支持搜索、预览、重命名、导出（详见 [docs/MEMORY.md](docs/MEMORY.md)）
+- **自动字幕**：按最终镜头顺序和时长，把剧本对白生成 SRT 并由 FFmpeg 烧录到成片
 - **Seed 可复现**：图片和视频生成支持 seed 参数
 - **优雅降级**：未配置 API Key 时自动使用模板生成，仍可体验完整流程
 - **中英双语**：完整 i18n 支持
@@ -163,7 +165,9 @@ cine-cutie/
 │   ├── ssh-tunnel.js                # 到 DGX Spark 的 SSH 隧道
 │   ├── memory.js                    # 创作历史档案读写
 │   ├── cache.js                     # LRU 缓存
-│   ├── tasks.js                     # 异步任务状态管理
+│   ├── tasks.js                     # 异步任务向后兼容层（委托 TaskStore）
+│   ├── task-store.js                # TaskStore 接口 + InMemory / File 持久化实现
+│   ├── task-controller.js           # 任务调度：并发控制、幂等提交、重启恢复、取消、清理
 │   ├── render.js                    # ffmpeg 视频拼接
 │   └── workflows/                   # ComfyUI H3 工作流模板（t2v / 首帧 / 首尾帧 / 参考图）
 │
@@ -250,6 +254,9 @@ cine-cutie/
 | `/api/comfyui/status` | GET | SSH 隧道 + GPU 状态 |
 | `/api/comfyui/monitor` | GET | DGX 实时监控（GPU/显存/磁盘/队列） |
 | `/api/task/:id` | GET | 查询异步任务状态 |
+| `/api/task/:id/cancel` | POST | 取消排队中或运行中的任务 |
+| `/api/tasks` | GET | 列出全部任务（按创建时间倒序） |
+| `/api/tasks/health` | GET | 任务调度诊断（并发/队列/恢复） |
 | `/api/media/:filename` | GET | 获取媒体文件 |
 | `/api/cache/stats` · `/clear` | GET/POST | LLM 缓存统计 / 清空 |
 | `/api/health` | GET | 健康检查 |
@@ -270,14 +277,25 @@ cine-cutie/
 | `MEDIA_DIR` | `./media` | 生成素材存储目录 |
 | `MEMORY_DIR` | `./data/memory` | 创作历史存储目录 |
 | `FFMPEG_BIN` | （空） | 指定后 ffmpeg-static 不下载，直接用该路径 |
+| `TASK_STORE_DIR` | `./data/tasks` | 持久化任务存储目录（不设则用内存存储） |
+| `TASK_MAX_CONCURRENCY` | `4` | 全局最大并行任务数 |
+| `TASK_PER_OWNER_LIMIT` | `2` | 单个 owner 最大并行任务数 |
+| `TASK_RETENTION_HOURS` | `1` | 已完成任务保留时长（小时），超时自动清理 |
 
 ## 测试
 
 ```bash
-npm test          # 运行全部单元测试（node:test）
+npm test          # 自动发现并运行全部 test/*.test.js
+npm run test:smoke # 快速验证构建产物、Pipeline 和字幕链路
+npm run verify     # 构建 + 全量测试 + smoke test
+npm run benchmark  # 生成工作流哈希、量化证据与本地编译基准
 ```
 
-测试覆盖：ArtifactStore 依赖与持久化、DeliveryQC 门禁、编排器门禁/修订/回滚、ComfyUI 工作流、DashScope 视频输入、视频模式规划、IP 合规、Memory、重试策略、进度追踪、渲染转场与 BGM。
+真实 ComfyUI/H3 benchmark 需在已配置 DGX SSH 环境显式设置 `CINE_BENCH_REAL=1`；支持四种视频模式、fast/balanced/quality 档位、受 profile 上限约束的有界并发、GPU/内存/磁盘采样及输出哈希。缺少合法图像输入会记录跳过原因，未连接 GPU 会记录 `measured=false`，不会写入估算数据。精确命令和字段定义见 [模型工程说明](docs/MODEL_ENGINEERING.md)。
+
+测试覆盖：ArtifactStore 依赖与持久化、DeliveryQC 门禁、审核决定、最终合规报告、生成 lineage、Prompt Agent、ComfyUI 工作流、DashScope 视频输入、视频模式规划、文本与视觉合规、Memory、重试策略、进度追踪、转场、字幕与 BGM。视觉合规的部署方式和门禁语义见 [视觉合规说明](docs/VISUAL_COMPLIANCE.md)。
+
+复现与模型工程证据见 [模型工程说明](docs/MODEL_ENGINEERING.md)、[复现 Notebook](notebooks/reproduce_and_benchmark.ipynb) 和生成的 [benchmark 报告](reports/benchmark.json)。Co-Create 模式同时承担逐阶段人工审核，并把批准记录固化到 Artifact provenance；最终页会展示带限制声明和哈希的合规报告。
 
 ## 技术栈
 

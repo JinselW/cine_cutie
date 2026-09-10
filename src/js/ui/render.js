@@ -142,8 +142,9 @@ export function showGenerating(stepIndex) {
   const el = $('#stepContent');
   beginStage(step.id);
   el.innerHTML = `
-    <div class="gen-status">
-      <div class="sub-msg">${t('ui.agentWorking', { agent })}</div>
+    <div class="gen-status generation-status">
+      <div class="generation-icon" aria-hidden="true">${step.icon}</div>
+      <div class="msg" role="status">${t('ui.agentWorking', { agent })}</div>
       <div class="dots"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>
       <div class="progress-wrap" id="genProgressWrap">
         <div class="progress-bar indeterminate" id="genProgressBar" role="progressbar" aria-label="${label}"><div class="progress-fill" id="genProgress"></div></div>

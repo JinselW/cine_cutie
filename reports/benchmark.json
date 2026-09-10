@@ -1,0 +1,108 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-09-10T10:16:40.345Z",
+  "environment": {
+    "node": "v20.15.0",
+    "platform": "win32",
+    "arch": "x64"
+  },
+  "scope": "Local workflow compilation and optional real ComfyUI/H3 inference. Compiler timings are not GPU performance.",
+  "reproducibility": {
+    "seed": 42,
+    "durationSeconds": 5,
+    "aspectRatio": "16:9",
+    "profiles": [
+      "balanced"
+    ]
+  },
+  "workflows": [
+    {
+      "name": "h3_first_frame_to_video.json",
+      "sha256": "8071efb24b31b743e3d1049d8865358496fc0657f761564d359558658923032e",
+      "bytes": 8193,
+      "nodeCount": 26,
+      "precisionAndQuantizationEvidence": [
+        "minimax_h3_audio_vae_fp32.safetensors",
+        "minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors",
+        "minimax_h3_fl2va_pruned_int8_convrot.safetensors",
+        "minimax_h3_video_vae_fp16.safetensors",
+        "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors"
+      ]
+    },
+    {
+      "name": "h3_first_last_frame_to_video.json",
+      "sha256": "a13c1d2960ad443cd4680e6f3ab6e32f76bf4c4dfbaf9740afa6eed2024b4b1c",
+      "bytes": 8433,
+      "nodeCount": 27,
+      "precisionAndQuantizationEvidence": [
+        "minimax_h3_audio_vae_fp32.safetensors",
+        "minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors",
+        "minimax_h3_fl2va_pruned_int8_convrot.safetensors",
+        "minimax_h3_video_vae_fp16.safetensors",
+        "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors"
+      ]
+    },
+    {
+      "name": "h3_reference_to_video.json",
+      "sha256": "67583113f6ad69f88132d5f95878f67a6ea295e7d5f620655e47342039cb20e5",
+      "bytes": 8014,
+      "nodeCount": 26,
+      "precisionAndQuantizationEvidence": [
+        "minimax_h3_audio_vae_fp32.safetensors",
+        "minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors",
+        "minimax_h3_ref2va_pruned_int8_convrot.safetensors",
+        "minimax_h3_video_vae_fp16.safetensors",
+        "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors"
+      ]
+    },
+    {
+      "name": "h3_text_to_video.json",
+      "sha256": "d2dfc3678382e3db17ea2781c8d69fca6be06b96c79eebfd82ba08120c9b9aac",
+      "bytes": 7698,
+      "nodeCount": 23,
+      "precisionAndQuantizationEvidence": [
+        "minimax_h3_audio_vae_fp32.safetensors",
+        "minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors",
+        "minimax_h3_fl2va_pruned_int8_convrot.safetensors",
+        "minimax_h3_video_vae_fp16.safetensors",
+        "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors"
+      ]
+    }
+  ],
+  "compiler": {
+    "textToVideo": {
+      "metric": "localWorkflowCompilation",
+      "iterations": 100,
+      "medianMs": 0.104,
+      "p95Ms": 0.555
+    },
+    "firstFrame": {
+      "metric": "localWorkflowCompilation",
+      "iterations": 100,
+      "medianMs": 0.17,
+      "p95Ms": 0.407
+    },
+    "firstLastFrame": {
+      "metric": "localWorkflowCompilation",
+      "iterations": 100,
+      "medianMs": 0.115,
+      "p95Ms": 0.404
+    },
+    "referenceImage": {
+      "metric": "localWorkflowCompilation",
+      "iterations": 100,
+      "medianMs": 0.115,
+      "p95Ms": 0.381
+    }
+  },
+  "queuePolicy": {
+    "requestedConcurrency": 1,
+    "boundedByProfile": true,
+    "defaultConcurrency": 1
+  },
+  "gpuRuntime": {
+    "measured": false,
+    "reason": "Real inference disabled; set CINE_BENCH_REAL=1 on a configured ComfyUI host",
+    "attempts": []
+  }
+}

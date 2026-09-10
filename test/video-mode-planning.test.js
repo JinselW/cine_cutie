@@ -3,22 +3,8 @@ import assert from 'node:assert/strict';
 import {
   buildVideoModeCandidates,
   isVideoModelUnavailableError,
-  normalizeShotModeAssignments,
   videoClipPayloadForMode,
 } from '../src/js/videoModePlanning.js';
-
-test('auto mode assignments match storyboard shot ids regardless of JSON id type', () => {
-  const shots = [{ shot_id: 1 }, { shot_id: 'shot-2' }, { shot_id: 3 }];
-  assert.deepEqual(normalizeShotModeAssignments(shots, [
-    { shot_id: '1', mode: 'firstLastFrame', reason: 'clear end pose' },
-    { shot_id: 'shot-2', mode: 'referenceImage', reason: 'identity' },
-    { shot_id: 3, mode: 'invalid' },
-  ]), [
-    { shot: shots[0], mode: 'firstLastFrame', reason: 'clear end pose' },
-    { shot: shots[1], mode: 'referenceImage', reason: 'identity' },
-    { shot: shots[2], mode: 'firstFrame', reason: '' },
-  ]);
-});
 
 test('first-last auto plan uses two independent frames then degrades without reusing another shot', () => {
   const complete = buildVideoModeCandidates('firstLastFrame', {

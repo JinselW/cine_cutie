@@ -243,6 +243,8 @@ function resetStepMetrics() {
   stepFallback = false;
 }
 
+export function peekTokenUsage() { return { ...stepUsage }; }
+
 function consumeStepMetrics() {
   const m = { tokens: { ...stepUsage }, retries: 0, fallbackUsed: stepFallback };
   resetStepMetrics();
