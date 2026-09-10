@@ -233,7 +233,7 @@ export class VideoAgent extends BaseAgent {
   #modeHasModel(mode) {
     if (getActiveProvider('video')?.id === 'video-comfy') return true;
     const cfg = this.#dashScopeConfig();
-    if (!cfg?.apiKey || mode === 'textToVideo') return false;
+    if ((!cfg?.apiKey && !cfg?.arkApiKey) || mode === 'textToVideo') return false;
     if (mode === 'referenceImage') return Boolean(cfg.refVideoModel);
     if (mode === 'firstLastFrame') return Boolean(cfg.lastFrameVideoModel);
     return Boolean(cfg.videoModel);

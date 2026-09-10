@@ -5,6 +5,7 @@ import mammoth from 'mammoth';
 import { createMemoryRouter } from './memory.js';
 import { LRUCache } from './cache.js';
 import { submitImageTask, submitImageEditTask, parseImageResultUrl, submitVideoTask, submitVideoTaskV2, pollTask, downloadFile, detectVideoMode, hasVideoUploads, fileToDataUri } from './dashscope.js';
+import { isArkModel, isArkVideoModel, isArkImageModel, submitArkVideoTask, submitArkImageTask, pollArkTask, parseArkVideoUrl } from './ark.js';
 import { createTask, getTask, updateTask, cancelTask, isTaskCancelled, cleanupTasks } from './tasks.js';
 import { concatVideos, checkFfmpeg, renderWithTransitions, probeStreams, probeAudioQuality, probeVisualDefects, applyBgm, sanitizeVolume } from './render.js';
 import { submitWorkflow, pollUntilDone, downloadOutput, uploadImageToComfy, checkComfyUIStatus, getComfyMonitorStatus, selectWorkflowMode, cancelPrompt, MAX_COMFY_REFERENCE_IMAGES } from './comfyui.js';
@@ -112,7 +113,12 @@ const upload = multer({
 });
 
 function isV2Model(name) {
-  return typeof name === 'string' && /^wan2\.\d/.test(name);
+  return typeof name === 'string' && name.startsWith('wan2.7');
+}
+
+function detectProvider(name) {
+  if (isArkModel(name)) return 'ark';
+  return 'dashscope';
 }
 
 const bgmUpload = multer({
@@ -266,9 +272,13 @@ app.post('/api/chat/completions', async (req, res) => {
 app.post('/api/generate/image', async (req, res) => {
   const { prompts, model, size, seed, seeds, refs, img2imgModel, img2imgSize } = req.body;
   const apiKey = req.headers['x-api-key'];
+  const arkApiKey = req.headers['x-ark-api-key'];
+  const provider = detectProvider(model);
+  const mediaApiKey = provider === 'ark' ? arkApiKey : apiKey;
 
-  if (!apiKey) {
-    return res.status(401).json({ error: 'Missing DashScope API key. Send via X-Api-Key header.' });
+  if (!mediaApiKey) {
+    const label = provider === 'ark' ? 'Ark (火山方舟)' : 'DashScope';
+    return res.status(401).json({ error: `Missing ${label} API key for model ${model}.` });
   }
 
   if (!Array.isArray(prompts) || prompts.length === 0) {
@@ -300,52 +310,70 @@ app.post('/api/generate/image', async (req, res) => {
           console.log(`[ImageBatch] task=${task.id} image ${i + 1}/${prompts.length}`);
           updateTask(task.id, { status: 'running', current: i + 1, progress: Math.round((i / prompts.length) * 100) });
 
-          let taskId;
-          if (itemRefs?.length && img2imgModel) {
-            const dataUris = [];
-            for (const ref of itemRefs) {
-              const localPath = resolveMediaRef(ref);
-              if (localPath) dataUris.push(await fileToDataUri(localPath));
+          let imageUrl;
+          if (provider === 'ark') {
+            const refUrls = [];
+            if (itemRefs?.length) {
+              for (const ref of itemRefs) {
+                const localPath = resolveMediaRef(ref);
+                if (localPath) refUrls.push(await fileToDataUri(localPath));
+              }
             }
-            if (dataUris.length === 0) {
-              throw new Error(`Reference images not found on server: ${itemRefs.join(', ')}`);
-            }
-            taskId = await submitImageEditTask(prompts[i], dataUris, {
-              model: img2imgModel, size: img2imgSize || size, apiKey, seed: itemSeed
+            imageUrl = await submitArkImageTask(prompts[i], {
+              model: itemRefs?.length && img2imgModel ? img2imgModel : model,
+              size: img2imgSize || size,
+              apiKey: mediaApiKey,
+              imageUrls: refUrls.length ? refUrls : undefined,
             });
           } else {
-            taskId = await submitImageTask(prompts[i], { model, size, apiKey, seed: itemSeed });
-          }
-
-          let pollResult;
-          for (let attempt = 0; attempt < 120; attempt++) {
-            if (isTaskCancelled(task.id)) { lastError = 'Cancelled'; break; }
-            await new Promise(r => setTimeout(r, 3000));
-            pollResult = await pollTask(taskId, apiKey);
-            const status = pollResult.output?.task_status;
-            if (status === 'SUCCEEDED' || status === 'FAILED') break;
-          }
-
-          if (lastError === 'Cancelled') break;
-
-          if (pollResult?.output?.task_status === 'SUCCEEDED') {
-            const imageUrl = parseImageResultUrl(pollResult);
-            if (imageUrl) {
-              const filename = `img_${task.id}_${i}.png`;
-              const savePath = path.join(MEDIA_DIR, filename);
-              await downloadFile(imageUrl, savePath);
-              results.push({ index: i, status: 'ok', path: `/api/media/${filename}`, imageUrl, prompt: prompts[i] });
-              console.log(`[ImageBatch] task=${task.id} image ${i + 1} OK`);
-              lastError = null;
-              break;
+            let taskId;
+            if (itemRefs?.length && img2imgModel) {
+              const dataUris = [];
+              for (const ref of itemRefs) {
+                const localPath = resolveMediaRef(ref);
+                if (localPath) dataUris.push(await fileToDataUri(localPath));
+              }
+              if (dataUris.length === 0) {
+                throw new Error(`Reference images not found on server: ${itemRefs.join(', ')}`);
+              }
+              taskId = await submitImageEditTask(prompts[i], dataUris, {
+                model: img2imgModel, size: img2imgSize || size, apiKey: mediaApiKey, seed: itemSeed
+              });
             } else {
-              lastError = 'No image URL in response';
-              console.log(`[ImageBatch] task=${task.id} image ${i + 1} FAILED: no URL`);
+              taskId = await submitImageTask(prompts[i], { model, size, apiKey: mediaApiKey, seed: itemSeed });
             }
-          } else {
-            const errMsg = pollResult?.output?.message || 'Task failed';
-            lastError = errMsg;
-            console.log(`[ImageBatch] task=${task.id} image ${i + 1} FAILED: ${errMsg}`);
+
+            let pollResult;
+            for (let attempt = 0; attempt < 120; attempt++) {
+              if (isTaskCancelled(task.id)) { lastError = 'Cancelled'; break; }
+              await new Promise(r => setTimeout(r, 3000));
+              pollResult = await pollTask(taskId, mediaApiKey);
+              const status = pollResult.output?.task_status;
+              if (status === 'SUCCEEDED' || status === 'FAILED') break;
+            }
+
+            if (lastError === 'Cancelled') break;
+
+            if (pollResult?.output?.task_status === 'SUCCEEDED') {
+              imageUrl = parseImageResultUrl(pollResult);
+            } else {
+              const errMsg = pollResult?.output?.message || 'Task failed';
+              lastError = errMsg;
+              console.log(`[ImageBatch] task=${task.id} image ${i + 1} FAILED: ${errMsg}`);
+            }
+          }
+
+          if (imageUrl) {
+            const filename = `img_${task.id}_${i}.png`;
+            const savePath = path.join(MEDIA_DIR, filename);
+            await downloadFile(imageUrl, savePath);
+            results.push({ index: i, status: 'ok', path: `/api/media/${filename}`, imageUrl, prompt: prompts[i] });
+            console.log(`[ImageBatch] task=${task.id} image ${i + 1} OK`);
+            lastError = null;
+            break;
+          } else if (!lastError) {
+            lastError = 'No image URL in response';
+            console.log(`[ImageBatch] task=${task.id} image ${i + 1} FAILED: no URL`);
           }
         } catch (err) {
           lastError = err.message;
@@ -402,9 +430,13 @@ app.post('/api/upload/prompt', promptUpload.single('file'), async (req, res) => 
 app.post('/api/generate/video', async (req, res) => {
   const { clips, model, duration, resolution, seed, aspectRatio, uploads, mode: clientMode, audio } = req.body;
   const apiKey = req.headers['x-api-key'];
+  const arkApiKey = req.headers['x-ark-api-key'];
+  const provider = detectProvider(model);
+  const mediaApiKey = provider === 'ark' ? arkApiKey : apiKey;
 
-  if (!apiKey) {
-    return res.status(401).json({ error: 'Missing DashScope API key. Send via X-Api-Key header.' });
+  if (!mediaApiKey) {
+    const label = provider === 'ark' ? 'Ark (火山方舟)' : 'DashScope';
+    return res.status(401).json({ error: `Missing ${label} API key for model ${model}.` });
   }
 
   if (!Array.isArray(clips) || clips.length === 0) {
@@ -469,7 +501,36 @@ app.post('/api/generate/video', async (req, res) => {
 
           let taskId;
 
-          if (hasUploads) {
+          if (provider === 'ark') {
+            const contentItems = [];
+            const addImage = (url, role) => { if (url) contentItems.push({ type: 'image_url', image_url: { url }, role }); };
+
+            if (hasUploads) {
+              if (uploads.firstFrame?.localPath) addImage(await fileToDataUri(uploads.firstFrame.localPath), 'first_frame');
+              if (uploads.lastFrame?.localPath) addImage(await fileToDataUri(uploads.lastFrame.localPath), 'last_frame');
+              if (uploads.referenceImages?.length) {
+                for (const ref of uploads.referenceImages) {
+                  if (ref.localPath) addImage(await fileToDataUri(ref.localPath), 'reference_image');
+                }
+              }
+            } else {
+              const firstUrl = await toDashScopeImage(clip.imagePath || clip.imageUrl);
+              addImage(firstUrl, 'first_frame');
+              const lastUrl = await toDashScopeImage(clip.lastFramePath || clip.lastFrameUrl);
+              addImage(lastUrl, 'last_frame');
+              const clipRefs = Array.isArray(clip.referenceImages) ? clip.referenceImages.slice(0, MAX_VIDEO_REFS) : [];
+              for (const ref of clipRefs) {
+                const url = await toDashScopeImage(ref);
+                addImage(url, 'reference_image');
+              }
+            }
+
+            console.log(`[VideoBatch Ark] task=${task.id} clip ${i + 1} content=${contentItems.length + 1} items`);
+            taskId = await submitArkVideoTask(clip.prompt || 'Scene animation', contentItems, {
+              model: effectiveModel, duration: clip.duration ?? duration, resolution: (resolution || '720P').toLowerCase(),
+              apiKey: mediaApiKey, seed: clip.seed ?? seed, ratio: aspectRatio,
+            });
+          } else if (hasUploads) {
             if (isV2Model(effectiveModel)) {
               const mediaArray = [];
               if (uploads.firstFrame?.localPath) {
@@ -572,18 +633,32 @@ app.post('/api/generate/video', async (req, res) => {
           }
 
           let pollResult;
-          for (let attempt = 0; attempt < 240; attempt++) {
-            if (isTaskCancelled(task.id)) { lastError = 'Cancelled'; break; }
-            await new Promise(r => setTimeout(r, 5000));
-            pollResult = await pollTask(taskId, apiKey);
-            const status = pollResult.output?.task_status;
-            if (status === 'SUCCEEDED' || status === 'FAILED') break;
+          if (provider === 'ark') {
+            for (let attempt = 0; attempt < 240; attempt++) {
+              if (isTaskCancelled(task.id)) { lastError = 'Cancelled'; break; }
+              await new Promise(r => setTimeout(r, 5000));
+              pollResult = await pollArkTask(taskId, mediaApiKey);
+              const s = (pollResult.status || '').toLowerCase();
+              if (s === 'succeeded' || s === 'failed' || s === 'cancelled') break;
+            }
+          } else {
+            for (let attempt = 0; attempt < 240; attempt++) {
+              if (isTaskCancelled(task.id)) { lastError = 'Cancelled'; break; }
+              await new Promise(r => setTimeout(r, 5000));
+              pollResult = await pollTask(taskId, mediaApiKey);
+              const status = pollResult.output?.task_status;
+              if (status === 'SUCCEEDED' || status === 'FAILED') break;
+            }
           }
 
           if (lastError === 'Cancelled') break;
 
-          if (pollResult?.output?.task_status === 'SUCCEEDED') {
-            const videoUrl = pollResult.output.video_url;
+          const isDone = provider === 'ark'
+            ? (pollResult?.status || '').toLowerCase() === 'succeeded'
+            : pollResult?.output?.task_status === 'SUCCEEDED';
+
+          if (isDone) {
+            const videoUrl = provider === 'ark' ? parseArkVideoUrl(pollResult) : pollResult.output.video_url;
             if (videoUrl) {
               const filename = `vid_${task.id}_${i}.mp4`;
               const savePath = path.join(MEDIA_DIR, filename);
@@ -597,7 +672,9 @@ app.post('/api/generate/video', async (req, res) => {
               console.log(`[VideoBatch] task=${task.id} clip ${i + 1} FAILED: no video URL`);
             }
           } else {
-            const errMsg = pollResult?.output?.message || 'Task failed';
+            const errMsg = provider === 'ark'
+              ? (pollResult?.error?.message || pollResult?.status || 'Task failed')
+              : (pollResult?.output?.message || 'Task failed');
             lastError = errMsg;
             console.log(`[VideoBatch] task=${task.id} clip ${i + 1} FAILED: ${errMsg}`);
           }

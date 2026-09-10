@@ -38,7 +38,7 @@ async function submitBatch(sentClips, bodyPayload, dsConfig, signal, onProgress)
   try {
     const res = await fetch('/api/generate/video', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Api-Key': dsConfig.apiKey },
+      headers: { 'Content-Type': 'application/json', 'X-Api-Key': dsConfig.apiKey, 'X-Ark-Api-Key': dsConfig.arkApiKey },
       signal,
       body: JSON.stringify(bodyPayload),
     });
@@ -94,15 +94,16 @@ function failAll(items, error) {
 
 const videoProvider = {
   id: 'video',
-  name: 'DashScope Video Generation',
+  name: 'DashScope / Ark Video Generation',
   capabilities: ['video'],
 
   async generate({ items, uploads, overrides = {}, signal } = {}) {
     const dsConfig = getImageConfig();
-    if (!dsConfig.apiKey || !items?.length) {
+    const hasKey = !!(dsConfig.apiKey || dsConfig.arkApiKey);
+    if (!hasKey || !items?.length) {
       return items.map(item => ({
         id: item.id, videoPath: '', status: 'failed',
-        error: !dsConfig.apiKey ? 'Not configured' : 'No items',
+        error: !hasKey ? 'Not configured' : 'No items',
       }));
     }
     if (signal?.aborted) return failAll(items, 'Cancelled');
@@ -300,6 +301,7 @@ const DURATION_RULES = [
   { pattern: /^wan2\.6-i2v/, range: [2, 15] },
   { pattern: /^wan2\.5-i2v/, values: [5, 10] },
   { pattern: /^wanx2\.1-i2v-turbo/, values: [3, 4, 5] },
+  { pattern: /^doubao-seedance/, values: [5, 10] },
 ];
 
 export function getDefaultVideoDuration(modelName) {

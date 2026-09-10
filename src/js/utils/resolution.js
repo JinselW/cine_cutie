@@ -46,10 +46,10 @@ export function computeImg2ImgSize(aspectRatio, tierId) {
   return `${upscale(w)}*${upscale(h)}`;
 }
 
-// DashScope 视频档位：2.7 系（r2v / general i2v）无 480P，回退 720P
+// 视频档位：wan2.7 系和 doubao-seedance 无 480P，回退 720P
 export function dsVideoResolution(tierId, model) {
   const tier = RESOLUTION_TIERS.some(t => t.id === tierId) ? tierId : DEFAULT_RESOLUTION;
-  if (tier === '480P' && /2\.7/.test(model || '')) return '720P';
+  if (tier === '480P' && (/2\.7/.test(model || '') || /seedance/.test(model || ''))) return '720P';
   return tier;
 }
 

@@ -7,7 +7,7 @@ import { reportBatchProgress } from '../progressTracker.js';
 const SETTINGS_KEY = 'cine-cutie-settings';
 const OLD_DS_KEY = 'cine-cutie-dashscope';
 
-let config = { apiKey: '', imageModel: 'wan2.6-t2i', img2imgModel: '', videoModel: 'wan2.6-i2v', lastFrameVideoModel: 'wan2.7-i2v', refVideoModel: 'wan2.7-r2v' };
+let config = { apiKey: '', arkApiKey: '', imageModel: 'wan2.6-t2i', img2imgModel: '', videoModel: 'wan2.6-i2v', lastFrameVideoModel: 'wan2.7-i2v', refVideoModel: 'wan2.7-r2v' };
 
 function loadConfig() {
   try {
@@ -15,6 +15,7 @@ function loadConfig() {
     if (saved) {
       const parsed = JSON.parse(saved);
       config.apiKey = parsed.apiProviders?.dashscope?.apiKey || '';
+      config.arkApiKey = parsed.apiProviders?.ark?.apiKey || '';
       config.imageModel = parsed.models?.image?.name || 'wan2.6-t2i';
       config.img2imgModel = parsed.models?.img2img?.name || '';
       config.videoModel = parsed.models?.video?.name || 'wan2.6-i2v';
@@ -32,6 +33,7 @@ function loadConfig() {
 
 function saveConfig(cfg) {
   if (cfg.apiKey !== undefined) config.apiKey = cfg.apiKey;
+  if (cfg.arkApiKey !== undefined) config.arkApiKey = cfg.arkApiKey;
   if (cfg.imageModel !== undefined) config.imageModel = cfg.imageModel;
   if (cfg.img2imgModel !== undefined) config.img2imgModel = cfg.img2imgModel;
   if (cfg.videoModel !== undefined) config.videoModel = cfg.videoModel;
@@ -44,6 +46,8 @@ function saveConfig(cfg) {
     if (!parsed.apiProviders) parsed.apiProviders = {};
     if (!parsed.apiProviders.dashscope) parsed.apiProviders.dashscope = {};
     if (cfg.apiKey !== undefined) parsed.apiProviders.dashscope.apiKey = cfg.apiKey;
+    if (!parsed.apiProviders.ark) parsed.apiProviders.ark = {};
+    if (cfg.arkApiKey !== undefined) parsed.apiProviders.ark.apiKey = cfg.arkApiKey;
     if (!parsed.models) parsed.models = {};
     if (cfg.imageModel !== undefined) parsed.models.image = { name: cfg.imageModel };
     if (cfg.img2imgModel !== undefined) parsed.models.img2img = { name: cfg.img2imgModel };
@@ -55,7 +59,7 @@ function saveConfig(cfg) {
 }
 
 function isConfigured() {
-  return !!config.apiKey;
+  return !!(config.apiKey || config.arkApiKey);
 }
 
 function getConfig() {
@@ -122,6 +126,7 @@ async function generateImages(prompts, ids, seeds, refs, externalSignal) {
       headers: {
         'Content-Type': 'application/json',
         'X-Api-Key': config.apiKey,
+        'X-Ark-Api-Key': config.arkApiKey,
       },
       signal: externalSignal,
       body: JSON.stringify({

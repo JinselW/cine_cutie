@@ -350,6 +350,7 @@ function handleSave() {
 
   const dashScopeConfig = {
     apiKey: apiProviders.dashscope?.apiKey || '',
+    arkApiKey: apiProviders.ark?.apiKey || '',
     imageModel: imageName || IMAGE_PRESETS[0],
     img2imgModel: img2imgName || IMG2IMG_PRESETS[0],
   };
