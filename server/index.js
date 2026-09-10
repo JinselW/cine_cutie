@@ -30,6 +30,11 @@ const PORT = process.env.PORT || 3006;
 const MEDIA_DIR = process.env.MEDIA_DIR || path.join(__dirname, '..', 'media');
 fs.mkdirSync(MEDIA_DIR, { recursive: true });
 
+// Matches the browser's heavy text budget so the proxy is never the tighter of the two caps.
+const DEFAULT_UPSTREAM_TIMEOUT_MS = 300000;
+const UPSTREAM_TIMEOUT_GRACE_MS = 5000;
+const MAX_UPSTREAM_TIMEOUT_MS = 600000;
+
 function fileSha256(filePath) {
   return createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
 }
@@ -278,10 +283,18 @@ app.post('/api/chat/completions', async (req, res) => {
   }
 
   const url = `${endpoint.replace(/\/+$/, '')}/chat/completions`;
+  // The browser already aborts on its own budget; a tighter hardcoded cap here would cut
+  // long prompt-package calls in half. Wait just past the caller's budget so its own
+  // timeout surfaces first, and default to the heavy budget when none is declared.
+  const declaredBudget = Number(req.headers['x-upstream-timeout-ms']);
+  const upstreamTimeoutMs = Math.min(
+    (declaredBudget > 0 ? declaredBudget : DEFAULT_UPSTREAM_TIMEOUT_MS) + UPSTREAM_TIMEOUT_GRACE_MS,
+    MAX_UPSTREAM_TIMEOUT_MS,
+  );
 
   try {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 90000);
+    const timeout = setTimeout(() => controller.abort(), upstreamTimeoutMs);
 
     const body = { model, messages, temperature: temperature ?? 0.8 };
     if (response_format) body.response_format = response_format;
@@ -313,7 +326,7 @@ app.post('/api/chat/completions', async (req, res) => {
     res.json(data);
   } catch (err) {
     if (err.name === 'AbortError') {
-      return res.status(504).json({ error: 'Upstream request timed out (90s)' });
+      return res.status(504).json({ error: `Upstream request timed out (${Math.round(upstreamTimeoutMs / 1000)}s)` });
     }
     res.status(502).json({ error: 'Upstream request failed', detail: err.message });
   }

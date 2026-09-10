@@ -298,7 +298,8 @@ async function callChat(messages, { retryWithoutJsonFormat = false, signal: exte
       headers = {
         'Content-Type': 'application/json',
         'X-Target-Endpoint': endpoint || 'https://api.openai.com/v1',
-        'X-Api-Key': apiKey
+        'X-Api-Key': apiKey,
+        'X-Upstream-Timeout-Ms': String(timeoutMs),
       };
     } else {
       url = `${endpoint}/chat/completions`;
