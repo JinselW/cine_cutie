@@ -11,16 +11,23 @@ export function tierToMp(tierId) {
   return tier ? tier.mp : 0.9;
 }
 
-// 由画面比例 + 分辨率档位算出图片 W*H（供文生图/i2v 首帧使用）
-// 单边约束到 DashScope wanx2.1 的 [512,1440]，四舍五入到 16 的倍数
+// wan2.5/2.6 文生图要求总像素位于 1280²~1440²；使用官方推荐的常见比例尺寸。
 export function computeImageSize(aspectRatio, tierId) {
+  const recommended = {
+    '1:1': '1280*1280',
+    '3:4': '1104*1472',
+    '4:3': '1472*1104',
+    '9:16': '960*1696',
+    '16:9': '1696*960',
+  };
+  if (recommended[aspectRatio]) return recommended[aspectRatio];
   const [rw, rh] = parseRatio(aspectRatio);
-  const totalPixels = tierToMp(tierId) * 1_000_000;
+  const totalPixels = 1280 * 1280;
   let w = Math.sqrt(totalPixels * rw / rh);
   let h = totalPixels / w;
 
-  const MAX = 1440;
-  const MIN = 512;
+  const MAX = 4096;
+  const MIN = 240;
   const maxSide = Math.max(w, h);
   const minSide = Math.min(w, h);
   let s = 1;
@@ -49,7 +56,7 @@ export function computeImg2ImgSize(aspectRatio, tierId) {
 // 视频档位：wan2.7 系和 doubao-seedance 无 480P，回退 720P
 export function dsVideoResolution(tierId, model) {
   const tier = RESOLUTION_TIERS.some(t => t.id === tierId) ? tierId : DEFAULT_RESOLUTION;
-  if (tier === '480P' && (/2\.7/.test(model || '') || /seedance/.test(model || ''))) return '720P';
+  if (tier === '480P' && (/^wan2\.[67]-(?:i2v|r2v)/.test(model || '') || /seedance/.test(model || ''))) return '720P';
   return tier;
 }
 
@@ -63,6 +70,7 @@ function parseRatio(aspectRatio) {
 }
 
 const DURATION_RULES = [
+  { pattern: /^wan2\.6-r2v/, range: [2, 10] },
   { pattern: /^wan2\.7-/, range: [2, 15] },
   { pattern: /^wan2\.6-i2v-flash/, range: [2, 15] },
   { pattern: /^wan2\.6-i2v-us/, values: [5, 10, 15] },
@@ -75,8 +83,8 @@ const DURATION_RULES = [
 export function getDefaultVideoDuration(modelName) {
   const rule = DURATION_RULES.find(r => r.pattern.test(modelName || ''));
   if (!rule) return 5;
-  if (rule.values) return rule.values[Math.floor(rule.values.length / 2)];
-  return Math.round((rule.range[0] + rule.range[1]) / 2);
+  if (rule.values) return rule.values.includes(5) ? 5 : rule.values[0];
+  return Math.min(rule.range[1], Math.max(rule.range[0], 5));
 }
 
 export function getVideoDurationRange(modelName) {

@@ -68,11 +68,12 @@ function getConfig() {
 
 loadConfig();
 
-const MAX_REFERENCE_IMAGES = 4;
+const MAX_REFERENCE_IMAGES = 9;
 
-function normalizeRefs(refs) {
+function normalizeRefs(refs, model) {
   if (!Array.isArray(refs)) return null;
-  const clean = refs.filter(r => typeof r === 'string' && r.startsWith('/api/media/')).slice(0, MAX_REFERENCE_IMAGES);
+  const modelLimit = model === 'wan2.7-image' ? MAX_REFERENCE_IMAGES : 4;
+  const clean = refs.filter(r => typeof r === 'string' && r.startsWith('/api/media/')).slice(0, modelLimit);
   return clean.length ? clean : null;
 }
 
@@ -102,7 +103,7 @@ const imageProvider = {
       return overrideSeed ?? item.seed ?? 42;
     });
 
-    const refs = items.map(item => normalizeRefs(item.refs));
+    const refs = items.map(item => normalizeRefs(item.refs, config.img2imgModel));
     const ids = items.map(item => item.id);
 
     return await generateImages(prompts, ids, seeds, refs, signal);

@@ -161,6 +161,7 @@ const videoProvider = {
           mode: groupMode,
           duration: DEFAULT_CLIP_DURATION,
           resolution: dsRes,
+          aspectRatio: state.aspectRatio || '16:9',
           seed: group.clips[0].seed,
           audio: true,
         };
@@ -237,6 +238,7 @@ const videoProvider = {
           mode,
           duration: DEFAULT_CLIP_DURATION,
           resolution: dsRes,
+          aspectRatio: state.aspectRatio || '16:9',
           seed: clips[0].seed,
           audio: true,
         }
@@ -255,6 +257,7 @@ const videoProvider = {
           mode,
           duration: DEFAULT_CLIP_DURATION,
           resolution: dsRes,
+          aspectRatio: state.aspectRatio || '16:9',
           seed: sentClips[0]?.seed ?? 42,
           audio: true,
         };

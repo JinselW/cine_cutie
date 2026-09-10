@@ -25,13 +25,13 @@ const MODEL_PRESETS = {
   gemini:    ['gemini-2.0-flash', 'gemini-1.5-pro'],
 };
 
-const IMAGE_PRESETS = ['wan2.6-t2i', 'doubao-seedream-5-0-260128', 'doubao-seedream-4-5-251128'];
-const IMG2IMG_PRESETS = ['wan2.6-image', 'wan2.7-image', 'doubao-seedream-5-0-260128'];
+const IMAGE_PRESETS = ['wan2.6-t2i', 'wan2.5-t2i-preview'];
+const IMG2IMG_PRESETS = ['wan2.7-image', 'wan2.6-image'];
 
 const VIDEO_MODES = [
-  { id: 'firstFrame', presets: ['wan2.6-i2v', 'doubao-seedance-2-0-260128', 'doubao-seedance-1-0-pro-250528'], defaultModel: 'wan2.6-i2v', configKey: 'video' },
-  { id: 'firstLastFrame', presets: ['wan2.7-i2v', 'doubao-seedance-2-0-260128'], defaultModel: 'wan2.7-i2v', configKey: 'video' },
-  { id: 'referenceImage', presets: ['wan2.7-r2v', 'doubao-seedance-2-0-260128'], defaultModel: 'wan2.7-r2v', configKey: 'refVideo' },
+  { id: 'firstFrame', presets: ['wan2.6-i2v', 'wan2.6-i2v-flash'], defaultModel: 'wan2.6-i2v', configKey: 'video' },
+  { id: 'firstLastFrame', presets: ['wan2.7-i2v'], defaultModel: 'wan2.7-i2v', configKey: 'video' },
+  { id: 'referenceImage', presets: ['wan2.6-r2v', 'wan2.7-r2v'], defaultModel: 'wan2.7-r2v', configKey: 'refVideo' },
   { id: 'auto', presets: [], defaultModel: '', configKey: null },
 ];
 

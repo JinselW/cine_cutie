@@ -4,7 +4,7 @@ import multer from 'multer';
 import mammoth from 'mammoth';
 import { createMemoryRouter } from './memory.js';
 import { LRUCache } from './cache.js';
-import { submitImageTask, submitImageEditTask, parseImageResultUrl, submitVideoTask, submitVideoTaskV2, pollTask, downloadFile, detectVideoMode, hasVideoUploads, fileToDataUri } from './dashscope.js';
+import { submitImageTask, submitImageEditTask, parseImageResultUrl, submitVideoTask, submitVideoTaskV2, submitLegacyReferenceVideoTask, pollTask, downloadFile, detectVideoMode, hasVideoUploads, fileToDataUri } from './dashscope.js';
 import { isArkModel, isArkVideoModel, isArkImageModel, submitArkVideoTask, submitArkImageTask, pollArkTask, parseArkVideoUrl } from './ark.js';
 import { createTask, getTask, updateTask, cancelTask, isTaskCancelled, cleanupTasks } from './tasks.js';
 import { concatVideos, checkFfmpeg, renderWithTransitions, probeStreams, probeAudioQuality, probeVisualDefects, applyBgm, sanitizeVolume } from './render.js';
@@ -114,6 +114,10 @@ const upload = multer({
 
 function isV2Model(name) {
   return typeof name === 'string' && name.startsWith('wan2.7');
+}
+
+function isLegacyReferenceVideoModel(name) {
+  return typeof name === 'string' && /^wan2\.6-r2v(?:$|-)/.test(name);
 }
 
 function detectProvider(name) {
@@ -475,8 +479,8 @@ app.post('/api/generate/video', async (req, res) => {
     return res.status(400).json({ error: 'A last frame requires a first frame' });
   }
 
-  if (mode === 'r2v' && !isV2Model(effectiveModel) && provider !== 'ark') {
-    return res.status(400).json({ error: `${effectiveModel} accepts no reference images — pick a wan2.7 r2v or doubao-seedance model in Settings` });
+  if (mode === 'r2v' && !isV2Model(effectiveModel) && !isLegacyReferenceVideoModel(effectiveModel) && provider !== 'ark') {
+    return res.status(400).json({ error: `${effectiveModel} accepts no reference images — pick wan2.6-r2v or wan2.7-r2v in Settings` });
   }
 
   const task = createTask('video', { total: clips.length });
@@ -531,7 +535,24 @@ app.post('/api/generate/video', async (req, res) => {
               apiKey: mediaApiKey, seed: clip.seed ?? seed, ratio: aspectRatio,
             });
           } else if (hasUploads) {
-            if (isV2Model(effectiveModel)) {
+            if (mode === 'r2v') {
+              const referenceUrls = [];
+              for (const ref of (uploads.referenceImages || []).slice(0, MAX_VIDEO_REFS)) {
+                if (ref.localPath) referenceUrls.push(await fileToDataUri(ref.localPath));
+              }
+              if (!referenceUrls.length) {
+                lastError = null;
+                results.push({ index: i, status: 'error', error: 'No valid reference media' });
+                break;
+              }
+              taskId = isV2Model(effectiveModel)
+                ? await submitVideoTaskV2(clip.prompt || 'Scene animation', referenceUrls.map(url => ({ type: 'reference_image', url })), {
+                  model: effectiveModel, duration: clip.duration ?? duration, resolution, apiKey, seed: clip.seed ?? seed, aspectRatio,
+                })
+                : await submitLegacyReferenceVideoTask(clip.prompt || 'character1 in a cinematic scene', referenceUrls, {
+                  model: effectiveModel, duration: clip.duration ?? duration, resolution, apiKey, seed: clip.seed ?? seed, aspectRatio, audio,
+                });
+            } else if (isV2Model(effectiveModel)) {
               const mediaArray = [];
               if (uploads.firstFrame?.localPath) {
                 const dataUri = await fileToDataUri(uploads.firstFrame.localPath);
@@ -578,29 +599,34 @@ app.post('/api/generate/video', async (req, res) => {
             const lastRef = clip.lastFramePath || clip.lastFrameUrl;
 
             if (clipRefs.length) {
-              if (!isV2Model(effectiveModel)) {
-                lastError = null;
-                results.push({ index: i, status: 'error', error: `${effectiveModel} accepts no reference images — pick a wan2.7 r2v model in Settings` });
-                console.log(`[VideoBatch] task=${task.id} clip ${i + 1} ERROR: ${effectiveModel} is not a reference-to-video model`);
-                break;
-              }
-
-              const media = [];
+              const referenceUrls = [];
               for (const ref of clipRefs) {
                 const url = await toDashScopeImage(ref);
-                if (url) media.push({ type: 'reference_image', url });
+                if (url) referenceUrls.push(url);
               }
-              if (!media.length) {
+              if (!referenceUrls.length) {
                 lastError = null;
                 results.push({ index: i, status: 'error', error: `Reference images not found on server: ${clipRefs.join(', ')}` });
                 console.log(`[VideoBatch] task=${task.id} clip ${i + 1} SKIPPED: no usable reference image`);
                 break;
               }
 
-              console.log(`[VideoBatch r2v] task=${task.id} clip ${i + 1} refs=${media.length}`);
-              taskId = await submitVideoTaskV2(clip.prompt || 'Scene animation', media, {
-                model: effectiveModel, duration: clipDuration, resolution, apiKey, seed: clipSeed, aspectRatio, audio
-              });
+              console.log(`[VideoBatch r2v] task=${task.id} clip ${i + 1} refs=${referenceUrls.length}`);
+              if (isV2Model(effectiveModel)) {
+                taskId = await submitVideoTaskV2(
+                  clip.prompt || 'Scene animation',
+                  referenceUrls.map(url => ({ type: 'reference_image', url })),
+                  { model: effectiveModel, duration: clipDuration, resolution, apiKey, seed: clipSeed, aspectRatio },
+                );
+              } else if (isLegacyReferenceVideoModel(effectiveModel)) {
+                taskId = await submitLegacyReferenceVideoTask(clip.prompt || 'character1 in a cinematic scene', referenceUrls, {
+                  model: effectiveModel, duration: clipDuration, resolution, apiKey, seed: clipSeed, aspectRatio, audio,
+                });
+              } else {
+                lastError = null;
+                results.push({ index: i, status: 'error', error: `${effectiveModel} is not a supported reference-to-video model` });
+                break;
+              }
             } else {
               const firstUrl = await toDashScopeImage(firstRef);
               if (!firstUrl) {
