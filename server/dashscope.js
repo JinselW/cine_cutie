@@ -301,6 +301,15 @@ export function hasVideoUploads(uploads) {
   );
 }
 
+// 一次视频请求里，每个 clip 会把首帧、尾帧和参考图候选一起带过来，所以"参考图字段非空"
+// 不等于调用方要 r2v。必须按声明的模式决定，否则首帧请求会被误判成 r2v，配上不接受
+// 参考图的模型（wan2.6-i2v 这类）就是整批失败。模式缺省时才退回按字段推断。
+export function selectClipReferenceImages(clip, declaredMode) {
+  const refs = Array.isArray(clip?.referenceImages) ? clip.referenceImages : [];
+  if (declaredMode) return declaredMode === 'referenceImage' ? refs : [];
+  return refs;
+}
+
 export async function fileToDataUri(filePath) {
   const { readFile } = await import('fs/promises');
   const { extname } = await import('path');

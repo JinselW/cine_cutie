@@ -538,6 +538,7 @@ export class VideoAgent extends BaseAgent {
           videoModeReason: shot.videoModeReason || '',
           videoPath: result.videoPath || '',
           status: result.status === 'complete' ? 'complete' : result.status === 'skipped' ? 'skipped' : 'failed',
+          error: result.error || '',
         };
       }
       if (!shot.imagePath && !shot.imageUrl) {

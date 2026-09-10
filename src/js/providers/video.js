@@ -244,16 +244,7 @@ const videoProvider = {
           audio: true,
         }
       : {
-          clips: sentClips.map(c => ({
-            prompt: c.prompt,
-            imagePath: c.imagePath,
-            imageUrl: c.imageUrl,
-            lastFramePath: c.lastFramePath,
-            lastFrameUrl: c.lastFrameUrl,
-            referenceImages: c.referenceImages,
-            duration: c.duration,
-            seed: c.seed,
-          })),
+          clips: sentClips.map(c => videoClipPayloadForMode(c, mode)),
           model: chosenModel,
           mode,
           duration: DEFAULT_CLIP_DURATION,
@@ -276,7 +267,7 @@ const videoProvider = {
         resultMap.set(clipId, {
           videoPath: r.path || '',
           status: r.status === 'ok' ? 'complete' : 'failed',
-          error: r.status === 'ok' ? null : 'Generation failed',
+          error: r.status === 'ok' ? null : (r.error || 'Generation failed'),
           trace: r.trace || null,
         });
       }

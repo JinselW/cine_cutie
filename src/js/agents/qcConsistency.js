@@ -178,7 +178,13 @@ export function checkConsistency(stepId, data, entities) {
         issues.push(`Only ${actualClips}/${expectedClips} reference shots have video clips`);
       }
       if (actualClips > 0 && completed === 0) {
-        issues.push(t('pipeline.allVideoClipsFailed', { count: actualClips }));
+        const summary = t('pipeline.allVideoClipsFailed', { count: actualClips });
+        const errors = (data.clips || [])
+          .filter(c => c.status === 'failed')
+          .map(c => String(c.error || '').trim())
+          .filter(Boolean);
+        const reason = [...new Set(errors)][0];
+        issues.push(reason ? `${summary} ${reason}` : summary);
         hasFatal = true;
       } else if (completed < actualClips) {
         issues.push(t('pipeline.videoClipsFailed', { failed: actualClips - completed, total: actualClips }));

@@ -4,7 +4,7 @@ import multer from 'multer';
 import mammoth from 'mammoth';
 import { createMemoryRouter } from './memory.js';
 import { LRUCache } from './cache.js';
-import { submitImageTask, submitImageEditTask, parseImageResultUrl, submitVideoTask, submitVideoTaskV2, submitLegacyReferenceVideoTask, pollTask, downloadFile, detectVideoMode, hasVideoUploads, fileToDataUri } from './dashscope.js';
+import { submitImageTask, submitImageEditTask, parseImageResultUrl, submitVideoTask, submitVideoTaskV2, submitLegacyReferenceVideoTask, pollTask, downloadFile, detectVideoMode, hasVideoUploads, selectClipReferenceImages, fileToDataUri } from './dashscope.js';
 import { isArkModel, isArkVideoModel, isArkImageModel, submitArkVideoTask, submitArkImageTask, pollArkTask, parseArkVideoUrl } from './ark.js';
 import { getTask, updateTask, isTaskCancelled, listTasks, initTaskStore } from './tasks.js';
 import { TaskController } from './task-controller.js';
@@ -580,6 +580,7 @@ app.post('/api/generate/video', async (req, res) => {
       for (let i = 0; i < clips.length; i++) {
         if (isTaskCancelled(task.id)) break;
         const clip = clips[i];
+        const clipRefs = selectClipReferenceImages(clip, clientMode).slice(0, MAX_VIDEO_REFS);
         let upstreamTaskId = null;
         const videoTrace = outputPath => ({
           provider, model: effectiveModel, modelVersion: effectiveModel,
@@ -622,7 +623,6 @@ app.post('/api/generate/video', async (req, res) => {
               addImage(firstUrl, 'first_frame');
               const lastUrl = await toDashScopeImage(clip.lastFramePath || clip.lastFrameUrl);
               addImage(lastUrl, 'last_frame');
-              const clipRefs = Array.isArray(clip.referenceImages) ? clip.referenceImages.slice(0, MAX_VIDEO_REFS) : [];
               for (const ref of clipRefs) {
                 const url = await toDashScopeImage(ref);
                 addImage(url, 'reference_image');
@@ -675,7 +675,6 @@ app.post('/api/generate/video', async (req, res) => {
                 });
               }
             } else {
-              const clipRefs = Array.isArray(clip.referenceImages) ? clip.referenceImages.slice(0, MAX_VIDEO_REFS) : [];
               const clipSeed = clip.seed ?? seed;
               const clipDuration = clip.duration ?? duration;
               const firstRef = clip.imagePath || clip.imageUrl;
