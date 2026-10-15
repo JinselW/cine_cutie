@@ -128,8 +128,11 @@ test('generateAudioAsset falls back to degraded silence when no provider is regi
 });
 
 // Guarded end-to-end test: exercises the real Microsoft Edge TTS provider.
-// Skipped automatically when the network/synthesis endpoint is unreachable.
-test('edge-tts provider synthesizes real speech end-to-end', async (t) => {
+// Opt in explicitly; ordinary regression runs must not contact Microsoft.
+// Also skipped when the network/synthesis endpoint is unreachable.
+test('edge-tts provider synthesizes real speech end-to-end', {
+  skip: process.env.CINE_TEST_REAL_TTS !== '1' && 'Set CINE_TEST_REAL_TTS=1 to test the real Edge TTS service',
+}, async (t) => {
   clearAudioProviders();
   await import('../server/edgeTtsProvider.js');
   const out = path.join(dir, 'edge.m4a');

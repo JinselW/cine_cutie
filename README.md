@@ -305,6 +305,20 @@ npm run verify     # 构建 + 全量测试 + smoke test
 npm run benchmark  # 生成工作流哈希、量化证据与本地编译基准
 ```
 
+GitHub Actions 在每次 `push` 和 `pull_request` 时运行 `.github/workflows/ci.yml`，使用 Ubuntu 24.04、Node.js 20 和 `npm run verify`。工作流通过 lockfile 安装开发/可选依赖，使用系统 FFmpeg（包含 libx264、AAC、libass 字幕支持），并安装中文字体和 Tesseract 中英文语言包。`--ignore-scripts` 避免 ffmpeg-static 下载二进制，`FFMPEG_BIN` 让服务端与集成测试共同使用系统版本。
+
+在干净的 Ubuntu 24.04 环境安装 Node.js 20 后，可复现 CI：
+
+```bash
+sudo apt-get update
+sudo apt-get install -y --no-install-recommends ffmpeg fonts-noto-cjk tesseract-ocr tesseract-ocr-eng tesseract-ocr-chi-sim
+export FFMPEG_BIN=/usr/bin/ffmpeg
+npm ci --include=dev --ignore-scripts
+NODE_ENV=test CINE_TEST_REAL_TTS=0 CINE_BENCH_REAL=0 npm run verify
+```
+
+普通回归不需要 `.env`、DGX、SSH 凭据或真实模型 API Key；请在未配置这些凭据的干净 checkout 中运行以上命令。Provider、任务恢复与 GPU 调度测试使用模拟依赖，FFmpeg 集成测试仍实际编码、混音和烧录字幕，不会跳过。唯一访问真实 Edge TTS 的测试默认明确标记为跳过，可用 `CINE_TEST_REAL_TTS=1 FFMPEG_BIN=/usr/bin/ffmpeg node --test test/audio-provider-registry.test.js` 单独启用；服务不可达时仍会报告跳过。`test:e2e` 浏览器测试与真实 GPU benchmark 不属于 `verify`，未在普通 CI 中运行。工作流配置完成不代表 GitHub Actions 已通过，应以对应提交的 Actions 运行结果为准。
+
 真实 ComfyUI/H3 benchmark 需在已配置 DGX SSH 环境显式设置 `CINE_BENCH_REAL=1`；支持四种视频模式、fast/balanced/quality 档位、受 profile 上限约束的有界并发、GPU/内存/磁盘采样及输出哈希。缺少合法图像输入会记录跳过原因，未连接 GPU 会记录 `measured=false`，不会写入估算数据。精确命令和字段定义见 [模型工程说明](docs/MODEL_ENGINEERING.md)。
 
 测试覆盖：ArtifactStore 依赖与持久化、DeliveryQC 门禁、审核决定、最终合规报告、生成 lineage、Prompt Agent、ComfyUI 工作流、DashScope 视频输入、视频模式规划、文本与视觉合规、Memory、重试策略、进度追踪、转场、字幕与 BGM。视觉合规的部署方式和门禁语义见 [视觉合规说明](docs/VISUAL_COMPLIANCE.md)。

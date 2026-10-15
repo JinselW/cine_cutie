@@ -130,9 +130,12 @@ export async function createHarness({ mode = 'auto' } = {}) {
     readFileSync(new URL('../../src/js/orchestrator.js', import.meta.url), 'utf8'),
     { context },
   );
-  await module.link(() => new vm.SyntheticModule(Object.keys(exports), function () {
+  // Reuse one dependency module for the shared stub namespace across imports.
+  // Creating duplicate synthetic modules here crashes Node 20 during linking.
+  const dependencies = new vm.SyntheticModule(Object.keys(exports), function () {
     for (const [name, value] of Object.entries(exports)) this.setExport(name, value);
-  }, { context }));
+  }, { context });
+  await module.link(() => dependencies);
   await module.evaluate();
 
   const api = module.namespace;

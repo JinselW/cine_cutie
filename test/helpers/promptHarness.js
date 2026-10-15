@@ -28,14 +28,22 @@ export async function promptHarness({ videoId = 'video-comfy', imageGenerate, vi
     stubs['src/js/compliance/visualCompliance.js'] = { checkVisualMediaBatch: async () => visualCompliance };
   }
   const cache = new Map();
-  async function load(file) {
+  function getModule(file) {
     file = file.replaceAll('\\', '/');
     if (cache.has(file)) return cache.get(file);
     const exports = stubs[file];
     const mod = exports ? new vm.SyntheticModule(Object.keys(exports), function () { for (const [k,v] of Object.entries(exports)) this.setExport(k,v); }, { context, identifier: file })
       : new vm.SourceTextModule(readFileSync(file, 'utf8'), { context, identifier: file });
     cache.set(file, mod);
-    await mod.link((specifier, parent) => load(path.posix.normalize(path.posix.join(path.posix.dirname(parent.identifier), specifier))));
+    return mod;
+  }
+  async function load(file) {
+    const mod = getModule(file);
+    // Let Node link the graph once. Recursively calling link() can expose
+    // an incompletely linked shared dependency to another branch of the graph.
+    if (mod.status === 'unlinked') {
+      await mod.link((specifier, parent) => getModule(path.posix.normalize(path.posix.join(path.posix.dirname(parent.identifier), specifier))));
+    }
     return mod;
   }
   const modules = {};

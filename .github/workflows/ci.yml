@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Build and regression tests (Node 20)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      NODE_ENV: test
+      FFMPEG_BIN: /usr/bin/ffmpeg
+      CINE_TEST_REAL_TTS: '0'
+      CINE_BENCH_REAL: '0'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - name: Install media dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg fonts-noto-cjk tesseract-ocr tesseract-ocr-eng tesseract-ocr-chi-sim
+          ffmpeg -version
+      # Avoid ffmpeg-static's binary download; retain dev/optional dependencies for Vite.
+      - name: Install locked dependencies
+        run: npm ci --include=dev --ignore-scripts
+      - name: Build and run regression and smoke tests
+        run: npm run verify
